@@ -1,0 +1,181 @@
+[CmdletBinding()]
+param(
+    [Parameter(Position = 0)]
+    [string]$RepoRoot = "",
+
+    [string]$OutDir = ".\audit\gate",
+    [string]$RunStamp = ""
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+function Ensure-Dir([string]$p) { New-Item -ItemType Directory -Force -Path $p | Out-Null }
+function Now-Stamp { (Get-Date).ToString("yyyyMMdd_HHmmss") }
+
+function Run-Step {
+    param(
+        [string]$Name,
+        [scriptblock]$Command,
+        [string]$LogPath
+    )
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        & $Command 2>&1 | Tee-Object -FilePath $LogPath
+        $code = $LASTEXITCODE
+        if ($code -ne 0) { return @{ Step = $Name; ExitCode = $code; DurationMs = $sw.Elapsed.TotalMilliseconds } }
+        return @{ Step = $Name; ExitCode = 0; DurationMs = $sw.Elapsed.TotalMilliseconds }
+    }
+    finally {
+        $sw.Stop()
+    }
+}
+
+try {
+    if (-not $RepoRoot -or $RepoRoot.Trim() -eq "") {
+        $RepoRoot = (Resolve-Path ".").Path
+    }
+    else {
+        $RepoRoot = (Resolve-Path $RepoRoot).Path
+    }
+
+    if (-not $RunStamp -or $RunStamp.Trim() -eq "") { $RunStamp = Now-Stamp }
+
+    Write-Host "==> Contexte"
+    Write-Host "[INFO] Repo root : $RepoRoot"
+
+    Push-Location $RepoRoot
+
+    # outils
+    $node = (node --version) 2>$null
+    $npm = (npm --version) 2>$null
+    Write-Host ""
+    Write-Host "`$ node --version"
+    Write-Host $node
+    Write-Host ""
+    Write-Host "`$ npm --version"
+    Write-Host $npm
+    Write-Host "[INFO] Package manager détecté : npm"
+
+    # arborescence audit
+    Ensure-Dir (Join-Path $RepoRoot ".\audit")
+    Ensure-Dir (Join-Path $RepoRoot ".\audit\runtime")
+    Ensure-Dir (Join-Path $RepoRoot ".\audit\opacity")
+    Ensure-Dir (Join-Path $RepoRoot ".\audit\typecheck")
+    Ensure-Dir (Join-Path $RepoRoot ".\audit\tests")
+    Ensure-Dir (Join-Path $RepoRoot ".\audit\build")
+    Ensure-Dir (Join-Path $RepoRoot $OutDir)
+
+    $steps = New-Object System.Collections.Generic.List[object]
+
+    Write-Host ""
+    Write-Host "==> Audit runtime (RitualOrchestrator) — BLOQUANT si WARN/ERR"
+    $rtLog = Join-Path $RepoRoot ".\audit\runtime\runtimeaudit_run_$RunStamp.log"
+    $s1 = Run-Step -Name "audit-runtime" -LogPath $rtLog -Command {
+        pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\audit-runtime.ps1 -OutDir .\audit\runtime -RunStamp $RunStamp
+    }
+    $steps.Add($s1) | Out-Null
+    if ($s1.ExitCode -ne 0) { throw "audit-runtime failed (exit=$($s1.ExitCode)). Voir: $rtLog" }
+
+    Write-Host ""
+    Write-Host "==> Audit opacity (wiring opacités) — BLOQUANT si WARN/ERR"
+    $opLog = Join-Path $RepoRoot ".\audit\opacity\opacityaudit_run_$RunStamp.log"
+    $sOp = Run-Step -Name "audit-opacity" -LogPath $opLog -Command {
+        pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\audit-opacity.ps1 -OutDir .\audit\opacity -RunStamp $RunStamp
+    }
+    $steps.Add($sOp) | Out-Null
+    if ($sOp.ExitCode -ne 0) { throw "audit-opacity failed (exit=$($sOp.ExitCode)). Voir: $opLog" }
+
+    Write-Host ""
+    Write-Host "==> Typecheck (TS strict)"
+    $tsLog = Join-Path $RepoRoot ".\audit\typecheck\tsc_$RunStamp.log"
+    $s2 = Run-Step -Name "typecheck" -LogPath $tsLog -Command {
+        npx --no-install tsc -p tsconfig.json --noEmit
+    }
+    $steps.Add($s2) | Out-Null
+    if ($s2.ExitCode -ne 0) { throw "typecheck failed (exit=$($s2.ExitCode)). Voir: $tsLog" }
+
+    Write-Host ""
+    Write-Host "==> Tests (vitest)"
+    $vtLog = Join-Path $RepoRoot ".\audit\tests\vitest_$RunStamp.log"
+    $junit = Join-Path $RepoRoot ".\audit\tests\junit_$RunStamp.xml"
+    $s3 = Run-Step -Name "tests" -LogPath $vtLog -Command {
+        npx --no-install vitest run --reporter default --reporter junit --outputFile $junit
+    }
+    $steps.Add($s3) | Out-Null
+    if ($s3.ExitCode -ne 0) { throw "tests failed (exit=$($s3.ExitCode)). Voir: $vtLog / $junit" }
+
+    Write-Host ""
+    Write-Host "==> Build (prod)"
+    $bdLog = Join-Path $RepoRoot ".\audit\build\build_$RunStamp.log"
+    $s4 = Run-Step -Name "build" -LogPath $bdLog -Command {
+        npm run build
+    }
+    $steps.Add($s4) | Out-Null
+    if ($s4.ExitCode -ne 0) { throw "build failed (exit=$($s4.ExitCode)). Voir: $bdLog" }
+
+    # rapport gate
+    $reportDir = Join-Path $RepoRoot $OutDir
+    $reportRun = Join-Path $reportDir ("gate-report_{0}.json" -f $RunStamp)
+    $reportLatest = Join-Path $reportDir "gate-latest.json"
+
+    $gitInfo = @{
+        available = $false
+        branch    = $null
+        commit    = $null
+        dirty     = $null
+    }
+    try {
+        $gitInfo.available = $true
+        $gitInfo.branch = (git rev-parse --abbrev-ref HEAD) 2>$null
+        $gitInfo.commit = (git rev-parse HEAD) 2>$null
+        $gitInfo.dirty = [bool]((git status --porcelain) 2>$null)
+    }
+    catch {}
+
+    $payload = [ordered]@{
+        timestamp = (Get-Date).ToString("o")
+        runStamp  = $RunStamp
+        repoRoot  = $RepoRoot
+        tools     = @{ node = $node; npm = $npm; packageManager = "npm" }
+        git       = $gitInfo
+        steps     = $steps
+        artifacts = @{
+            runtimeAuditTxt  = (Join-Path $RepoRoot ".\audit\runtime\runtimeaudit_$RunStamp.txt")
+            runtimeAuditJson = (Join-Path $RepoRoot ".\audit\runtime\runtimeaudit_$RunStamp.json")
+            opacityAuditTxt  = (Join-Path $RepoRoot ".\audit\opacity\opacityaudit_$RunStamp.txt")
+            opacityAuditJson = (Join-Path $RepoRoot ".\audit\opacity\opacityaudit_$RunStamp.json")
+            reportRunJson    = $reportRun
+            reportLatestJson = $reportLatest
+        }
+        summary   = @{
+            ok         = $true
+            totalMs    = ($steps | Measure-Object -Property DurationMs -Sum).Sum
+            failedStep = $null
+            error      = $null
+        }
+    }
+
+    ($payload | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $reportRun -Encoding UTF8
+    Copy-Item -Force $reportRun $reportLatest
+
+    Write-Host ""
+    Write-Host "==> Résumé"
+    foreach ($s in $steps) {
+        $sec = [Math]::Round(($s.DurationMs / 1000), 2)
+        Write-Host ("- {0,-15} {1,6}s  exit={2}" -f $s.Step, $sec, $s.ExitCode)
+    }
+    Write-Host ("[OK]   Gate complet ✅")
+    Write-Host ("[INFO] Rapport JSON (run)    : {0}" -f $reportRun)
+    Write-Host ("[INFO] Rapport JSON (latest) : {0}" -f $reportLatest)
+
+    exit 0
+}
+catch {
+    Write-Host "[ERR] Gate FAILED : $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+finally {
+    Pop-Location
+}

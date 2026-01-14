@@ -1,0 +1,1 @@
+Set-Location "C:\ATLAS\INBOX\dev\R_D\carte_de_visite\test_unitaire\app_llmed"; New-Item -Path "Fix-Phase3Lock_v2.ps1" -ItemType File -Force -Value (Get-Clipboard); pwsh -Command "& { . .\Fix-Phase3Lock_v2.ps1 }"

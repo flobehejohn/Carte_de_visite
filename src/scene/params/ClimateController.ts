@@ -1,0 +1,534 @@
+export type ClimateTargets = {
+  presetName: string;
+  fog: { enabled: boolean; density: number; color: string | number };
+  bloom: { strength: number; radius: number; threshold: number };
+  volume: {
+    glowIntensity: number;
+    backgroundStrength: number;
+    softness: number;
+    vignette: number;
+    bgColor?: string | number;
+    glowColor?: string | number;
+  };
+  opacity: { wireOpacityMul: number; particlesOpacityMul: number; foregroundOpacity?: number };
+};
+
+type ClimateControllerConfig = {
+  seed?: string;
+  debug?: boolean;
+};
+
+type ClimatePresetDef = {
+  name: string;
+  colors: { fog: number; glow: number; bg: number };
+  fog: { low: number; mid: number; peak: number; end: number };
+  bloomStrength: { low: number; mid: number; peak: number; end: number };
+  bloomRadius: { low: number; mid: number; peak: number; end: number };
+  bloomThreshold: { low: number; mid: number; peak: number; end: number };
+  glowIntensity: { low: number; mid: number; peak: number; end: number };
+  backgroundStrength: { low: number; mid: number; peak: number; end: number };
+  softness: { low: number; mid: number; peak: number; end: number };
+  wireOpacityMul: { low: number; mid: number; peak: number; end: number };
+  particlesOpacityMul: { low: number; mid: number; peak: number; end: number };
+  vignette: number;
+};
+
+const SAFE_RANGES = {
+  fogDensity: { min: 0.005, max: 0.06 },
+  bloomStrength: { min: 0.0, max: 1.35 },
+  bloomRadius: { min: 0.0, max: 0.55 },
+  bloomThreshold: { min: 0.65, max: 0.95 },
+  glowIntensity: { min: 0.1, max: 0.9 },
+  backgroundStrength: { min: 0.1, max: 1.1 },
+  softness: { min: 0.1, max: 1.25 },
+  opacityMul: { min: 0.4, max: 1.25 },
+};
+
+const PRESETS: Record<string, ClimatePresetDef> = {
+  Cendre: {
+    name: 'Cendre',
+    colors: { fog: 0x1a1a1a, glow: 0x5a5146, bg: 0x0b0b0b },
+    fog: { low: 0.045, mid: 0.038, peak: 0.032, end: 0.025 },
+    bloomStrength: { low: 0.15, mid: 0.25, peak: 0.4, end: 0.22 },
+    bloomRadius: { low: 0.12, mid: 0.2, peak: 0.25, end: 0.15 },
+    bloomThreshold: { low: 0.9, mid: 0.88, peak: 0.84, end: 0.9 },
+    glowIntensity: { low: 0.18, mid: 0.28, peak: 0.42, end: 0.25 },
+    backgroundStrength: { low: 0.55, mid: 0.6, peak: 0.7, end: 0.55 },
+    softness: { low: 0.35, mid: 0.4, peak: 0.45, end: 0.38 },
+    wireOpacityMul: { low: 0.7, mid: 0.75, peak: 0.85, end: 0.75 },
+    particlesOpacityMul: { low: 0.7, mid: 0.8, peak: 0.9, end: 0.75 },
+    vignette: 1.1,
+  },
+  "Brume d'or": {
+    name: "Brume d'or",
+    colors: { fog: 0x2a2416, glow: 0xffd28a, bg: 0x120f08 },
+    fog: { low: 0.028, mid: 0.022, peak: 0.02, end: 0.018 },
+    bloomStrength: { low: 0.3, mid: 0.5, peak: 0.75, end: 0.4 },
+    bloomRadius: { low: 0.18, mid: 0.28, peak: 0.35, end: 0.22 },
+    bloomThreshold: { low: 0.82, mid: 0.78, peak: 0.74, end: 0.84 },
+    glowIntensity: { low: 0.35, mid: 0.5, peak: 0.75, end: 0.45 },
+    backgroundStrength: { low: 0.6, mid: 0.7, peak: 0.85, end: 0.65 },
+    softness: { low: 0.45, mid: 0.55, peak: 0.65, end: 0.5 },
+    wireOpacityMul: { low: 0.8, mid: 0.9, peak: 1.05, end: 0.85 },
+    particlesOpacityMul: { low: 0.8, mid: 0.95, peak: 1.1, end: 0.9 },
+    vignette: 1.05,
+  },
+  "Nuit froide": {
+    name: 'Nuit froide',
+    colors: { fog: 0x0b1020, glow: 0x9fc3ff, bg: 0x05080f },
+    fog: { low: 0.015, mid: 0.012, peak: 0.01, end: 0.008 },
+    bloomStrength: { low: 0.12, mid: 0.2, peak: 0.3, end: 0.15 },
+    bloomRadius: { low: 0.1, mid: 0.15, peak: 0.2, end: 0.12 },
+    bloomThreshold: { low: 0.9, mid: 0.88, peak: 0.86, end: 0.9 },
+    glowIntensity: { low: 0.2, mid: 0.3, peak: 0.45, end: 0.25 },
+    backgroundStrength: { low: 0.5, mid: 0.6, peak: 0.7, end: 0.55 },
+    softness: { low: 0.4, mid: 0.45, peak: 0.5, end: 0.42 },
+    wireOpacityMul: { low: 0.7, mid: 0.8, peak: 0.9, end: 0.75 },
+    particlesOpacityMul: { low: 0.65, mid: 0.75, peak: 0.85, end: 0.7 },
+    vignette: 1.1,
+  },
+  Aurore: {
+    name: 'Aurore',
+    colors: { fog: 0x2b1a16, glow: 0xffb28c, bg: 0x0b0708 },
+    fog: { low: 0.022, mid: 0.018, peak: 0.016, end: 0.012 },
+    bloomStrength: { low: 0.2, mid: 0.45, peak: 0.85, end: 0.3 },
+    bloomRadius: { low: 0.12, mid: 0.24, peak: 0.4, end: 0.18 },
+    bloomThreshold: { low: 0.86, mid: 0.8, peak: 0.74, end: 0.88 },
+    glowIntensity: { low: 0.25, mid: 0.45, peak: 0.85, end: 0.35 },
+    backgroundStrength: { low: 0.55, mid: 0.68, peak: 0.9, end: 0.6 },
+    softness: { low: 0.45, mid: 0.55, peak: 0.7, end: 0.5 },
+    wireOpacityMul: { low: 0.8, mid: 0.95, peak: 1.15, end: 0.85 },
+    particlesOpacityMul: { low: 0.8, mid: 1.0, peak: 1.2, end: 0.9 },
+    vignette: 1.05,
+  },
+};
+
+const PRESET_NAMES = Object.keys(PRESETS);
+const DEFAULT_PRESET = PRESETS.Cendre;
+
+function clamp(v: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, Number(v) || 0));
+}
+function clamp01(v: number) {
+  return clamp(v, 0, 1);
+}
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
+}
+function smoothstep(a: number, b: number, t: number) {
+  const x = clamp01((t - a) / (b - a));
+  return x * x * (3 - 2 * x);
+}
+
+function curve4(t: number, low: number, mid: number, peak: number, end: number) {
+  const rise = smoothstep(0.2, 0.7, t);
+  const apex = smoothstep(0.7, 0.9, t);
+  const calm = smoothstep(0.9, 1.0, t);
+  let v = lerp(low, mid, rise);
+  v = lerp(v, peak, apex);
+  v = lerp(v, end, calm);
+  return v;
+}
+
+function hashString(input: string) {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function mulberry32(seed: number) {
+  let a = seed >>> 0;
+  return function () {
+    a += 0x6d2b79f5;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function parseColor(input: unknown): number | null {
+  if (typeof input === 'number' && Number.isFinite(input)) return input;
+  if (typeof input !== 'string') return null;
+  const raw = input.trim();
+  if (!raw) return null;
+  if (raw.startsWith('#')) {
+    const hex = raw.slice(1);
+    const num = Number.parseInt(hex, 16);
+    return Number.isFinite(num) ? num : null;
+  }
+  if (raw.startsWith('0x') || raw.startsWith('0X')) {
+    const num = Number.parseInt(raw.slice(2), 16);
+    return Number.isFinite(num) ? num : null;
+  }
+  return null;
+}
+
+function mixColor(a: number, b: number, t: number) {
+  const ar = (a >> 16) & 0xff;
+  const ag = (a >> 8) & 0xff;
+  const ab = a & 0xff;
+  const br = (b >> 16) & 0xff;
+  const bg = (b >> 8) & 0xff;
+  const bb = b & 0xff;
+  const rr = Math.round(lerp(ar, br, t));
+  const rg = Math.round(lerp(ag, bg, t));
+  const rb = Math.round(lerp(ab, bb, t));
+  return (rr << 16) | (rg << 8) | rb;
+}
+
+function alphaForSeconds(seconds: number, dtSec: number) {
+  const safe = Math.max(0.05, seconds);
+  const lambda = 4 / safe;
+  return 1 - Math.exp(-lambda * Math.max(0, dtSec));
+}
+
+export class ClimateController {
+  private seed = 'climate-default';
+  private debug = false;
+  private mood = 'default';
+  private progress = 0;
+  private visualParams: any | null = null;
+
+  private rng = mulberry32(1);
+  private timeMs = 0;
+  private lastPresetChangeMs = 0;
+  private minHoldMs = 12000;
+
+  private basePreset = DEFAULT_PRESET.name;
+  private altPreset = DEFAULT_PRESET.name;
+  private currentPreset = DEFAULT_PRESET.name;
+  private presetSwitched = false;
+
+  private targets: ClimateTargets | null = null;
+
+  private transitionSec = { fog: 4, bloom: 5, volume: 5, opacity: 3.5 };
+  private lastLogMs = 0;
+
+  constructor(config: ClimateControllerConfig = {}) {
+    this.debug = !!config.debug;
+    if (config.seed) this.seed = String(config.seed);
+    this.resetRng();
+    this.refreshPresets();
+  }
+
+  setSeed(seed: string) {
+    this.seed = String(seed || 'climate-default');
+    this.resetRng();
+    this.refreshPresets();
+  }
+
+  setMood(mood: string) {
+    this.mood = String(mood || 'default');
+    this.refreshPresets();
+  }
+
+  setProgress(t01: number) {
+    this.progress = clamp01(Number(t01) || 0);
+  }
+
+  setVisualParams(visualParams: any | null) {
+    this.visualParams = visualParams || null;
+  }
+
+  update(dtMs: number) {
+    const dt = Math.max(0, Number(dtMs) || 0);
+    this.timeMs += dt;
+
+    this.ensurePresetSwitch();
+
+    const desired = this.computeTargets();
+
+    if (!this.targets) {
+      this.targets = desired;
+    } else {
+      this.targets = this.smoothTargets(this.targets, desired, dt / 1000);
+    }
+
+    // 1) Safe clamp
+    this.targets = this.clampTargets(this.targets);
+
+    // 2) ✅ End-dampen POST-smoothing (le point qui manquait pour ton test)
+    this.targets = this.applyEndDampen(this.targets);
+
+    // 3) Re-clamp pour rester béton
+    this.targets = this.clampTargets(this.targets);
+
+    this.logStatus(this.targets);
+  }
+
+  getTargets(): ClimateTargets {
+    if (this.targets) return this.targets;
+    const base = this.clampTargets(this.computeTargets());
+    return this.clampTargets(this.applyEndDampen(base));
+  }
+
+  private applyEndDampen(targets: ClimateTargets): ClimateTargets {
+    const t = clamp01(this.progress);
+
+    // 0 -> 1 entre 0.85 et 1.0
+    const endPhase = smoothstep(0.85, 1.0, t);
+
+    // Assez fort pour tuer les cas limites liés au smoothing
+    // max -50% à t=1.0
+    const endMul = 1 - endPhase * 0.5;
+
+    return {
+      ...targets,
+      bloom: {
+        ...targets.bloom,
+        strength: targets.bloom.strength * endMul,
+      },
+      volume: {
+        ...targets.volume,
+        glowIntensity: targets.volume.glowIntensity * endMul,
+      },
+    };
+  }
+
+  private resetRng() {
+    const seedValue = hashString(this.seed || 'climate-default');
+    this.rng = mulberry32(seedValue || 1);
+    this.transitionSec = {
+      fog: lerp(2, 6, this.rng()),
+      bloom: lerp(3, 7, this.rng()),
+      volume: lerp(2, 8, this.rng()),
+      opacity: lerp(2, 5, this.rng()),
+    };
+  }
+
+  private refreshPresets() {
+    this.basePreset = this.pickPreset('base');
+    this.altPreset = this.pickPreset('late');
+    this.currentPreset = this.basePreset;
+    this.presetSwitched = false;
+    this.lastPresetChangeMs = this.timeMs;
+  }
+
+  private pickPreset(tag: string) {
+    const key = `${this.seed}|${this.mood}|${tag}`;
+    const idx = hashString(key) % PRESET_NAMES.length;
+    return PRESET_NAMES[idx] || DEFAULT_PRESET.name;
+  }
+
+  private ensurePresetSwitch() {
+    if (this.presetSwitched) return;
+    if (this.progress < 0.7) return;
+    if (this.timeMs - this.lastPresetChangeMs < this.minHoldMs) return;
+
+    if (this.altPreset !== this.currentPreset) {
+      this.currentPreset = this.altPreset;
+      this.presetSwitched = true;
+      this.lastPresetChangeMs = this.timeMs;
+    }
+  }
+
+  private computeTargets(): ClimateTargets {
+    const preset = PRESETS[this.currentPreset] || DEFAULT_PRESET;
+    const t = clamp01(this.progress);
+
+    const fogFromPreset = curve4(t, preset.fog.low, preset.fog.mid, preset.fog.peak, preset.fog.end);
+    const llmFogRatio = this.visualParams?.fog_density;
+    const llmFogDensity =
+      typeof llmFogRatio === 'number' && Number.isFinite(llmFogRatio)
+        ? lerp(0.008, 0.045, clamp01(llmFogRatio))
+        : null;
+
+    const fogDensity = clamp(
+      llmFogDensity != null ? llmFogDensity : fogFromPreset,
+      SAFE_RANGES.fogDensity.min,
+      SAFE_RANGES.fogDensity.max
+    );
+
+    const bloomStrength = clamp(
+      curve4(t, preset.bloomStrength.low, preset.bloomStrength.mid, preset.bloomStrength.peak, preset.bloomStrength.end),
+      SAFE_RANGES.bloomStrength.min,
+      SAFE_RANGES.bloomStrength.max
+    );
+
+    const bloomRadius = clamp(
+      curve4(t, preset.bloomRadius.low, preset.bloomRadius.mid, preset.bloomRadius.peak, preset.bloomRadius.end),
+      SAFE_RANGES.bloomRadius.min,
+      SAFE_RANGES.bloomRadius.max
+    );
+
+    const bloomThreshold = clamp(
+      curve4(
+        t,
+        preset.bloomThreshold.low,
+        preset.bloomThreshold.mid,
+        preset.bloomThreshold.peak,
+        preset.bloomThreshold.end
+      ),
+      SAFE_RANGES.bloomThreshold.min,
+      SAFE_RANGES.bloomThreshold.max
+    );
+
+    const glowIntensity = clamp(
+      curve4(t, preset.glowIntensity.low, preset.glowIntensity.mid, preset.glowIntensity.peak, preset.glowIntensity.end),
+      SAFE_RANGES.glowIntensity.min,
+      SAFE_RANGES.glowIntensity.max
+    );
+
+    const backgroundStrength = clamp(
+      curve4(
+        t,
+        preset.backgroundStrength.low,
+        preset.backgroundStrength.mid,
+        preset.backgroundStrength.peak,
+        preset.backgroundStrength.end
+      ),
+      SAFE_RANGES.backgroundStrength.min,
+      SAFE_RANGES.backgroundStrength.max
+    );
+
+    const softness = clamp(
+      curve4(t, preset.softness.low, preset.softness.mid, preset.softness.peak, preset.softness.end),
+      SAFE_RANGES.softness.min,
+      SAFE_RANGES.softness.max
+    );
+
+    const wireOpacityMul = clamp(
+      curve4(t, preset.wireOpacityMul.low, preset.wireOpacityMul.mid, preset.wireOpacityMul.peak, preset.wireOpacityMul.end),
+      SAFE_RANGES.opacityMul.min,
+      SAFE_RANGES.opacityMul.max
+    );
+
+    const particlesOpacityMul = clamp(
+      curve4(
+        t,
+        preset.particlesOpacityMul.low,
+        preset.particlesOpacityMul.mid,
+        preset.particlesOpacityMul.peak,
+        preset.particlesOpacityMul.end
+      ),
+      SAFE_RANGES.opacityMul.min,
+      SAFE_RANGES.opacityMul.max
+    );
+
+    let fogColor = preset.colors.fog;
+    let glowColor = preset.colors.glow;
+    const bgColor = preset.colors.bg;
+
+    const primary = parseColor(this.visualParams?.primary_color);
+    if (primary != null) {
+      fogColor = mixColor(fogColor, primary, 0.2);
+      glowColor = mixColor(glowColor, primary, 0.25);
+    }
+
+    return {
+      presetName: preset.name,
+      fog: { enabled: true, density: fogDensity, color: fogColor },
+      bloom: { strength: bloomStrength, radius: bloomRadius, threshold: bloomThreshold },
+      volume: {
+        glowIntensity,
+        backgroundStrength,
+        softness,
+        vignette: preset.vignette,
+        bgColor,
+        glowColor,
+      },
+      opacity: { wireOpacityMul, particlesOpacityMul },
+    };
+  }
+
+  private smoothTargets(current: ClimateTargets, next: ClimateTargets, dtSec: number): ClimateTargets {
+    const fogAlpha = alphaForSeconds(this.transitionSec.fog, dtSec);
+    const bloomAlpha = alphaForSeconds(this.transitionSec.bloom, dtSec);
+    const volumeAlpha = alphaForSeconds(this.transitionSec.volume, dtSec);
+    const opacityAlpha = alphaForSeconds(this.transitionSec.opacity, dtSec);
+
+    return {
+      presetName: next.presetName,
+      fog: {
+        enabled: next.fog.enabled,
+        density: lerp(current.fog.density, next.fog.density, fogAlpha),
+        color: mixColor(Number(current.fog.color), Number(next.fog.color), fogAlpha),
+      },
+      bloom: {
+        strength: lerp(current.bloom.strength, next.bloom.strength, bloomAlpha),
+        radius: lerp(current.bloom.radius, next.bloom.radius, bloomAlpha),
+        threshold: lerp(current.bloom.threshold, next.bloom.threshold, bloomAlpha),
+      },
+      volume: {
+        glowIntensity: lerp(current.volume.glowIntensity, next.volume.glowIntensity, volumeAlpha),
+        backgroundStrength: lerp(current.volume.backgroundStrength, next.volume.backgroundStrength, volumeAlpha),
+        softness: lerp(current.volume.softness, next.volume.softness, volumeAlpha),
+        vignette: lerp(current.volume.vignette, next.volume.vignette, volumeAlpha),
+        bgColor: mixColor(Number(current.volume.bgColor), Number(next.volume.bgColor), volumeAlpha),
+        glowColor: mixColor(Number(current.volume.glowColor), Number(next.volume.glowColor), volumeAlpha),
+      },
+      opacity: {
+        wireOpacityMul: lerp(current.opacity.wireOpacityMul, next.opacity.wireOpacityMul, opacityAlpha),
+        particlesOpacityMul: lerp(current.opacity.particlesOpacityMul, next.opacity.particlesOpacityMul, opacityAlpha),
+        foregroundOpacity:
+          typeof current.opacity.foregroundOpacity === 'number' && typeof next.opacity.foregroundOpacity === 'number'
+            ? lerp(current.opacity.foregroundOpacity, next.opacity.foregroundOpacity, opacityAlpha)
+            : next.opacity.foregroundOpacity,
+      },
+    };
+  }
+
+  private clampTargets(targets: ClimateTargets): ClimateTargets {
+    return {
+      presetName: targets.presetName,
+      fog: {
+        enabled: targets.fog.enabled,
+        density: clamp(targets.fog.density, SAFE_RANGES.fogDensity.min, SAFE_RANGES.fogDensity.max),
+        color: targets.fog.color,
+      },
+      bloom: {
+        strength: clamp(targets.bloom.strength, SAFE_RANGES.bloomStrength.min, SAFE_RANGES.bloomStrength.max),
+        radius: clamp(targets.bloom.radius, SAFE_RANGES.bloomRadius.min, SAFE_RANGES.bloomRadius.max),
+        threshold: clamp(targets.bloom.threshold, SAFE_RANGES.bloomThreshold.min, SAFE_RANGES.bloomThreshold.max),
+      },
+      volume: {
+        glowIntensity: clamp(targets.volume.glowIntensity, SAFE_RANGES.glowIntensity.min, SAFE_RANGES.glowIntensity.max),
+        backgroundStrength: clamp(
+          targets.volume.backgroundStrength,
+          SAFE_RANGES.backgroundStrength.min,
+          SAFE_RANGES.backgroundStrength.max
+        ),
+        softness: clamp(targets.volume.softness, SAFE_RANGES.softness.min, SAFE_RANGES.softness.max),
+        vignette: targets.volume.vignette,
+        bgColor: targets.volume.bgColor,
+        glowColor: targets.volume.glowColor,
+      },
+      opacity: {
+        wireOpacityMul: clamp(targets.opacity.wireOpacityMul, SAFE_RANGES.opacityMul.min, SAFE_RANGES.opacityMul.max),
+        particlesOpacityMul: clamp(
+          targets.opacity.particlesOpacityMul,
+          SAFE_RANGES.opacityMul.min,
+          SAFE_RANGES.opacityMul.max
+        ),
+        foregroundOpacity: targets.opacity.foregroundOpacity,
+      },
+    };
+  }
+
+  private logStatus(targets: ClimateTargets) {
+    if (!this.shouldLog()) return;
+    const now = Date.now();
+    if (now - this.lastLogMs < 1000) return;
+    this.lastLogMs = now;
+    const b = targets.bloom;
+    const msg = `preset=${targets.presetName} fog=${targets.fog.density.toFixed(4)} bloom=(${b.strength.toFixed(
+      2
+    )},${b.radius.toFixed(2)},${b.threshold.toFixed(2)}) glow=${targets.volume.glowIntensity.toFixed(
+      2
+    )} bg=${targets.volume.backgroundStrength.toFixed(2)}`;
+    console.info(`[Climate] ${msg}`);
+  }
+
+  private shouldLog() {
+    if (this.debug) return true;
+    try {
+      return typeof import.meta !== 'undefined' && !!(import.meta as any).env?.DEV;
+    } catch {
+      return false;
+    }
+  }
+}

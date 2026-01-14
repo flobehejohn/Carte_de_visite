@@ -1,0 +1,45 @@
+{
+  "name": "oracle-zarathustra-llmed",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.3.0",
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=11.0.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "gate": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\gate.ps1",
+    "diag:exports": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/diag-exports.ps1",
+    "test:seq:scene": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/vitest-seq.ps1",
+    "ph3:lock": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/ph3-lock.ps1",
+    "audit:cleanup": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/cleanup-audit.ps1 -KeepLast 10",
+    "audit:orb": "tsx scripts/orb-deep-audit.ts --runs 10 --out audit/orb_audit_report.txt"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@types/three": "^0.182.0",
+    "framer-motion": "^11.15.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.182.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.8",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.3",
+    "autoprefixer": "^10.4.23",
+    "playwright": "^1.57.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.21.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.4.8",
+    "vitest": "^2.1.4"
+  }
+}
