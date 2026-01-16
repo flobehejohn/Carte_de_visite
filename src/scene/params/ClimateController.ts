@@ -99,8 +99,11 @@ const PRESETS_BASE: Record<string, ClimatePresetDef> = {
   },
 };
 
-const VARIANTS = buildPresetVariants(PRESETS_BASE, { perBase: 12, seed: 'preset-v1' });
-const PRESETS: Record<string, ClimatePresetDef> = { ...PRESETS_BASE, ...VARIANTS };
+const VARIANTS = buildPresetVariants(PRESETS_BASE, { perBase: 12, seed: 'preset-v1' }) satisfies Record<
+  string,
+  ClimatePresetDef
+>;
+const PRESETS = { ...PRESETS_BASE, ...VARIANTS } satisfies Record<string, ClimatePresetDef>;
 
 export const CLIMATE_PRESET_NAMES = Object.freeze(Object.keys(PRESETS));
 const PRESET_NAMES = CLIMATE_PRESET_NAMES;
