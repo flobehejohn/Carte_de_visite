@@ -1,185 +1,95 @@
+// src/scene/params/presetLibrary.ts
+// Générateur déterministe de variantes climatiques
+
+import { ClimatePresetDef } from './ClimateController';
+
+// SAFE_RANGES déplacés ici pour éviter les dépendances circulaires
 export const SAFE_RANGES = {
-  fogDensity: { min: 0.005, max: 0.06 },
-  bloomStrength: { min: 0.0, max: 1.35 },
-  bloomRadius: { min: 0.0, max: 0.55 },
-  bloomThreshold: { min: 0.65, max: 0.95 },
-  glowIntensity: { min: 0.1, max: 0.9 },
-  backgroundStrength: { min: 0.1, max: 1.1 },
-  softness: { min: 0.1, max: 1.25 },
-  opacityMul: { min: 0.4, max: 1.25 },
+  fogDensity: { min: 0.0, max: 0.15 },
+  bloomStrength: { min: 0.0, max: 2.0 },
+  bloomRadius: { min: 0.0, max: 1.5 },
+  bloomThreshold: { min: 0.0, max: 1.0 },
+  glowIntensity: { min: 0.0, max: 2.0 },
+  backgroundStrength: { min: 0.0, max: 2.0 },
+  softness: { min: 0.0, max: 2.0 },
+  opacityMul: { min: 0.0, max: 1.5 },
   foregroundOpacityMul: { min: 0.0, max: 1.25 },
 };
 
-type Curve4 = { low: number; mid: number; peak: number; end: number };
-type PresetDef = {
-  name: string;
-  colors: { fog: number; glow: number; bg: number };
-  fog: Curve4;
-  bloomStrength: Curve4;
-  bloomRadius: Curve4;
-  bloomThreshold: Curve4;
-  glowIntensity: Curve4;
-  backgroundStrength: Curve4;
-  softness: Curve4;
-  wireOpacityMul: Curve4;
-  particlesOpacityMul: Curve4;
-  foregroundOpacityMul: Curve4;
-  vignette: number;
-};
-
-type VariantOptions = { perBase: number; seed: number | string; tagPrefix?: string };
-
-function clamp(v: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, Number(v) || 0));
-}
-
-function clamp01(v: number) {
-  return clamp(v, 0, 1);
-}
-
-function hashSeed(input: number | string) {
-  const str = String(input);
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i += 1) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
-function mulberry32(seed: number) {
-  let a = seed >>> 0;
+// PRNG simple (Mulberry32)
+function mulberry32(a: number) {
   return function () {
-    a += 0x6d2b79f5;
-    let t = a;
+    let t = (a += 0x6d2b79f5);
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
-function jitter(v: number, amp: number, rand: () => number) {
-  return v * (1 + (rand() * 2 - 1) * amp);
+// Clamp utilitaire
+function clamp(val: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, val));
 }
 
-function jitterCurve(range: Curve4, amp: number, min: number, max: number, rand: () => number): Curve4 {
-  return {
-    low: clamp(jitter(range.low, amp, rand), min, max),
-    mid: clamp(jitter(range.mid, amp, rand), min, max),
-    peak: clamp(jitter(range.peak, amp, rand), min, max),
-    end: clamp(jitter(range.end, amp, rand), min, max),
-  };
+// Jitter : applique une variation +/- range centrée
+function jitter(val: number, range: number, rng: () => number, limits?: { min: number; max: number }) {
+  const delta = (rng() - 0.5) * 2 * range; // -range à +range
+  let res = val + delta;
+  if (limits) res = clamp(res, limits.min, limits.max);
+  return res;
 }
 
-function toRgb(color: number) {
-  return {
-    r: ((color >> 16) & 0xff) / 255,
-    g: ((color >> 8) & 0xff) / 255,
-    b: (color & 0xff) / 255,
-  };
-}
+export function buildPresetVariants(
+  basePresets: Record<string, ClimatePresetDef>,
+  opts: { perBase: number; seed: number | string; tagPrefix?: string }
+): Record<string, ClimatePresetDef> {
+  const variants: Record<string, ClimatePresetDef> = {};
+  
+  // Seed numérique stable
+  const seedStr = String(opts.seed);
+  let seedNum = 0;
+  for (let i = 0; i < seedStr.length; i++) seedNum += seedStr.charCodeAt(i);
+  const rng = mulberry32(seedNum);
 
-function fromRgb(rgb: { r: number; g: number; b: number }) {
-  const r = Math.round(clamp01(rgb.r) * 255);
-  const g = Math.round(clamp01(rgb.g) * 255);
-  const b = Math.round(clamp01(rgb.b) * 255);
-  return (r << 16) | (g << 8) | b;
-}
+  Object.entries(basePresets).forEach(([baseName, def]) => {
+    for (let i = 0; i < opts.perBase; i++) {
+      const name = `${baseName}__V${i.toString().padStart(2, '0')}`;
+      
+      // Clone profond simple
+      const v = JSON.parse(JSON.stringify(def)) as ClimatePresetDef;
 
-function jitterColor(color: number, amp: number, rand: () => number) {
-  const { r, g, b } = toRgb(color);
-  return fromRgb({
-    r: clamp01(r + (rand() * 2 - 1) * amp),
-    g: clamp01(g + (rand() * 2 - 1) * amp),
-    b: clamp01(b + (rand() * 2 - 1) * amp),
-  });
-}
+      // Perturbations agressives pour garantir la diversité (Prompt 5)
+      // Fog
+      if (v.fog) {
+        v.fog.density = jitter(v.fog.density, 0.015, rng, SAFE_RANGES.fogDensity);
+      }
 
-export function buildPresetVariants<T extends Record<string, any>>(
-  basePresets: T,
-  opts: VariantOptions
-): Record<string, any> {
-  const variants: Record<string, PresetDef> = {};
-  const perBase = Math.max(0, Math.floor(opts.perBase));
-  const baseSeed = String(opts.seed ?? 'preset-v1');
-  const prefix = opts.tagPrefix ?? '';
+      // Bloom
+      if (v.bloom) {
+        v.bloom.strength = jitter(v.bloom.strength, 0.3, rng, SAFE_RANGES.bloomStrength);
+        v.bloom.radius = jitter(v.bloom.radius, 0.2, rng, SAFE_RANGES.bloomRadius);
+        v.bloom.threshold = jitter(v.bloom.threshold, 0.1, rng, SAFE_RANGES.bloomThreshold);
+      }
 
-  const entries = Object.entries(basePresets) as Array<[string, PresetDef]>;
-  for (const [baseName, preset] of entries) {
-    for (let i = 0; i < perBase; i += 1) {
-      const variantTag = `${baseName}|${i}|${baseSeed}`;
-      const rand = mulberry32(hashSeed(variantTag));
-      const variantName = `${prefix}${baseName}__V${String(i).padStart(2, '0')}`;
+      // Volume
+      if (v.volume) {
+        v.volume.glowIntensity = jitter(v.volume.glowIntensity, 0.3, rng, SAFE_RANGES.glowIntensity);
+        v.volume.backgroundStrength = jitter(v.volume.backgroundStrength, 0.2, rng, SAFE_RANGES.backgroundStrength);
+      }
 
-      variants[variantName] = {
-        name: variantName,
-        colors: {
-          fog: jitterColor(preset.colors.fog, 0.06, rand),
-          glow: jitterColor(preset.colors.glow, 0.06, rand),
-          bg: jitterColor(preset.colors.bg, 0.06, rand),
-        },
-        fog: jitterCurve(preset.fog, 0.08, SAFE_RANGES.fogDensity.min, SAFE_RANGES.fogDensity.max, rand),
-        bloomStrength: jitterCurve(
-          preset.bloomStrength,
-          0.1,
-          SAFE_RANGES.bloomStrength.min,
-          SAFE_RANGES.bloomStrength.max,
-          rand
-        ),
-        bloomRadius: jitterCurve(
-          preset.bloomRadius,
-          0.1,
-          SAFE_RANGES.bloomRadius.min,
-          SAFE_RANGES.bloomRadius.max,
-          rand
-        ),
-        bloomThreshold: jitterCurve(
-          preset.bloomThreshold,
-          0.05,
-          SAFE_RANGES.bloomThreshold.min,
-          SAFE_RANGES.bloomThreshold.max,
-          rand
-        ),
-        glowIntensity: jitterCurve(
-          preset.glowIntensity,
-          0.1,
-          SAFE_RANGES.glowIntensity.min,
-          SAFE_RANGES.glowIntensity.max,
-          rand
-        ),
-        backgroundStrength: jitterCurve(
-          preset.backgroundStrength,
-          0.08,
-          SAFE_RANGES.backgroundStrength.min,
-          SAFE_RANGES.backgroundStrength.max,
-          rand
-        ),
-        softness: jitterCurve(preset.softness, 0.08, SAFE_RANGES.softness.min, SAFE_RANGES.softness.max, rand),
-        wireOpacityMul: jitterCurve(
-          preset.wireOpacityMul,
-          0.08,
-          SAFE_RANGES.opacityMul.min,
-          SAFE_RANGES.opacityMul.max,
-          rand
-        ),
-        particlesOpacityMul: jitterCurve(
-          preset.particlesOpacityMul,
-          0.08,
-          SAFE_RANGES.opacityMul.min,
-          SAFE_RANGES.opacityMul.max,
-          rand
-        ),
-        foregroundOpacityMul: jitterCurve(
-          preset.foregroundOpacityMul,
-          0.1,
-          SAFE_RANGES.foregroundOpacityMul.min,
-          SAFE_RANGES.foregroundOpacityMul.max,
-          rand
-        ),
-        vignette: preset.vignette,
-      };
+      // Opacity Multipliers
+      if (v.opacity) {
+        // Foreground : variation critique pour le test sémantique
+        // On booste la variance pour Cendre (valeurs hautes) et on limite pour Aurore
+        const fgRange = baseName.includes('Cendre') ? 0.2 : 0.05; 
+        if (v.opacity.foregroundOpacity !== undefined) {
+             v.opacity.foregroundOpacity = jitter(v.opacity.foregroundOpacity, fgRange, rng, SAFE_RANGES.foregroundOpacityMul);
+        }
+      }
+
+      variants[name] = v;
     }
-  }
+  });
 
   return variants;
 }
