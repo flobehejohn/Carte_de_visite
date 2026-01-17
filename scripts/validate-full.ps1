@@ -20,6 +20,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $ScriptDir "_auditRun.ps1")
 
 $log = New-LogState
+if (-not $PSBoundParameters.ContainsKey("Quiet")) { $Quiet = $true }
 if ($Quiet) { $VerbosePreference = "SilentlyContinue" }
 
 function Get-OverallStatus([object[]]$steps) {
@@ -33,10 +34,10 @@ $runDir = $null
 
 try {
     $audit = Resolve-AuditRun -RepoRoot $RepoRoot -OutDir $OutDir -RunStamp $RunStamp -Mode $Mode -Archive:$Archive -Prefix "VALID" -CleanLatest:(-not $NoCleanLatest)
-    $RepoRoot = $audit.RepoRoot
+    $RepoRoot  = $audit.RepoRoot
     $OutDirAbs = $audit.OutDir
-    $RunStamp = $audit.RunStamp
-    $runDir = $audit.RunDir
+    $RunStamp  = $audit.RunStamp
+    $runDir    = $audit.RunDir
 
     $mainLog = Join-Path $runDir "validate-full.log"
     Set-LogFile -Path $mainLog -Reset
@@ -47,16 +48,25 @@ try {
     Info $log ("Run dir   : {0}" -f $runDir)
     Info $log ("Mode      : {0}" -f $audit.Mode)
     Info $log ("Archive   : {0}" -f ([bool]$audit.Archive))
+    Info $log ("Strict    : {0}" -f ([bool]$Strict))
+
+    # IMPORTANT:
+    # En mode local, runDir = audit\_latest.
+    # Or, les scripts d'audit écrasent audit\_latest\runtime / opacity / opacity_sinks via Write-AuditLatest.
+    # Donc: on met TOUTES les sorties "validate-full" dans un sous-dossier _validate
+    # pour éviter toute collision/lock.
+    $validateRoot = Join-Path $runDir "_validate"
+    Ensure-Dir $validateRoot
 
     $dirs = [ordered]@{
-        typecheck     = Join-Path $runDir "typecheck"
-        tests         = Join-Path $runDir "tests"
-        build         = Join-Path $runDir "build"
-        runtime       = Join-Path $runDir "runtime"
-        opacity       = Join-Path $runDir "opacity"
-        opacity_sinks = Join-Path $runDir "opacity_sinks"
-        e2e           = Join-Path $runDir "e2e"
-        gate          = Join-Path $runDir "gate"
+        typecheck     = Join-Path $validateRoot "typecheck"
+        tests         = Join-Path $validateRoot "tests"
+        build         = Join-Path $validateRoot "build"
+        runtime       = Join-Path $validateRoot "runtime"
+        opacity       = Join-Path $validateRoot "opacity"
+        opacity_sinks = Join-Path $validateRoot "opacity_sinks"
+        e2e           = Join-Path $validateRoot "e2e"
+        gate          = Join-Path $validateRoot "gate"
     }
     foreach ($d in $dirs.Values) { Ensure-Dir $d }
 
@@ -64,38 +74,40 @@ try {
     $pushed = $true
 
     $node = (node --version) 2>$null
-    $npm = (npm --version) 2>$null
+    $npm  = (npm --version) 2>$null
     if ($node) { Info $log ("node : {0}" -f $node.Trim()) } else { Warn $log "node not found in PATH" }
-    if ($npm) { Info $log ("npm  : {0}" -f $npm.Trim()) } else { Warn $log "npm not found in PATH" }
+    if ($npm)  { Info $log ("npm  : {0}" -f $npm.Trim()) } else { Warn $log "npm not found in PATH" }
 
     $auditRuntime = Join-Path $ScriptDir "audit-runtime.ps1"
     $auditOpacity = Join-Path $ScriptDir "audit-opacity.ps1"
-    $auditSinks = Join-Path $ScriptDir "audit-opacity-sinks.ps1"
+    $auditSinks   = Join-Path $ScriptDir "audit-opacity-sinks.ps1"
 
     $steps = @()
 
-    $steps += Invoke-Step -State $log -Name "typecheck" -LogPath (Join-Path $dirs.typecheck "typecheck.log") -Command {
+    $steps += Invoke-Step -State $log -Name "typecheck" -LogPath (Join-Path $dirs.typecheck "typecheck.log") -Quiet:$Quiet -Command {
         npx --no-install tsc -p tsconfig.json --noEmit
     }
 
     $junitPath = Join-Path $dirs.tests "junit.xml"
-    $steps += Invoke-Step -State $log -Name "tests" -LogPath (Join-Path $dirs.tests "tests.log") -Command {
+    $steps += Invoke-Step -State $log -Name "tests" -LogPath (Join-Path $dirs.tests "tests.log") -Quiet:$Quiet -Command {
         npx --no-install vitest run --reporter default --reporter junit --outputFile $junitPath
     }
 
-    $steps += Invoke-Step -State $log -Name "build" -LogPath (Join-Path $dirs.build "build.log") -Command {
+    $steps += Invoke-Step -State $log -Name "build" -LogPath (Join-Path $dirs.build "build.log") -Quiet:$Quiet -Command {
         npm run build
     }
 
-    $steps += Invoke-Step -State $log -Name "audit-runtime" -WarnExitCodes @(2) -LogPath (Join-Path $dirs.runtime "audit-runtime.log") -Command {
+    # Les audits écrivent leur "latest" dans audit/_latest/<category> via -OutDir.
+    # On garde ça, mais les logs validate-full (Invoke-Step) sont dans runDir/_validate/... => plus de lock.
+    $steps += Invoke-Step -State $log -Name "audit-runtime" -WarnExitCodes @(2) -LogPath (Join-Path $dirs.runtime "audit-runtime.step.log") -Quiet:$Quiet -Command {
         pwsh -NoProfile -ExecutionPolicy Bypass -File $auditRuntime -RepoRoot $RepoRoot -OutDir "audit/_latest/runtime" -RunStamp $RunStamp -Quiet:$Quiet
     }
 
-    $steps += Invoke-Step -State $log -Name "audit-opacity" -WarnExitCodes @(2) -LogPath (Join-Path $dirs.opacity "audit-opacity.log") -Command {
+    $steps += Invoke-Step -State $log -Name "audit-opacity" -WarnExitCodes @(2) -LogPath (Join-Path $dirs.opacity "audit-opacity.step.log") -Quiet:$Quiet -Command {
         pwsh -NoProfile -ExecutionPolicy Bypass -File $auditOpacity -RepoRoot $RepoRoot -OutDir "audit/_latest/opacity" -RunStamp $RunStamp -Quiet:$Quiet
     }
 
-    $steps += Invoke-Step -State $log -Name "audit-opacity-sinks" -WarnExitCodes @(2) -LogPath (Join-Path $dirs.opacity_sinks "audit-opacity-sinks.log") -Command {
+    $steps += Invoke-Step -State $log -Name "audit-opacity-sinks" -WarnExitCodes @(2) -LogPath (Join-Path $dirs.opacity_sinks "audit-opacity-sinks.step.log") -Quiet:$Quiet -Command {
         pwsh -NoProfile -ExecutionPolicy Bypass -File $auditSinks -RepoRoot $RepoRoot -OutDir "audit/_latest/opacity_sinks" -RunStamp $RunStamp -Quiet:$Quiet
     }
 
@@ -105,17 +117,17 @@ try {
     foreach ($s in $steps) {
         $sec = [Math]::Round(($s.DurationMs / 1000), 2)
         $msg = ("{0,-22} {1,6}s exit={2}" -f $s.Name, $sec, $s.ExitCode)
-        if ($s.Status -eq "OK") { Ok   $log $msg }
+        if ($s.Status -eq "OK") { Ok $log $msg }
         elseif ($s.Status -eq "WARN") { Warn $log $msg }
-        else { Err  $log $msg }
+        else { Err $log $msg }
     }
 
-    if ($overall -eq "OK") { Ok   $log "RESULT OK" }
+    if ($overall -eq "OK") { Ok $log "RESULT OK" }
     elseif ($overall -eq "WARN" -and $Strict) { Warn $log "RESULT WARN (strict=on, exit=1)" }
     elseif ($overall -eq "WARN") { Warn $log "RESULT WARN" }
-    else { Err  $log "RESULT ERR" }
+    else { Err $log "RESULT ERR" }
 
-    $summaryTxt = Join-Path $runDir "summary.txt"
+    $summaryTxt  = Join-Path $runDir "summary.txt"
     $summaryJson = Join-Path $runDir "summary.json"
 
     $summaryLines = New-Object System.Collections.Generic.List[string]
@@ -148,6 +160,7 @@ try {
         logs      = $mainLog
     }
     ($payload | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $summaryJson -Encoding UTF8
+
     Write-AuditManifest -Path $audit.Manifest -Payload @{
         timestamp = $audit.Timestamp
         runStamp  = $RunStamp
@@ -174,7 +187,7 @@ try {
 catch {
     Err $log $_.Exception.Message
     if ($runDir) {
-        try { Write-LogFile $log (Join-Path $runDir "validate-full.error.log") } catch {}
+        try { Write-LogFile -State $log -Path (Join-Path $runDir "validate-full.error.log") } catch {}
     }
     exit 1
 }
