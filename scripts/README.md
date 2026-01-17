@@ -5,6 +5,11 @@
 - Runs: TypeScript strict, two Vitest preset tests, and the presets audit.
 - Outputs: `audit/presets/<timestamp>/...` and `audit/_latest/presets/...`
 
+## Gate render
+- Command: `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate-render.ps1`
+- Runs: TypeScript strict, render param map test, and the render params audit.
+- Outputs: `audit/render_params/<timestamp>/...` and `audit/_latest/render_params/...`
+
 ## Audit output convention
 - Always write audit outputs under `audit/`.
 - Use `audit/_latest/<domain>/...` for the most recent run.
