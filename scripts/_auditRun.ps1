@@ -52,7 +52,7 @@ function Detect-AuditMode {
         "APPVEYOR"
     )
     foreach ($v in $ciVars) {
-        $val = [string]$env:$v
+        $val = [string][Environment]::GetEnvironmentVariable($v)
         if (-not [string]::IsNullOrWhiteSpace($val) -and $val -ne "false") { return "ci" }
     }
     return "local"
@@ -104,7 +104,8 @@ function Resolve-AuditRun {
     $git = Get-GitInfo -RepoRoot $repoRootAbs
     $runId = $null
     foreach ($k in @("GITHUB_RUN_ID", "GITHUB_RUN_NUMBER", "BUILD_BUILDID", "CI_PIPELINE_ID", "BUILD_NUMBER", "BUILD_ID")) {
-        if (-not [string]::IsNullOrWhiteSpace($env:$k)) { $runId = $env:$k; break }
+        $envVal = [Environment]::GetEnvironmentVariable($k)
+        if (-not [string]::IsNullOrWhiteSpace($envVal)) { $runId = $envVal; break }
     }
 
     $effectiveRunStamp = $RunStamp
@@ -152,4 +153,39 @@ function Write-AuditManifest {
     )
     Ensure-Dir (Split-Path -Parent $Path)
     ($Payload | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+
+function Write-AuditLatest {
+    [CmdletBinding()]
+    param(
+        [string]$Category,
+        [string]$RunDir,
+        [string]$LatestDir,
+        [int]$Keep = 3
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RunDir)) { throw "RunDir missing for audit copy." }
+    if ([string]::IsNullOrWhiteSpace($LatestDir)) { throw "LatestDir missing for audit copy." }
+
+    Ensure-Dir $RunDir
+    Ensure-Dir (Split-Path -Parent $LatestDir)
+
+    if (Test-Path $LatestDir) { Remove-Item -Recurse -Force $LatestDir }
+    Copy-Item -Recurse -Force $RunDir $LatestDir
+
+    $baseDir = Split-Path -Parent $RunDir
+    if (Test-Path $baseDir) {
+        $dirs = Get-ChildItem -LiteralPath $baseDir -Directory | Where-Object { $_.Name -ne "_latest" } |
+            Sort-Object LastWriteTime -Descending
+        if ($Keep -gt 0) {
+            $i = 0
+            foreach ($d in $dirs) {
+                $i++
+                if ($i -le $Keep) { continue }
+                Remove-Item -LiteralPath $d.FullName -Recurse -Force
+            }
+        }
+    }
+
+    return $LatestDir
 }

@@ -1,8 +1,10 @@
 [CmdletBinding()]
 param(
   [string]$RepoRoot = "",
-  [string]$OutDir = ".\audit\opacity_sinks",
-  [string]$RunStamp = ""
+  [string]$OutDir = "audit/_latest/opacity_sinks",
+  [string]$RunStamp = "",
+  [int]$Keep = 3,
+  [switch]$Quiet
 )
 
 Set-StrictMode -Version Latest
@@ -11,6 +13,9 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $ScriptDir "_auditRun.ps1")
 
+$script:Quiet = [bool]$Quiet
+if ($script:Quiet) { $VerbosePreference = "SilentlyContinue" }
+
 $script:WarnCount = 0
 $script:ErrCount = 0
 $script:LogLines = New-Object System.Collections.Generic.List[string]
@@ -18,7 +23,12 @@ $script:LogLines = New-Object System.Collections.Generic.List[string]
 function Log([string]$level, [string]$msg, [ConsoleColor]$color = [ConsoleColor]::Gray) {
   $line = "[$level] $msg"
   $script:LogLines.Add($line) | Out-Null
-  Write-Host $line -ForegroundColor $color
+  if ($script:Quiet) {
+    if ($level -ne "INFO") { Write-Host $line -ForegroundColor $color }
+    return
+  }
+  if ($level -eq "INFO") { Write-Verbose $line }
+  else { Write-Host $line -ForegroundColor $color }
 }
 function Info($m) { Log "INFO" $m ([ConsoleColor]::Gray) }
 function Ok($m) { Log "OK"   $m ([ConsoleColor]::Green) }
@@ -38,7 +48,13 @@ try {
   $RepoRoot = Resolve-RepoRoot -RepoRoot $RepoRoot -ScriptDir $ScriptDir
   if (-not $RunStamp -or $RunStamp.Trim() -eq "") { $RunStamp = Now-Stamp }
 
-  $outAbs = Resolve-OutDirAbs -RepoRoot $RepoRoot -OutDir $OutDir -DefaultSubDir ".\audit\opacity_sinks"
+  $category = "opacity_sinks"
+  $baseDir = Join-Path $RepoRoot "audit\$category"
+  $runDir = Join-Path $baseDir $RunStamp
+  $latest = Resolve-OutDirAbs -RepoRoot $RepoRoot -OutDir $OutDir -DefaultSubDir "audit/_latest/$category"
+  Ensure-Dir $runDir
+  $outAbs = $runDir
+  if (-not $script:Quiet) { Write-Host "`n=== audit opacity sinks ===" -ForegroundColor Cyan }
   Info "Repo root : $RepoRoot"
 
   $all = Get-ChildItem (Join-Path $RepoRoot "src") -Recurse -File -Include *.js, *.ts, *.tsx |
@@ -83,7 +99,7 @@ try {
     $lines = Get-Lines $file
     $assigns = Select-String -LiteralPath $file -Pattern 'material\.opacity\s*=' -ErrorAction SilentlyContinue
 
-    if (-not $assigns) { Warn "$($label): aucune assignation material.opacity trouvée" ; return }
+    if (-not $assigns) { Ok "$($label): no material.opacity assignments (single-writer OK)"; return }
 
     foreach ($a in $assigns) {
       $ctx = Get-Context $lines $a.LineNumber 40
@@ -114,7 +130,7 @@ try {
       Err "VEIL: opacity foregroundMesh non reliée à veilOpacity/applied (ligne $($v.LineNumber)): $($v.Line.Trim())"
     }
     if ($veil -and $script:ErrCount -eq 0) { Ok "VEIL: foreground opacity reliée à l'état appliqué." }
-    elseif (-not $veil) { Warn "VEIL: aucune assignation foregroundMesh.material.opacity trouvée" }
+    elseif (-not $veil) { Ok "VEIL: no foreground opacity assignments (single-writer OK)" }
   }
 
   $txtPath = Join-Path $outAbs ("opacity_sinks_{0}.txt" -f $RunStamp)
@@ -138,19 +154,21 @@ try {
 
   Set-Content -LiteralPath $txtPath -Value ($script:LogLines -join "`r`n") -Encoding UTF8
   ($payload | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $jsonPath -Encoding UTF8
-  Copy-Item -Force $txtPath  (Join-Path $outAbs "opacity_sinks-latest.txt")
-  Copy-Item -Force $jsonPath (Join-Path $outAbs "opacity_sinks-latest.json")
-
   Info "Audit sinks log : $txtPath"
   Info "Audit sinks json: $jsonPath"
+  $latestPath = Write-AuditLatest -Category $category -RunDir $runDir -LatestDir $latest -Keep $Keep
+  $exitCode = if ($script:ErrCount -gt 0) { 1 } elseif ($script:WarnCount -gt 0) { 2 } else { 0 }
 
-  Write-Host "`n---- Résumé audit opacity sinks ----"
-  Write-Host ("WARN: {0}" -f $script:WarnCount)
-  Write-Host ("ERR : {0}" -f $script:ErrCount)
-
-  if ($script:ErrCount -gt 0) { exit 1 }
-  if ($script:WarnCount -gt 0) { exit 2 }
-  exit 0
+  if ($exitCode -eq 0) {
+    Write-Host ("[OK] audit opacity sinks => {0}" -f $latestPath) -ForegroundColor Green
+    exit 0
+  }
+  if ($exitCode -eq 2) {
+    Write-Host ("[OK] audit opacity sinks (warn) => {0}" -f $latestPath) -ForegroundColor Yellow
+    exit 2
+  }
+  Write-Host ("[KO] audit opacity sinks => {0}" -f $latestPath) -ForegroundColor Red
+  exit 1
 }
 catch {
   Err $_.Exception.Message

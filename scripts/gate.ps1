@@ -7,7 +7,8 @@ param(
     [string]$RunStamp = "",
     [string]$Mode = "",
     [switch]$Archive,
-    [switch]$NoCleanLatest
+    [switch]$NoCleanLatest,
+    [switch]$Quiet
 )
 
 Set-StrictMode -Version Latest
@@ -18,6 +19,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $ScriptDir "_auditRun.ps1")
 
 $log = New-LogState
+if ($Quiet) { $VerbosePreference = "SilentlyContinue" }
 $runDir = $null
 
 try {
@@ -38,7 +40,7 @@ try {
     $tempLog = Join-Path $env:TEMP ("validate-full_{0}.log" -f ([guid]::NewGuid().ToString("N")))
 
     $step = Invoke-Step -State $log -Name "validate-full" -LogPath $tempLog -Command {
-        pwsh -NoProfile -ExecutionPolicy Bypass -File $validateScript -RepoRoot $RepoRoot -OutDir $OutDirAbs -RunStamp $RunStamp -Strict -Mode $audit.Mode -Archive:$audit.Archive -NoCleanLatest:$NoCleanLatest
+        pwsh -NoProfile -ExecutionPolicy Bypass -File $validateScript -RepoRoot $RepoRoot -OutDir $OutDirAbs -RunStamp $RunStamp -Strict -Mode $audit.Mode -Archive:$audit.Archive -NoCleanLatest:$NoCleanLatest -Quiet:$Quiet
     }
 
     $gateDir = Join-Path $runDir "gate"
@@ -75,6 +77,7 @@ try {
 
     $latestPath = Join-Path $audit.BaseDir "latest.txt"
     Set-Content -LiteralPath $latestPath -Value $runDir -Encoding UTF8
+    Ok $log ("latest : {0}" -f $runDir)
 
     if ($step.ExitCode -eq 0) { exit 0 }
     exit 1

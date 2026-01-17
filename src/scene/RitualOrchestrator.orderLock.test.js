@@ -24,6 +24,26 @@ vi.mock("./modules/orbVolumes.js", () => ({
   ensureVolumeConfig: vi.fn(() => ({ glowIntensity: 0, backgroundStrength: 0 })),
   updateVolumeForFrame: vi.fn(),
 }));
+vi.mock("./render/materials/mapClimateToRenderParams", () => ({
+  mapClimateToRenderParams: vi.fn(() => ({
+    presetName: "Mock",
+    fog: { enabled: false, density: 0, color: 0 },
+    bloom: { strength: 0, radius: 0, threshold: 0 },
+    volume: { glowIntensity: 0, backgroundStrength: 0, softness: 0, vignette: 0, bgColor: 0, glowColor: 0 },
+    opacity: { wireOpacityMul: 1, particlesOpacityMul: 1, foregroundOpacity: 0 },
+    optics: {
+      alpha: 1,
+      transmission: 0,
+      thickness: 0.1,
+      ior: 1.35,
+      roughness: 0.4,
+      clearcoat: 0,
+      scattering: 0,
+      absorption: 0,
+    },
+  })),
+}));
+vi.mock("./render/materials/applyMaterials", () => ({ applyMaterials: vi.fn() }));
 vi.mock("./params/ClimateController", () => ({ ClimateController: vi.fn() }));
 
 function pickCtor(mod) {
