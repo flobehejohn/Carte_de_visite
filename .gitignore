@@ -27,3 +27,6 @@ Thumbs.db
 .vscode/
 .idea/
 dist/
+
+tsconfig.tsbuildinfo
+
