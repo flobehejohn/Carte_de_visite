@@ -2,34 +2,6 @@ Set-StrictMode -Version Latest
 
 $script:LogFilePath = $null
 
-function Ensure-Dir {
-    param([string]$Path)
-    if ([string]::IsNullOrWhiteSpace($Path)) { return }
-    if (-not (Test-Path $Path)) {
-        New-Item -ItemType Directory -Force -Path $Path | Out-Null
-    }
-}
-
-function Set-LogFile {
-    [CmdletBinding()]
-    param(
-        [string]$Path = "",
-        [switch]$Reset
-    )
-
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        $script:LogFilePath = $null
-        return
-    }
-
-    Ensure-Dir (Split-Path -Parent $Path)
-    if ($Reset) {
-        Set-Content -LiteralPath $Path -Value "" -Encoding UTF8
-    }
-
-    $script:LogFilePath = $Path
-}
-
 function New-LogState {
     [CmdletBinding()]
     param()
@@ -40,12 +12,30 @@ function New-LogState {
     }
 }
 
+function Set-LogFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [switch]$Reset
+    )
+    $dir = Split-Path -Parent $Path
+    if (-not [string]::IsNullOrWhiteSpace($dir) -and -not (Test-Path -LiteralPath $dir)) {
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    }
+    $script:LogFilePath = $Path
+    if ($Reset -and (Test-Path -LiteralPath $Path)) {
+        Remove-Item -Force -LiteralPath $Path
+    }
+}
+
 function Write-LogLine {
+    [CmdletBinding()]
     param(
         [object]$State,
         [string]$Level,
         [string]$Message,
-        [ConsoleColor]$Color
+        [ConsoleColor]$Color = [ConsoleColor]::Gray
     )
 
     $line = "[{0}] {1}" -f $Level, $Message
@@ -55,73 +45,126 @@ function Write-LogLine {
     }
 
     if ($script:LogFilePath) {
-        Add-Content -LiteralPath $script:LogFilePath -Value $line -Encoding UTF8
+        try { Add-Content -LiteralPath $script:LogFilePath -Value $line -Encoding UTF8 } catch { }
     }
 
     if ($Level -eq "INFO") { Write-Verbose $line }
     else { Write-Host $line -ForegroundColor $Color }
 }
 
+function Info ([object]$State, [string]$Message) { Write-LogLine $State "INFO" $Message ([ConsoleColor]::Gray) }
+function Ok   ([object]$State, [string]$Message) { Write-LogLine $State "OK"   $Message ([ConsoleColor]::Green) }
+function Warn ([object]$State, [string]$Message) { if ($null -ne $State) { $State.WarnCount++ }; Write-LogLine $State "WARN" $Message ([ConsoleColor]::Yellow) }
+function Err  ([object]$State, [string]$Message) { if ($null -ne $State) { $State.ErrCount++  }; Write-LogLine $State "ERR"  $Message ([ConsoleColor]::Red) }
+
 function Write-LogFile {
     [CmdletBinding()]
     param(
+        [Parameter(Mandatory = $true)]
         [object]$State,
+        [Parameter(Mandatory = $true)]
         [string]$Path
     )
 
-    if ($null -eq $State -or -not $State.Lines) { return }
-    Ensure-Dir (Split-Path -Parent $Path)
+    $dir = Split-Path -Parent $Path
+    if (-not [string]::IsNullOrWhiteSpace($dir) -and -not (Test-Path -LiteralPath $dir)) {
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    }
+
+    if ($null -eq $State -or -not $State.Lines) {
+        Set-Content -LiteralPath $Path -Value "" -Encoding UTF8
+        return
+    }
+
     Set-Content -LiteralPath $Path -Value ($State.Lines -join "`r`n") -Encoding UTF8
 }
 
-function Info([object]$State, [string]$Message) { Write-LogLine $State "INFO" $Message ([ConsoleColor]::Gray) }
-function Ok  ([object]$State, [string]$Message) { Write-LogLine $State "OK"   $Message ([ConsoleColor]::Green) }
-function Warn([object]$State, [string]$Message) { if ($null -ne $State) { $State.WarnCount++ }; Write-LogLine $State "WARN" $Message ([ConsoleColor]::Yellow) }
-function Err ([object]$State, [string]$Message) { if ($null -ne $State) { $State.ErrCount++ }; Write-LogLine $State "ERR"  $Message ([ConsoleColor]::Red) }
-
 function Invoke-Step {
+    <#
+      ULTRA déterministe:
+        - ne dépend jamais de $?
+        - reset LASTEXITCODE avant exécution
+        - redirige *tous* les streams via *> (sans pipe), donc pas de "faux OK"
+        - si exception PowerShell => exit=1
+        - si aucun natif appelé => LASTEXITCODE reste 0 (car reset)
+        - WARN si exit dans WarnExitCodes
+    #>
     [CmdletBinding()]
     param(
+        [Parameter(Mandatory = $true)]
         [object]$State,
+
+        [Parameter(Mandatory = $true)]
         [string]$Name,
-        [scriptblock]$Command,
-        [string]$LogPath,
-        [int[]]$WarnExitCodes = @()
+
+        [string]$LogPath = "",
+
+        [int[]]$WarnExitCodes = @(),
+
+        [switch]$Quiet,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Command
     )
 
-    if ($LogPath) {
-        Ensure-Dir (Split-Path -Parent $LogPath)
-        Set-Content -LiteralPath $LogPath -Value ("[INFO] step {0} started {1}" -f $Name, (Get-Date -Format o)) -Encoding UTF8
+    $start = Get-Date
+    $exitCode = 1
+    $status = "ERR"
+    $errMsg = $null
+
+    if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+        $logDir = Split-Path -Parent $LogPath
+        if (-not [string]::IsNullOrWhiteSpace($logDir) -and -not (Test-Path -LiteralPath $logDir)) {
+            New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+        }
+        if (Test-Path -LiteralPath $LogPath) { Remove-Item -Force -LiteralPath $LogPath }
     }
 
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    $exitCode = 0
-
     try {
-        & $Command 2>&1 | Tee-Object -FilePath $LogPath -Append | Out-Host
-        $exitCode = $LASTEXITCODE
+        $global:LASTEXITCODE = 0
+
+        if ([string]::IsNullOrWhiteSpace($LogPath)) {
+            & $Command | Out-Null
+        } else {
+            # Redirection "*>": capture stdout/stderr/verbose/warning/info/debug en fichier
+            & $Command *> $LogPath
+        }
+
+        $exitCode = [int]$global:LASTEXITCODE
+
+        if ($exitCode -eq 0) { $status = "OK" }
+        elseif ($WarnExitCodes -and ($WarnExitCodes -contains $exitCode)) { $status = "WARN" }
+        else { $status = "ERR" }
     }
     catch {
         $exitCode = 1
-        ($_ | Out-String) | Tee-Object -FilePath $LogPath -Append | Out-Host
-    }
-    finally {
-        $sw.Stop()
+        $status = "ERR"
+        $errMsg = $_.Exception.Message
+
+        if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+            try {
+                Add-Content -LiteralPath $LogPath -Value ("`n[EXCEPTION] {0}" -f $errMsg) -Encoding UTF8
+                if ($_.InvocationInfo) {
+                    Add-Content -LiteralPath $LogPath -Value ("[POSITION] {0}" -f $_.InvocationInfo.PositionMessage) -Encoding UTF8
+                }
+            } catch { }
+        }
     }
 
-    $status = "ERR"
-    if ($exitCode -eq 0) { $status = "OK" }
-    elseif ($WarnExitCodes -contains $exitCode) { $status = "WARN" }
+    $durMs = [int]([Math]::Round(((Get-Date) - $start).TotalMilliseconds, 0))
 
-    if ($status -eq "OK") { Ok   $State "step $Name OK (exit=$exitCode)" }
-    elseif ($status -eq "WARN") { Warn $State "step $Name WARN (exit=$exitCode)" }
-    else { Err  $State "step $Name ERR (exit=$exitCode)" }
+    if ($status -eq "OK") { Ok   $State ("step {0} OK (exit={1})" -f $Name, $exitCode) }
+    elseif ($status -eq "WARN") { Warn $State ("step {0} WARN (exit={1})" -f $Name, $exitCode) }
+    else {
+        if ($errMsg) { Err $State ("step {0} ERR (exit={1}) :: {2}" -f $Name, $exitCode, $errMsg) }
+        else { Err $State ("step {0} ERR (exit={1})" -f $Name, $exitCode) }
+    }
 
     return [pscustomobject]@{
         Name       = $Name
         ExitCode   = $exitCode
-        DurationMs = [Math]::Round($sw.Elapsed.TotalMilliseconds, 0)
         Status     = $status
+        DurationMs = $durMs
         LogPath    = $LogPath
     }
 }

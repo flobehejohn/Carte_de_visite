@@ -1,5 +1,7 @@
 # Scripts
 
+OPTICS1: single-writer transparency pipeline (applyMaterials only).
+
 ## Gate presets
 - Command: `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate-presets.ps1`
 - Runs: TypeScript strict, two Vitest preset tests, and the presets audit.
@@ -16,6 +18,9 @@
 - Use `audit/<domain>/<timestamp>/...` for historical runs.
 
 ## HOW TO VERIFY
+- `npx tsc -p tsconfig.json --noEmit`
+- `npx vitest run`
 - `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate-render.ps1`
 - `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate-presets.ps1`
+- `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate.ps1`
 - `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\cleanup-audit.ps1 -Keep 3`

@@ -19,8 +19,11 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $ScriptDir "_auditRun.ps1")
 
 $log = New-LogState
+if (-not $PSBoundParameters.ContainsKey("Quiet")) { $Quiet = $true }
 if ($Quiet) { $VerbosePreference = "SilentlyContinue" }
+
 $runDir = $null
+$tempLog = $null
 
 try {
     $audit = Resolve-AuditRun -RepoRoot $RepoRoot -OutDir $OutDir -RunStamp $RunStamp -Mode $Mode -Archive:$Archive -Prefix "VALID" -CleanLatest:$false
@@ -39,15 +42,17 @@ try {
     $validateScript = Join-Path $ScriptDir "validate-full.ps1"
     $tempLog = Join-Path $env:TEMP ("validate-full_{0}.log" -f ([guid]::NewGuid().ToString("N")))
 
-    $step = Invoke-Step -State $log -Name "validate-full" -LogPath $tempLog -Command {
-        pwsh -NoProfile -ExecutionPolicy Bypass -File $validateScript -RepoRoot $RepoRoot -OutDir $OutDirAbs -RunStamp $RunStamp -Strict -Mode $audit.Mode -Archive:$audit.Archive -NoCleanLatest:$NoCleanLatest -Quiet:$Quiet
+    $step = Invoke-Step -State $log -Name "validate-full" -LogPath $tempLog -Quiet:$Quiet -Command {
+        pwsh -NoProfile -ExecutionPolicy Bypass -File $validateScript `
+          -RepoRoot $RepoRoot -OutDir $OutDirAbs -RunStamp $RunStamp `
+          -Strict -Mode $audit.Mode -Archive:$audit.Archive -NoCleanLatest:$NoCleanLatest -Quiet:$Quiet
     }
 
     $gateDir = Join-Path $runDir "gate"
     Ensure-Dir $gateDir
 
     $validateLog = Join-Path $gateDir "validate-full.log"
-    if (Test-Path $tempLog) {
+    if ($tempLog -and (Test-Path -LiteralPath $tempLog)) {
         Move-Item -Force -LiteralPath $tempLog -Destination $validateLog
     }
 
@@ -70,7 +75,7 @@ try {
     Set-Content -LiteralPath $summaryPath -Value ($summary -join "`r`n") -Encoding UTF8
 
     $validateSummary = Join-Path $runDir "summary.txt"
-    if (Test-Path $validateSummary) {
+    if (Test-Path -LiteralPath $validateSummary) {
         Info $log "Validate summary:"
         Get-Content -LiteralPath $validateSummary | ForEach-Object { Info $log $_ }
     }
@@ -85,7 +90,12 @@ try {
 catch {
     Err $log $_.Exception.Message
     if ($runDir) {
-        try { Write-LogFile $log (Join-Path $runDir "gate.error.log") } catch {}
+        try { Write-LogFile -State $log -Path (Join-Path $runDir "gate.error.log") } catch {}
     }
     exit 1
+}
+finally {
+    if ($tempLog -and (Test-Path -LiteralPath $tempLog)) {
+        try { Remove-Item -Force -LiteralPath $tempLog } catch {}
+    }
 }

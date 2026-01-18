@@ -1,9 +1,52 @@
 Set-StrictMode -Version Latest
 
+# Stable script dir (safe under StrictMode even inside functions)
+$script:AuditRunScriptDir = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($script:AuditRunScriptDir) -and $MyInvocation -and $MyInvocation.MyCommand) {
+  try { $script:AuditRunScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path } catch { }
+}
 function Ensure-Dir {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return }
-    if (-not (Test-Path $Path)) { New-Item -ItemType Directory -Force -Path $Path | Out-Null }
+
+    # Test-Path + New-Item en LiteralPath pour éviter les surprises avec []
+    if (-not (Test-Path -LiteralPath $Path)) {
+        New-Item -ItemType Directory -Force -Path $Path | Out-Null
+    }
+}
+
+function Resolve-OnePath {
+    <#
+      Objectif:
+        - Résoudre un chemin en string de manière robuste.
+        - Gérer le cas où Resolve-Path retourne plusieurs résultats (tableau).
+        - Gérer le cas où Path est vide / null.
+      Retour:
+        - string absolu.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $resolved = Resolve-Path -LiteralPath $Path -ErrorAction Stop
+    if ($null -eq $resolved) { throw "Resolve-Path returned null for: $Path" }
+
+    # Resolve-Path peut renvoyer un tableau; on prend le premier élément
+    $first = $resolved | Select-Object -First 1
+    if ($null -eq $first) { throw "Resolve-Path returned empty result for: $Path" }
+
+    # On récupère .Path si dispo, sinon on fallback proprement
+    $p = $first.PSObject.Properties["Path"]
+    if ($p -and -not [string]::IsNullOrWhiteSpace([string]$p.Value)) {
+        return [string]$p.Value
+    }
+
+    # Rare fallback (au cas où)
+    $s = [string]$first
+    if (-not [string]::IsNullOrWhiteSpace($s)) { return $s }
+
+    throw "Resolve-Path produced an unexpected result for: $Path"
 }
 
 function Resolve-RepoRoot {
@@ -11,13 +54,16 @@ function Resolve-RepoRoot {
         [string]$RepoRoot,
         [string]$ScriptDir
     )
+
     if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) {
-        return (Resolve-Path $RepoRoot).Path
+        return (Resolve-OnePath -Path $RepoRoot)
     }
+
     if ([string]::IsNullOrWhiteSpace($ScriptDir)) {
         throw "ScriptDir missing for repo root fallback."
     }
-    return (Resolve-Path (Join-Path $ScriptDir "..")).Path
+
+    return (Resolve-OnePath -Path (Join-Path $ScriptDir ".."))
 }
 
 function Resolve-OutDirAbs {
@@ -26,14 +72,17 @@ function Resolve-OutDirAbs {
         [string]$OutDir,
         [string]$DefaultSubDir
     )
+
     $dir = if ([string]::IsNullOrWhiteSpace($OutDir)) { $DefaultSubDir } else { $OutDir }
     $abs = if ([System.IO.Path]::IsPathRooted($dir)) { $dir } else { Join-Path $RepoRoot $dir }
+
     Ensure-Dir $abs
-    return (Resolve-Path $abs).Path
+    return (Resolve-OnePath -Path $abs)
 }
 
 function Detect-AuditMode {
     param([string]$Mode)
+
     if (-not [string]::IsNullOrWhiteSpace($Mode)) {
         $m = $Mode.ToLowerInvariant()
         if ($m -ne "local" -and $m -ne "ci") { throw "Invalid Mode: $Mode (expected local|ci)" }
@@ -60,6 +109,7 @@ function Detect-AuditMode {
 
 function Get-GitInfo {
     param([string]$RepoRoot)
+
     $info = [ordered]@{
         available = $false
         sha       = $null
@@ -67,6 +117,7 @@ function Get-GitInfo {
         branch    = $null
         dirty     = $null
     }
+
     try {
         Push-Location $RepoRoot
         $info.available = $true
@@ -77,6 +128,7 @@ function Get-GitInfo {
     }
     catch { }
     finally { Pop-Location }
+
     return $info
 }
 
@@ -93,7 +145,7 @@ function Resolve-AuditRun {
         [switch]$CleanLatest
     )
 
-    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $scriptDir = $script:AuditRunScriptDir
     $repoRootAbs = Resolve-RepoRoot -RepoRoot $RepoRoot -ScriptDir $scriptDir
     $modeValue = Detect-AuditMode -Mode $Mode
     $outDirAbs = Resolve-OutDirAbs -RepoRoot $repoRootAbs -OutDir $OutDir -DefaultSubDir ".\audit"
@@ -109,14 +161,19 @@ function Resolve-AuditRun {
     }
 
     $effectiveRunStamp = $RunStamp
-    if ($modeValue -eq "local" -and -not $Archive) {
-        $effectiveRunStamp = "LATEST"
-        $runDir = Join-Path $baseDir "_latest"
-        if ($CleanLatest -and (Test-Path $runDir)) {
-            Get-ChildItem -Path $runDir -Force | Remove-Item -Recurse -Force
-        }
+
+if ($modeValue -eq "local" -and -not $Archive) {
+    # En local, le dossier reste "_latest" mais le RunStamp doit rester un vrai identifiant
+    if ([string]::IsNullOrWhiteSpace($effectiveRunStamp)) {
+        $ts = (Get-Date).ToString("yyyyMMdd_HHmmss")
+        $effectiveRunStamp = "{0}_{1}" -f $Prefix, $ts
     }
-    else {
+
+    $runDir = Join-Path $baseDir "_latest"
+    if ($CleanLatest -and (Test-Path -LiteralPath $runDir)) {
+        Get-ChildItem -LiteralPath $runDir -Force | Remove-Item -Recurse -Force
+    }
+}else {
         if ([string]::IsNullOrWhiteSpace($effectiveRunStamp)) {
             $ts = (Get-Date).ToString("yyyyMMdd_HHmmss")
             $effectiveRunStamp = "{0}_{1}" -f $Prefix, $ts
@@ -151,6 +208,7 @@ function Write-AuditManifest {
         [string]$Path,
         [hashtable]$Payload
     )
+
     Ensure-Dir (Split-Path -Parent $Path)
     ($Payload | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $Path -Encoding UTF8
 }
@@ -170,13 +228,15 @@ function Write-AuditLatest {
     Ensure-Dir $RunDir
     Ensure-Dir (Split-Path -Parent $LatestDir)
 
-    if (Test-Path $LatestDir) { Remove-Item -Recurse -Force $LatestDir }
+    if (Test-Path -LiteralPath $LatestDir) { Remove-Item -Recurse -Force -LiteralPath $LatestDir }
     Copy-Item -Recurse -Force $RunDir $LatestDir
 
     $baseDir = Split-Path -Parent $RunDir
-    if (Test-Path $baseDir) {
-        $dirs = Get-ChildItem -LiteralPath $baseDir -Directory | Where-Object { $_.Name -ne "_latest" } |
+    if (Test-Path -LiteralPath $baseDir) {
+        $dirs = Get-ChildItem -LiteralPath $baseDir -Directory |
+            Where-Object { $_.Name -ne "_latest" } |
             Sort-Object LastWriteTime -Descending
+
         if ($Keep -gt 0) {
             $i = 0
             foreach ($d in $dirs) {
@@ -189,3 +249,5 @@ function Write-AuditLatest {
 
     return $LatestDir
 }
+
+
