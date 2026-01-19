@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "ci": {
+    "latestDir": "audit/_latest/ci",
+    "historyRunsDir": "audit/ci/runs"
+  },
+  "steps": [
+    {
+      "id": "verify-contract",
+      "name": "verify-contract",
+      "script": "scripts/verify-contract.ps1",
+      "tags": ["core", "contract", "smoke", "full"],
+      "provides": ["contract.ok"]
+    },
+    {
+      "id": "gate",
+      "name": "gate",
+      "script": "scripts/gate.ps1",
+      "tags": ["core", "smoke", "full"],
+      "requires": ["contract.ok"],
+      "provides": ["gate.core.ok", "audit.latest"],
+      "expectedArtifacts": [
+        { "key": "audit.latest", "path": "audit/_latest", "required": true }
+      ]
+    },
+    {
+      "id": "gate-render",
+      "name": "gate-render",
+      "script": "scripts/gate-render.ps1",
+      "tags": ["render", "audit", "smoke", "full"],
+      "requires": ["gate.core.ok"],
+      "provides": [
+        "gate.render.ok",
+        "render_params.latest",
+        "gate_render.latest"
+      ],
+      "expectedArtifacts": [
+        {
+          "key": "render_params.latest",
+          "path": "audit/_latest/render_params",
+          "required": true
+        },
+        {
+          "key": "gate_render.latest",
+          "path": "audit/_latest/gate_render",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "gate-presets",
+      "name": "gate-presets",
+      "script": "scripts/gate-presets.ps1",
+      "tags": ["presets", "audit", "smoke", "full"],
+      "requires": ["gate.core.ok"],
+      "provides": ["gate.presets.ok", "presets.latest", "gate_presets.latest"],
+      "expectedArtifacts": [
+        {
+          "key": "presets.latest",
+          "path": "audit/_latest/presets",
+          "required": true
+        },
+        {
+          "key": "gate_presets.latest",
+          "path": "audit/_latest/gate_presets",
+          "required": true
+        }
+      ]
+    },
+
+    {
+      "id": "audit-runtime",
+      "name": "audit-runtime",
+      "script": "scripts/audit-runtime.ps1",
+      "tags": ["runtime", "audit", "full"],
+      "requires": ["gate.core.ok"],
+      "provides": ["runtime.latest"],
+      "expectedArtifacts": [
+        {
+          "key": "runtime.latest",
+          "path": "audit/_latest/runtime",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "audit-render-params",
+      "name": "audit-render-params",
+      "script": "scripts/audit-render-params.ps1",
+      "tags": ["render", "audit", "full"],
+      "requires": ["gate.core.ok"],
+      "provides": ["render_params.latest"],
+      "expectedArtifacts": [
+        {
+          "key": "render_params.latest",
+          "path": "audit/_latest/render_params",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "audit-opacity",
+      "name": "audit-opacity",
+      "script": "scripts/audit-opacity.ps1",
+      "tags": ["opacity", "audit", "full"],
+      "requires": ["gate.core.ok"],
+      "provides": ["opacity.latest"],
+      "expectedArtifacts": [
+        {
+          "key": "opacity.latest",
+          "path": "audit/_latest/opacity",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "audit-opacity-sinks",
+      "name": "audit-opacity-sinks",
+      "script": "scripts/audit-opacity-sinks.ps1",
+      "tags": ["opacity", "audit", "full"],
+      "requires": ["gate.core.ok"],
+      "provides": ["opacity_sinks.latest"],
+      "expectedArtifacts": [
+        {
+          "key": "opacity_sinks.latest",
+          "path": "audit/_latest/opacity_sinks",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "audit-presets",
+      "name": "audit-presets",
+      "script": "scripts/audit-presets.ps1",
+      "tags": ["presets", "audit", "full"],
+      "requires": ["gate.core.ok"],
+      "provides": ["presets.latest"],
+      "expectedArtifacts": [
+        {
+          "key": "presets.latest",
+          "path": "audit/_latest/presets",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "diag-exports",
+      "name": "diag-exports",
+      "script": "scripts/diag-exports.ps1",
+      "tags": ["diag", "full"],
+      "requires": ["gate.core.ok"],
+      "provides": ["diag.exports.ok"]
+    },
+
+    {
+      "id": "cleanup-audit",
+      "name": "cleanup-audit",
+      "script": "scripts/cleanup-audit.ps1",
+      "tags": ["cleanup"],
+      "kind": "cleanup",
+      "provides": ["cleanup.ok"]
+    }
+  ]
+}

@@ -319,4 +319,3 @@ function Write-AuditLatest {
 
     return $LatestDir
 }
-
