@@ -159,7 +159,7 @@ export function Oracle3DScene({ formData, stage, loading, result }: Oracle3DScen
           if (cc && typeof cc === 'object' && 'isColor' in cc && cc.isColor) return `#${cc.getHexString()}`;
           if (typeof c === 'string') return c;
           if (typeof c === 'number') return `#${new THREE.Color(c).getHexString()}`;
-        } catch (_) {}
+        } catch (_) { /* noop (eslint no-empty) */ }
         return null;
       };
 

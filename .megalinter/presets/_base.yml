@@ -1,0 +1,36 @@
+# .megalinter/presets/_base.yml
+# Base commune (Phase 0 = report-only): stable, observable, reproductible
+APPLY_FIXES: none
+
+# Phase 0: ne casse jamais ton existant (exit code 0 même s'il y a des erreurs)
+DISABLE_ERRORS: true
+
+# Rapports (exploitables CI/IDE)
+SARIF_REPORTER: true
+JSON_REPORTER: true
+HTML_REPORTER: true
+CLEAR_REPORT_FOLDER: true
+REPORT_OUTPUT_FOLDER: 'megalinter-reports'
+SHOW_ELAPSED_TIME: true
+SHOW_SKIPPED_LINTERS: true
+
+# Analyse
+VALIDATE_ALL_CODEBASE: true
+FLAVOR_SUGGESTIONS: false
+
+# Perf / stabilité
+PARALLEL: true
+
+# Exclusions (réduit le bruit et évite de relinter tes artefacts)
+EXCLUDED_DIRECTORIES:
+  - node_modules
+  - dist
+  - build
+  - coverage
+  - .next
+  - .turbo
+  - .cache
+  - audit
+  - megalinter-reports
+  - scripts/_bak
+  - _bak_config

@@ -18,11 +18,11 @@ const SAFE_FALLBACK_VISUAL = {
 } as const;
 
 function log(...args: any[]) {
-  // eslint-disable-next-line no-console
+
   console.log("[Zarathoustra]", ...args);
 }
 function warn(...args: any[]) {
-  // eslint-disable-next-line no-console
+
   console.warn("[Zarathoustra]", ...args);
 }
 

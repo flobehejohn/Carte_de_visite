@@ -1,0 +1,15 @@
+# .megalinter/presets/00-hygiene.yml
+# Hygiene repo / manifests (rapide, peu bruyant)
+EXTENDS:
+  - '.megalinter/presets/_base.yml'
+
+# Cible: fichiers de config & CI (pas le code applicatif)
+FILTER_REGEX_INCLUDE: '^(\.github/|\.megalinter/|scripts/|\.editorconfig$|\.gitattributes$|package\.json$|package-lock\.json$|pnpm-lock\.yaml$|yarn\.lock$|tsconfig(\.|$)|vite\.config\.|vitest\.config\.|\.eslintrc\.|\.mega-linter\.yml$|README\.md$)'
+
+# Linters essentiels et légers (on évite: SPELL, COPYPASTE, DEVSKIM, GIT_DIFF)
+ENABLE_LINTERS:
+  - JSON_JSONLINT
+  - JSON_PRETTIER
+  - YAML_YAMLLINT
+  - YAML_PRETTIER
+  - MARKDOWN_MARKDOWNLINT

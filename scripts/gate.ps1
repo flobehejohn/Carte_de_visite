@@ -8,7 +8,11 @@ param(
     [string]$Mode = "",
     [switch]$Archive,
     [switch]$NoCleanLatest,
-    [switch]$Quiet
+    [switch]$Quiet,
+
+    # Phase 0: dirty policy configurable
+    [ValidateSet("auto","warn","fail","off")]
+    [string]$DirtyPolicy = "auto"
 )
 
 Set-StrictMode -Version Latest
@@ -38,6 +42,7 @@ try {
     Info $log ("Run dir   : {0}" -f $runDir)
     Info $log ("Mode      : {0}" -f $audit.Mode)
     Info $log ("Archive   : {0}" -f ([bool]$audit.Archive))
+    Info $log ("DirtyPolicy: {0}" -f $DirtyPolicy)
 
     $validateScript = Join-Path $ScriptDir "validate-full.ps1"
     $tempLog = Join-Path $env:TEMP ("validate-full_{0}.log" -f ([guid]::NewGuid().ToString("N")))
@@ -45,7 +50,8 @@ try {
     $step = Invoke-Step -State $log -Name "validate-full" -LogPath $tempLog -Quiet:$Quiet -Command {
         pwsh -NoProfile -ExecutionPolicy Bypass -File $validateScript `
           -RepoRoot $RepoRoot -OutDir $OutDirAbs -RunStamp $RunStamp `
-          -Strict -Mode $audit.Mode -Archive:$audit.Archive -NoCleanLatest:$NoCleanLatest -Quiet:$Quiet
+          -Strict -Mode $audit.Mode -Archive:$audit.Archive -NoCleanLatest:$NoCleanLatest -Quiet:$Quiet `
+          -DirtyPolicy $DirtyPolicy
     }
 
     $gateDir = Join-Path $runDir "gate"
@@ -54,6 +60,12 @@ try {
     $validateLog = Join-Path $gateDir "validate-full.log"
     if ($tempLog -and (Test-Path -LiteralPath $tempLog)) {
         Move-Item -Force -LiteralPath $tempLog -Destination $validateLog
+    }
+
+    # Copie du gate-core.json (Phase 1 observable)
+    $gateCoreLatest = Join-Path $RepoRoot "audit\_latest\ci\gate-core.json"
+    if (Test-Path -LiteralPath $gateCoreLatest) {
+        Copy-Item -Force -LiteralPath $gateCoreLatest -Destination (Join-Path $gateDir "gate-core.json")
     }
 
     $gateLog = Join-Path $gateDir "gate.log"
@@ -70,7 +82,8 @@ try {
         ("result  : {0}" -f ($(if ($step.ExitCode -eq 0) { "OK" } else { "ERR" }))),
         ("exit    : {0}" -f $step.ExitCode),
         ("validateSummary: {0}" -f (Join-Path $runDir "summary.txt")),
-        ("validateLog    : {0}" -f $validateLog)
+        ("validateLog    : {0}" -f $validateLog),
+        ("gateCoreLatest : {0}" -f $gateCoreLatest)
     )
     Set-Content -LiteralPath $summaryPath -Value ($summary -join "`r`n") -Encoding UTF8
 

@@ -1,0 +1,67 @@
+{
+  "version": 2,
+  "defaults": {
+    "familyId": "other",
+    "familyWeight": 1.0,
+    "severityWeights": { "1": 1.0, "2": 3.0 },
+    "fixDiscount": 0.25,
+    "interdepBoost": 1.5
+  },
+  "families": [
+    {
+      "id": "regex",
+      "title": "Regex / Patterns dangereux",
+      "weight": 5.0,
+      "prefixes": [],
+      "rules": ["no-control-regex"]
+    },
+    {
+      "id": "node-env",
+      "title": "Runtime / Env (node, globals)",
+      "weight": 4.0,
+      "prefixes": [],
+      "rules": ["no-undef"]
+    },
+    {
+      "id": "ts-comments",
+      "title": "Commentaires TS (@ts-ignore / expect-error)",
+      "weight": 3.0,
+      "prefixes": [],
+      "rules": ["@typescript-eslint/ban-ts-comment"]
+    },
+    {
+      "id": "ts-types",
+      "title": "TypeScript / Types",
+      "weight": 2.0,
+      "prefixes": ["@typescript-eslint/"],
+      "rules": ["@typescript-eslint/no-explicit-any"]
+    },
+    {
+      "id": "unused",
+      "title": "Variables / Imports inutilisés",
+      "weight": 1.0,
+      "prefixes": [],
+      "rules": ["@typescript-eslint/no-unused-vars", "no-unused-vars"]
+    },
+    {
+      "id": "console",
+      "title": "Console / Logs",
+      "weight": 1.0,
+      "prefixes": [],
+      "rules": ["no-console"]
+    },
+    {
+      "id": "other",
+      "title": "Autres",
+      "weight": 1.0,
+      "prefixes": [],
+      "rules": []
+    }
+  ],
+  "ruleOverrides": {
+    "react-refresh/only-export-components": {
+      "familyId": "other",
+      "weight": 1.0
+    }
+  }
+}
