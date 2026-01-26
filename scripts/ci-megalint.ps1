@@ -36,9 +36,9 @@ function Write-Log {
     )
     $prefix = "[ci-megalint][$Level]"
     switch ($Level) {
-        "ERR" { Write-Error    "$prefix $Message" }
-        "WARN" { Write-Warning  "$prefix $Message" }
-        default { Write-Output  "$prefix $Message" }
+        "ERR" { Write-Error   "$prefix $Message" }
+        "WARN" { Write-Warning "$prefix $Message" }
+        default { Write-Output "$prefix $Message" }
     }
 }
 
@@ -228,6 +228,21 @@ try {
     else {
         Write-Log WARN "Aucun rapport .sarif/.html/.json trouvé dans $outHostPreset (vérifie reporters + REPORT_OUTPUT_FOLDER)."
     }
+
+    # ===== Phase 4 lite: KPI/SARIF summary (non bloquant) =====
+    $summaryScript = Join-Path $repoRoot "scripts\sarif\summarize-megalinter.ps1"
+    if (Test-Path -LiteralPath $summaryScript) {
+        try {
+            & pwsh -NoProfile -ExecutionPolicy Bypass -File $summaryScript -ReportDir $outHostPreset
+        }
+        catch {
+            Write-Log WARN ("SARIF/KPI summary a échoué (non bloquant): {0}" -f $_.Exception.Message)
+        }
+    }
+    else {
+        Write-Log DBG "summaryScript absent: $summaryScript"
+    }
+    # =========================================================
 
     if ($exit -ne 0) {
         Write-Log WARN "Docker/MegaLinter exit=$exit (Phase 0 attend plutôt 0 sauf crash/config)."

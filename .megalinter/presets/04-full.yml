@@ -1,13 +1,14 @@
 # .megalinter/presets/04-full.yml
 # Full (Phase 0 = report-only) : code + configs + styles
+
 EXTENDS:
   - '.megalinter/presets/_base.yml'
 
 ENABLE_LINTERS:
-  # Code
-  - TYPESCRIPT_ESLINT
+  # Code (clés MegaLinter réellement observées)
+  - TYPESCRIPT_ES
   - TSX_ESLINT
-  - JAVASCRIPT_ESLINT
+  - JAVASCRIPT_ES
 
   # Styles
   - CSS_STYLELINT
@@ -19,6 +20,5 @@ ENABLE_LINTERS:
   - YAML_PRETTIER
   - MARKDOWN_MARKDOWNLINT
 
-# Stylelint: utilise ta config repo si présente (Tailwind-friendly)
 CSS_STYLELINT_CONFIG_FILE: '.stylelintrc.json'
 CSS_STYLELINT_RULES_PATH: 'LINTER_DEFAULT'
