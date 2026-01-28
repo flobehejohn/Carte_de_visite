@@ -2,32 +2,40 @@ name: ci
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  test-build:
+  gate:
+    name: Gate
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: package-lock.json
-
-      # Optionnel mais utile sur Windows (long paths)
-      - name: Enable long paths
+      - name: Enable long paths (Windows)
         shell: pwsh
         run: git config --global core.longpaths true
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
       - name: Install
+        shell: pwsh
         run: npm ci --no-audit --no-fund
 
       - name: Gate
