@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { RitualOrchestrator } from "./RitualOrchestrator.js";
+import { RitualOrchestrator } from "./RitualOrchestrator";
 
 describe("RitualOrchestrator — opacity wiring", () => {
   it("applique targets.opacity vers les multiplicateurs (wire/particles/foreground)", () => {

@@ -11,15 +11,12 @@ param(
     [switch]$NoCleanLatest,
     [switch]$Quiet,
 
-    # Phase 0: dirty policy configurable
     [ValidateSet("auto", "warn", "fail", "off")]
     [string]$DirtyPolicy = "auto",
 
-    # Audits (observabilité)
     [ValidateSet("warn", "fail", "off")]
     [string]$AuditPolicy = "warn",
 
-    # Lint (Phase 0: mesure sans bloquer)
     [ValidateSet("warn", "fail", "off")]
     [string]$LintPolicy = "warn"
 )
@@ -68,6 +65,22 @@ function Write-TextFile([string]$Path, [string[]]$Lines) {
     Set-Content -LiteralPath $Path -Value ($Lines -join "`r`n") -Encoding UTF8
 }
 
+function Copy-FileSafe([string]$Src, [string]$Dst) {
+    if (-not (Test-Path -LiteralPath $Src)) { return }
+    $dstDir = Split-Path -Parent $Dst
+    if ($dstDir) { Ensure-Dir $dstDir }
+
+    try {
+        $srcFull = (Resolve-Path -LiteralPath $Src -ErrorAction Stop).Path
+        $dstFull = $Dst
+        try { $dstFull = (Resolve-Path -LiteralPath $Dst -ErrorAction Stop).Path } catch {}
+        if ($srcFull -eq $dstFull) { return } # évite Copy-Item same-file
+    }
+    catch {}
+
+    Copy-Item -LiteralPath $Src -Destination $Dst -Force
+}
+
 function Try-GetGitBranch([string]$RepoRoot) {
     try {
         Push-Location $RepoRoot
@@ -114,7 +127,6 @@ function Resolve-Policy3([string]$Requested, [string]$EnvVar, [string]$Default =
     $p = $Requested
     if (-not $p -or $p.Trim() -eq "") { $p = $Default }
 
-    # ✅ FIX: lecture env var robuste (évite .Value sur objet inattendu)
     $envPolicy = [Environment]::GetEnvironmentVariable($EnvVar)
     if ($envPolicy -and $envPolicy.Trim() -ne "") { $p = $envPolicy.Trim().ToLowerInvariant() }
 
@@ -176,7 +188,6 @@ function Invoke-PolicyStep {
         return Invoke-Step -State $log -Name $Name -LogPath $LogPath -Quiet:$Quiet -Command $Command
     }
 
-    # warn => tout exit != 0 devient WARN (jamais ERR)
     $warnExit = 1..255
     return Invoke-Step -State $log -Name $Name -WarnExitCodes $warnExit -LogPath $LogPath -Quiet:$Quiet -Command $Command
 }
@@ -204,9 +215,6 @@ try {
     Info $log ("Mode      : {0}" -f $audit.Mode)
     Info $log ("Archive   : {0}" -f ([bool]$audit.Archive))
     Info $log ("Strict    : {0}" -f ([bool]$Strict))
-    Info $log ("DirtyPolicy(resolved): {0}" -f (Resolve-DirtyPolicy -Requested $DirtyPolicy -Branch (Try-GetGitBranch $RepoRoot)))
-    Info $log ("LintPolicy(resolved): {0}" -f $resolvedLintPolicy)
-    Info $log ("AuditPolicy(resolved): {0}" -f $resolvedAuditPolicy)
 
     $validateRoot = Join-Path $runDir "_validate"
     Ensure-Dir $validateRoot
@@ -220,7 +228,6 @@ try {
         runtime       = Join-Path $validateRoot "runtime"
         opacity       = Join-Path $validateRoot "opacity"
         opacity_sinks = Join-Path $validateRoot "opacity_sinks"
-        e2e           = Join-Path $validateRoot "e2e"
     }
     foreach ($d in $dirs.Values) { Ensure-Dir $d }
 
@@ -286,17 +293,13 @@ try {
     # LINT (policy-driven)
     $lintLogPath = Join-Path $dirs.lint "lint.log"
     if ($scripts.ContainsKey("lint")) {
-        $steps += Invoke-PolicyStep -Name "lint" -LogPath $lintLogPath -Policy $resolvedLintPolicy -Command {
-            PM-Run $pm "lint"
-        }
+        $steps += Invoke-PolicyStep -Name "lint" -LogPath $lintLogPath -Policy $resolvedLintPolicy -Command { PM-Run $pm "lint" }
     }
     else {
         $eslintBin = Join-Path $RepoRoot "node_modules\.bin\eslint.cmd"
         $eslintBin2 = Join-Path $RepoRoot "node_modules\.bin\eslint"
         if ((Test-Path -LiteralPath $eslintBin) -or (Test-Path -LiteralPath $eslintBin2)) {
-            $steps += Invoke-PolicyStep -Name "lint" -LogPath $lintLogPath -Policy $resolvedLintPolicy -Command {
-                npx --no-install eslint .
-            }
+            $steps += Invoke-PolicyStep -Name "lint" -LogPath $lintLogPath -Policy $resolvedLintPolicy -Command { npx --no-install eslint . }
         }
         else {
             Write-TextFile $lintLogPath @("[SKIP] No lint script and eslint not detected.")
@@ -313,13 +316,11 @@ try {
     # TESTS
     $junitPath = Join-Path $dirs.tests "junit.xml"
     $steps += Invoke-Step -State $log -Name "tests" -LogPath (Join-Path $dirs.tests "tests.log") -Quiet:$Quiet -Command {
-        npx --no-install vitest run --reporter default --reporter junit --outputFile $junitPath
+        npx --no-install vitest run --config vitest.config.ts --reporter default --reporter junit --outputFile $junitPath
     }
 
     # BUILD
-    $steps += Invoke-Step -State $log -Name "build" -LogPath (Join-Path $dirs.build "build.log") -Quiet:$Quiet -Command {
-        PM-Run $pm "build"
-    }
+    $steps += Invoke-Step -State $log -Name "build" -LogPath (Join-Path $dirs.build "build.log") -Quiet:$Quiet -Command { PM-Run $pm "build" }
 
     # Audits (policy-driven)
     $auditRuntime = Join-Path $ScriptDir "audit-runtime.ps1"
@@ -349,8 +350,10 @@ try {
     $overall = Get-OverallStatus $steps
 
     # gate-core.json
-    $ciLatestDir = Join-Path $RepoRoot "audit\_latest\ci"
+    $latestDir = Join-Path $RepoRoot "audit\_latest"
+    $ciLatestDir = Join-Path $latestDir "ci"
     Ensure-Dir $ciLatestDir
+
     $gateDir = Join-Path $dirs.gate "core"
     Ensure-Dir $gateDir
 
@@ -383,23 +386,8 @@ try {
     }
 
     ($gateCore | ConvertTo-Json -Depth 10) | Set-Content -LiteralPath $gateCorePathLatest -Encoding UTF8
-    ($gateCore | ConvertTo-Json -Depth 10) | Set-Content -LiteralPath $gateCorePathRun -Encoding UTF8
+    ($gateCore | ConvertTo-Json -Depth 10) | Set-Content -LiteralPath $gateCorePathRun    -Encoding UTF8
     Ok $log ("gate-core.json: {0}" -f $gateCorePathLatest)
-
-    # Summary console
-    foreach ($s in $steps) {
-        $sec = [Math]::Round(($s.DurationMs / 1000), 2)
-        $msg = ("{0,-22} {1,6}s exit={2}" -f $s.Name, $sec, $s.ExitCode)
-        if ($s.Status -eq "OK") { Ok $log $msg }
-        elseif ($s.Status -eq "SKIP") { Warn $log ("{0} (SKIP)" -f $msg) }
-        elseif ($s.Status -eq "WARN") { Warn $log $msg }
-        else { Err $log $msg }
-    }
-
-    if ($gateOverall -eq "OK") { Ok $log "RESULT OK (gate)" }
-    elseif ($gateOverall -eq "WARN" -and $Strict) { Warn $log "RESULT WARN (gate, strict=on, exit=1)" }
-    elseif ($gateOverall -eq "WARN") { Warn $log "RESULT WARN (gate)" }
-    else { Err $log "RESULT ERR (gate)" }
 
     # summary files
     $summaryTxt = Join-Path $runDir "summary.txt"
@@ -420,7 +408,7 @@ try {
     Set-Content -LiteralPath $summaryTxt -Value ($summaryLines -join "`r`n") -Encoding UTF8
 
     $payload = [ordered]@{
-        timestamp    = (Get-Date).ToString("o")
+        timestamp    = (Get-Date).ToString("o") # ✅ Option B: string ISO
         runStamp     = $RunStamp
         repoRoot     = $RepoRoot
         outDir       = $OutDirAbs
@@ -437,35 +425,23 @@ try {
         warnCount    = $log.WarnCount
         errCount     = $log.ErrCount
         steps        = $steps
-        logs         = $mainLog
+        logs         = (Join-Path $runDir "validate-full.log")
         gateCore     = $gateCorePathLatest
     }
+
     ($payload | ConvertTo-Json -Depth 10) | Set-Content -LiteralPath $summaryJson -Encoding UTF8
 
-    # ✅ Contract clean: timestamp string ISO-8601 (évite DateTime dans les consommateurs)
-    Write-AuditManifest -Path $audit.Manifest -Payload @{
-        timestamp    = (Get-Date).ToString("o")
-        runStamp     = $RunStamp
-        repoRoot     = $RepoRoot
-        outDir       = $OutDirAbs
-        runDir       = $runDir
-        mode         = $audit.Mode
-        archive      = [bool]$audit.Archive
-        git          = $audit.Git
-        steps        = $steps
-        overall      = $overall
-        gateOverall  = $gateOverall
-        auditOverall = $auditOverall
-        warnCount    = $log.WarnCount
-        errCount     = $log.ErrCount
-    }
+    # ✅ Nice-to-have #2 : uniformiser "latest" summary
+    $latestSummaryRoot = Join-Path $latestDir "summary.json"
+    $latestSummaryCi = Join-Path $ciLatestDir "summary.json"
+    Copy-FileSafe -Src $summaryJson -Dst $latestSummaryRoot
+    Copy-FileSafe -Src $summaryJson -Dst $latestSummaryCi
 
-    # ✅ latest.txt sans newline => lecture fiable en -Raw
-    $latestPath = Join-Path $audit.BaseDir "latest.txt"
+    # ✅ latest.txt (chemin runDir, sans newline)
+    $latestPath = Join-Path $latestDir "latest.txt"
     Set-Content -LiteralPath $latestPath -Value $runDir -Encoding UTF8 -NoNewline
     Ok $log ("latest : {0}" -f $runDir)
 
-    # Exit policy basé sur gateOverall
     if ($gateOverall -eq "OK") { exit 0 }
     if ($gateOverall -eq "WARN" -and -not $Strict) { exit 0 }
     exit 1

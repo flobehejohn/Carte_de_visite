@@ -4,6 +4,10 @@ param(
     [string]$SummaryPath = "",
     [ValidateSet("warn", "fail", "off")]
     [string]$Policy = "warn",
+
+    # ✅ Nice-to-have #1 : DBG opt-in
+    [switch]$DebugContract,
+
     [switch]$Quiet
 )
 
@@ -14,7 +18,14 @@ function Info([string]$m) { if (-not $Quiet) { Write-Host "[INFO] $m" -Foregroun
 function Ok([string]$m) { Write-Host "[OK]  $m" -ForegroundColor Green }
 function Warn([string]$m) { Write-Host "[WARN] $m" -ForegroundColor Yellow }
 function Err([string]$m) { Write-Host "[ERR] $m" -ForegroundColor Red }
-function Dbg([string]$m) { if (-not $Quiet) { Write-Host "[DBG] $m" -ForegroundColor DarkGray } }
+
+# ✅ DBG n'apparait que si -Verbose OU -DebugContract (et jamais si -Quiet)
+function Dbg([string]$m) {
+    if ($Quiet) { return }
+    if ($DebugContract -or $VerbosePreference -eq "Continue") {
+        Write-Host "[DBG] $m" -ForegroundColor DarkGray
+    }
+}
 
 function Resolve-RepoRoot([string]$RepoRoot, [string]$ScriptDir) {
     if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) {
@@ -43,7 +54,7 @@ function Resolve-SummaryPath([string]$root, [string]$explicit) {
     }
 
     $candidates = @(
-        (Join-Path $root "audit\_latest\ci\summary.json"),
+        (Join-Path $root "audit\_latest\ci\summary.json"), # ✅ now exists after Nice-to-have #2
         (Join-Path $root "audit\_latest\summary.json"),
         (Join-Path $root "audit\latest\ci\summary.json"),
         (Join-Path $root "audit\latest\summary.json")
@@ -94,7 +105,6 @@ if (-not $summaryPath) {
 Info ("summary: {0}" -f $summaryPath)
 Dbg ("summaryPath={0}" -f $summaryPath)
 
-
 $issues = New-Object 'System.Collections.Generic.List[object]'
 
 # Parse JSON (⚠️ ConvertFrom-Json peut typer les dates en DateTime selon la version/culture)
@@ -105,12 +115,13 @@ try {
     $rawJson = Get-Content -LiteralPath $summaryPath -Raw -Encoding UTF8
     $summary = $rawJson | ConvertFrom-Json -ErrorAction Stop
 
-    # DBG: timestamp tel qu'il est écrit dans le JSON (string attendue)
+    # ✅ Option B (contrat clean) : on valide la forme dans le JSON brut (timestamp doit être une string)
     $m = [regex]::Match($rawJson, '"timestamp"\s*:\s*"([^"]*)"')
     if ($m.Success) { $timestampJson = $m.Groups[1].Value }
+
     Dbg ("timestamp(json)='{0}'" -f $timestampJson)
 
-    # DBG: timestamp après ConvertFrom-Json (peut être DateTime)
+    # DBG: timestamp après parsing (informative seulement)
     $ts = $null
     $tsType = $null
     try {
@@ -130,8 +141,6 @@ catch {
 # Champs attendus (Phase 0)
 if ($summary) {
 
-    # ✅ Option B (contrat "clean") : on valide le type dans le JSON (timestamp DOIT être une string)
-    # (ConvertFrom-Json peut caster en DateTime => on ne s'appuie pas sur le type PowerShell.)
     if ([string]::IsNullOrWhiteSpace($timestampJson)) {
         Add-Issue $issues "field.timestamp" "timestamp doit être une string JSON non vide (ex: 2026-01-26T23:26:13.0000000+01:00)." "timestamp"
     }
@@ -157,7 +166,6 @@ if ($summary) {
     if (-not (Is-Int $summary.warnCount)) { Add-Issue $issues "field.warnCount" "warnCount doit être int." "warnCount" }
     if (-not (Is-Int $summary.errCount)) { Add-Issue $issues "field.errCount" "errCount doit être int." "errCount" }
 
-    # steps[]
     if ($null -eq $summary.steps) {
         Add-Issue $issues "field.steps" "steps manquant." "steps"
     }
@@ -173,7 +181,6 @@ if ($summary) {
         }
     }
 
-    # gateCore : vérifie présence du fichier si pointeur fourni
     if (Is-String $summary.gateCore) {
         $gateCorePath = $summary.gateCore
         if (-not (Test-Path -LiteralPath $gateCorePath)) {
@@ -190,7 +197,6 @@ if ($summary) {
         }
     }
     else {
-        # Même si summary.gateCore n'est pas là, gate-core.json doit exister dans audit/_latest/ci
         $fallbackGateCore = Join-Path $root "audit\_latest\ci\gate-core.json"
         if (-not (Test-Path -LiteralPath $fallbackGateCore)) {
             Add-Issue $issues "gateCore.latest.missing" "gate-core.json manquant dans audit/_latest/ci." $fallbackGateCore
@@ -198,7 +204,6 @@ if ($summary) {
     }
 }
 
-# Ecrire un rapport contract
 $reportDir = Split-Path -Parent $summaryPath
 $reportPath = Join-Path $reportDir "contract-analytics.json"
 
