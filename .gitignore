@@ -54,3 +54,6 @@ megalinter-reports/
 audit/
 tmp/
 .DS_Store
+# local diagnostics (do not commit)
+final_test.mjs
+test_zara.mjs
