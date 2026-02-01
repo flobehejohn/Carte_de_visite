@@ -1,99 +1,41 @@
-###############################################################################
-# .gitattributes — Repo "CI-first" : normalisation stable & reproductible
-#
-# Principe :
-#  - Tout ce qui est texte => normalisé par Git + eol=lf (cohérent Docker/CI)
-#  - Tout ce qui est binaire => binary (Git ne modifie jamais)
-#
-# Après modification (une seule fois) :
-#   git add --renormalize .
-###############################################################################
-
-# Base : Git détecte texte vs binaire automatiquement
 * text=auto
 
-############################
-# TEXT — forcer LF partout
-############################
-
-# Config / docs
+# Toujours LF (reproductible CI)
 *.yml   text eol=lf
 *.yaml  text eol=lf
-*.json  text eol=lf
+*.ps1   text eol=lf
+*.psm1  text eol=lf
+*.psd1  text eol=lf
+*.sh    text eol=lf
 *.md    text eol=lf
 *.txt   text eol=lf
-*.xml   text eol=lf
-*.csv   text eol=lf
-*.lock  text eol=lf
-*.env   text eol=lf
-*.ini   text eol=lf
-*.toml  text eol=lf
-
-# Web / Front
 *.js    text eol=lf
 *.mjs   text eol=lf
 *.cjs   text eol=lf
 *.ts    text eol=lf
 *.tsx   text eol=lf
-*.jsx   text eol=lf
+*.json  text eol=lf
 *.css   text eol=lf
-*.scss  text eol=lf
-*.sass  text eol=lf
-*.less  text eol=lf
 *.html  text eol=lf
 *.svg   text eol=lf
+*.xml   text eol=lf
+*.csv   text eol=lf
+*.lock  text eol=lf
 
-# Scripts (CI / tooling)
-*.sh    text eol=lf
-*.ps1   text eol=lf
-*.psm1  text eol=lf
-*.psd1  text eol=lf
-
-# GitHub / CI
-*.gitattributes text eol=lf
-*.gitignore     text eol=lf
-
-############################
-# WINDOWS-only scripts (si présents)
-# -> optionnel : garde CRLF uniquement pour cmd/bat si tu en as besoin
-############################
-*.cmd   text eol=crlf
-*.bat   text eol=crlf
-
-############################
-# BINAIRES — ne jamais modifier
-############################
-*.png   binary
-*.jpg   binary
-*.jpeg  binary
-*.webp  binary
-*.gif   binary
-*.ico   binary
-
-*.glb   binary
-*.gltf  binary
-*.wasm  binary
-
-*.mp3   binary
-*.wav   binary
-*.flac  binary
-*.mp4   binary
-*.mov   binary
-*.mkv   binary
-
-*.ttf   binary
-*.otf   binary
-*.woff  binary
+# Binaires (ne jamais toucher)
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.webp binary
+*.gif  binary
+*.glb  binary
+*.gltf binary
+*.wasm binary
+*.mp3  binary
+*.wav  binary
+*.mp4  binary
+*.mov  binary
+*.ttf  binary
+*.otf  binary
+*.woff binary
 *.woff2 binary
-
-*.pdf   binary
-*.zip   binary
-*.7z    binary
-*.gz    binary
-*.tgz   binary
-*.rar   binary
-
-############################
-# Fichiers de build/artefacts fréquents (souvent binaires)
-############################
-*.map   binary

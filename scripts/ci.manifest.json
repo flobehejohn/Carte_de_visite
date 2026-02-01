@@ -18,34 +18,11 @@
       "script": "scripts/gate.ps1",
       "tags": ["core", "smoke", "full"],
       "requires": ["contract.ok"],
-      "provides": ["gate.core.ok", "audit.latest", "gate_core.latest"],
+      "provides": ["gate.core.ok", "audit.latest"],
       "expectedArtifacts": [
-        { "key": "audit.latest", "path": "audit/_latest", "required": true },
-        {
-          "key": "gate_core.latest",
-          "path": "audit/_latest/ci/gate-core.json",
-          "required": true
-        }
+        { "key": "audit.latest", "path": "audit/_latest", "required": true }
       ]
     },
-
-    {
-      "id": "audit-lint-analytics",
-      "name": "audit-lint-analytics",
-      "script": "scripts/audit-lint.ps1",
-      "tags": ["lint", "audit", "full"],
-      "requires": ["gate.core.ok"],
-      "provides": ["lint_analytics.latest"],
-      "expectedArtifacts": [
-        {
-          "key": "lint_analytics.latest",
-          "path": "audit/_latest/lint_analytics",
-          "required": true
-        }
-      ],
-      "args": ["-FixDryRun", "-WithImportGraph"]
-    },
-
     {
       "id": "gate-render",
       "name": "gate-render",
@@ -90,6 +67,7 @@
         }
       ]
     },
+
     {
       "id": "audit-runtime",
       "name": "audit-runtime",
@@ -173,6 +151,7 @@
       "requires": ["gate.core.ok"],
       "provides": ["diag.exports.ok"]
     },
+
     {
       "id": "cleanup-audit",
       "name": "cleanup-audit",

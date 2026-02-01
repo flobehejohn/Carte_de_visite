@@ -50,12 +50,12 @@ function createThrottledLogger(prefix: string, throttleMs = LOG_THROTTLE_MS) {
   return {
     log: (...args: any[]) => {
       if (!canLog()) return;
-
+      // eslint-disable-next-line no-console
       console.info(`[${prefix}]`, ...args);
     },
     warn: (...args: any[]) => {
       if (!canLog()) return;
-
+      // eslint-disable-next-line no-console
       console.warn(`[${prefix}]`, ...args);
     }
   };

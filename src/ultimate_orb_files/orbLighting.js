@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import * as lightChoreo from './lightChoreo';
+import * as lightChoreo from './lightChoreo.js';
 
 /**
  * orbLighting — version "Ultime"
