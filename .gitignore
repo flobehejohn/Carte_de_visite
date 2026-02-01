@@ -2,11 +2,14 @@
 # Dépendances
 ############################
 node_modules/
+.pnpm-store/
 
 ############################
 # Artefacts CI / Audit / Reports
 ############################
 audit/
+audit-*/
+audit-*/**
 megalinter-reports/
 .megalinter-reports/
 sarif/
@@ -39,11 +42,12 @@ yarn-error.log*
 pnpm-debug.log*
 
 ############################
-# Environnement
+# Environnement / Secrets
 ############################
 .env
 .env.*
 !.env.example
+.envrc
 
 ############################
 # OS / IDE
@@ -62,13 +66,10 @@ tsconfig.tsbuildinfo
 ############################
 # D.TS générés / suspects (IMPORTANT)
 ############################
-# On ignore uniquement les d.ts qui "traînent" et sont probablement générés
 vite.config.d.ts
 vitest.config.d.ts
 **/*.generated.d.ts
 **/*.d.ts.map
-
-# (On NE met PAS **/*.d.ts globalement, sinon tu casses src/vite-env.d.ts)
 
 ############################
 # Backups / fichiers temporaires
@@ -79,6 +80,11 @@ vitest.config.d.ts
 *.orig
 *.tmp
 *.swp
+
+# Dumps terminal / exports temporaires (souvent sensibles)
+extrait_terminal_temporaire*.txt
+*_terminal_*.txt
+terminal_*.log
 
 # Backups spécifiques scripts
 scripts/_bak/
