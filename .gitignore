@@ -57,3 +57,9 @@ tmp/
 # local diagnostics (do not commit)
 final_test.mjs
 test_zara.mjs
+# phase1 work kept out of phase0
+api/
+
+# generated / legacy artifacts
+vite.config.d.ts
+vite.config.js
