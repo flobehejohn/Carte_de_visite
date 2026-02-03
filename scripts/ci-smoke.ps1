@@ -58,7 +58,7 @@ function Normalize-Tags([object]$tags) {
 }
 
 function Matches-Filters([pscustomobject]$step) {
-    $tags = @($step.tags | ForEach-Object { [string]$_ } | Where-Object { $_ -ne "" })
+    $tags = @($step.tags)
     $id = [string]$step.id
 
     if ($OnlyIds.Count -gt 0 -and ($OnlyIds -notcontains $id)) { return $false }
@@ -117,7 +117,7 @@ $didRun = $false
 try {
     $scriptRoot = $PSScriptRoot
     $script:root = if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) { (Resolve-Path $RepoRoot).Path }
-    else { (Resolve-Path (Join-Path $scriptRoot "..")).Path }
+                   else { (Resolve-Path (Join-Path $scriptRoot "..")).Path }
 
     Set-Location $script:root
     Info "Repo root: $script:root"
@@ -203,7 +203,7 @@ try {
     if ($ListSteps.IsPresent) {
         Info "Steps sélectionnés:"
         foreach ($st in $selected) {
-            $tagStr = if (@($st.tags).Count -gt 0) { ($st.tags -join ",") } else { "-" }
+            $tagStr = if ($st.tags.Count -gt 0) { ($st.tags -join ",") } else { "-" }
             Write-Host (" - {0}  ({1})  [{2}] kind={3}" -f $st.id, $st.rel, $tagStr, $st.kind)
         }
         exit 0
@@ -238,12 +238,12 @@ try {
             $exists = if ($abs) { Test-Path -LiteralPath $abs } else { $false }
 
             $items.Add([pscustomobject]@{
-                    key      = $key
-                    path     = $pathRel
-                    abs      = $abs
-                    required = [bool]$reqBool
-                    exists   = [bool]$exists
-                }) | Out-Null
+                key      = $key
+                path     = $pathRel
+                abs      = $abs
+                required = [bool]$reqBool
+                exists   = [bool]$exists
+            }) | Out-Null
         }
         return $items
     }
@@ -327,11 +327,11 @@ try {
         }
 
         $script:stepReports.Add([pscustomobject]@{
-                id      = $st.id
-                ok      = [bool]$okStep
-                latest  = $paths.latestRel
-                history = $paths.historyRel
-            }) | Out-Null
+            id      = $st.id
+            ok      = [bool]$okStep
+            latest  = $paths.latestRel
+            history = $paths.historyRel
+        }) | Out-Null
 
         if ($okStep) {
             foreach ($p in @($st.provides)) { [void]$script:capabilities.Add([string]$p) }
@@ -373,7 +373,8 @@ finally {
             $endedAt = Get-Date
             $durMs = Get-DurationMs -Start $runStartedAt -End $endedAt
 
-            # Convertir la List[object] en ARRAY PowerShell (stabilité ConvertTo-Json)
+            # ✅ FIX IMPORTANT : convertir la List[object] en ARRAY PowerShell
+            # (évite ConvertTo-Json qui casse sur certains indexers .NET => "Argument types do not match")
             $stepsForJson = @($script:stepReports | ForEach-Object { $_ })
 
             $total = $stepsForJson.Count
@@ -401,6 +402,7 @@ finally {
             [void](Write-RunReportFiles -CiDirs $script:ciDirs -RunReportObject $runReport)
         }
         catch {
+            # logs plus utiles si ça re-casse
             Warn ("finally: impossible d'écrire ci-report.json: " + $_.Exception.GetType().FullName + " | " + $_.Exception.Message)
             if ($_.InvocationInfo) {
                 Warn ("finally: at " + $_.InvocationInfo.ScriptName + ":" + $_.InvocationInfo.ScriptLineNumber)

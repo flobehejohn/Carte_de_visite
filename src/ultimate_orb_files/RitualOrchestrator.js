@@ -1,11 +1,11 @@
 import * as THREE from 'three';
-import * as orbGeometry from './modules/orbGeometry';
-import * as orbGround from './modules/orbGround';
-import * as orbLighting from './modules/orbLighting';
-import * as orbParticles from './modules/orbParticles';
-import * as orbVolumes from './modules/orbVolumes';
-import * as orbPoly from './modules/orbPoly';
-import * as orbFluidParticles from './modules/orbFluidParticles';
+import * as orbGeometry from './modules/orbGeometry.js';
+import * as orbGround from './modules/orbGround.js';
+import * as orbLighting from './modules/orbLighting.js';
+import * as orbParticles from './modules/orbParticles.js';
+import * as orbVolumes from './modules/orbVolumes.js';
+import * as orbPoly from './modules/orbPoly.js';
+import * as orbFluidParticles from './modules/orbFluidParticles.js';
 
 /**
  * RitualOrchestrator — version "Ultime"

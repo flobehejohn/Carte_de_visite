@@ -1,85 +1,72 @@
-############################
-# Dépendances
-############################
+# deps
 node_modules/
 
-############################
-# Artefacts CI / Audit / Reports
-############################
+# audit / artefacts générés (locaux + CI upload)
 audit/
-megalinter-reports/
-.megalinter-reports/
-sarif/
-reports/
-out/
-tmp/
-temp/
-.cache/
-.eslintcache
 
-############################
-# Builds / Outputs
-############################
+# builds
 dist/
 build/
 coverage/
-.storybook-static/
-.vite/
-.turbo/
-.next/
-.vercel/
 
-############################
-# Logs
-############################
+# logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-############################
-# Environnement
-############################
+# env
 .env
 .env.*
 !.env.example
 
-############################
 # OS / IDE
-############################
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+dist/
 
-############################
-# TypeScript
-############################
 tsconfig.tsbuildinfo
+
+
+tsconfig.tsbuildinfo
+
+
+# local script backups
+scripts/_bak/
+
+# --- Security / temp artifacts ---
+*.patch
+extrait_terminal_temporaire*.txt
+
+# --- Local backups (NEVER COMMIT) ---
+_wip_backup_*/
+*_sanitize_*.git/
+_bak_*/
+*.bak*
 *.tsbuildinfo
 
-############################
-# D.TS générés / suspects (IMPORTANT)
-############################
-# On ignore uniquement les d.ts qui "traînent" et sont probablement générés
+# --- Build outputs ---
+dist/
+megalinter-reports/
+audit/
+tmp/
+.DS_Store
+# local diagnostics (do not commit)
+final_test.mjs
+test_zara.mjs
+# phase1 work kept out of phase0
+api/
+
+# generated / legacy artifacts
 vite.config.d.ts
+vite.config.js
+
+# local cache
+.cache/
+
+# generated vitest artifacts (do not commit)
+vitest.config.js
 vitest.config.d.ts
-**/*.generated.d.ts
-**/*.d.ts.map
-
-# (On NE met PAS **/*.d.ts globalement, sinon tu casses src/vite-env.d.ts)
-
-############################
-# Backups / fichiers temporaires
-############################
-*.bak
-*.bak.*
-*_bak_*
-*.orig
-*.tmp
-*.swp
-
-# Backups spécifiques scripts
-scripts/_bak/
-_bak_config/
