@@ -11,6 +11,10 @@ export type GeminiGenerateResult = {
   raw?: unknown;
 };
 
+type GeminiJsonResponse =
+  | { text?: unknown; output?: unknown; error?: unknown; message?: unknown }
+  | Record<string, unknown>;
+
 export async function geminiGenerate(
   prompt: string,
   opts: GeminiGenerateOptions = {}
@@ -31,20 +35,41 @@ export async function geminiGenerate(
   });
 
   const ct = r.headers.get("content-type") ?? "";
-  const data = ct.includes("application/json") ? await r.json() : await r.text();
+  const isJson = ct.includes("application/json");
 
+  // Lecture du body : JSON si possible, sinon texte brut (utile pour messages d'erreur)
+  const bodyText = isJson ? null : await r.text().catch(() => "");
+  const bodyJson = isJson ? await r.json().catch(() => null) : null;
+
+  // Fail-fast : un 200 avec HTML/text => très souvent un rewrite SPA ou une mauvaise route API.
+  if (r.ok && !isJson) {
+    const hint = bodyText ? ` (extrait: ${String(bodyText).slice(0, 120)})` : "";
+    throw new Error(
+      `Réponse inattendue depuis /api/gemini: content-type="${ct || "inconnu"}" (JSON attendu).${hint}`
+    );
+  }
+
+  // Erreur HTTP : on autorise les erreurs non-JSON (texte) pour afficher un message utile
   if (!r.ok) {
+    const data = (bodyJson ?? bodyText) as unknown;
+
     const msg =
       typeof data === "string"
         ? data
-        : (data?.error ?? data?.message ?? "Erreur API Gemini");
-    throw new Error(msg);
+        : ((data as GeminiJsonResponse | null)?.error ??
+            (data as GeminiJsonResponse | null)?.message ??
+            `Erreur API Gemini (status ${r.status})`);
+
+    throw new Error(String(msg));
   }
 
+  // Succès : JSON garanti ici (cf fail-fast)
+  const data = (bodyJson ?? {}) as GeminiJsonResponse;
+
   const text =
-    typeof data === "string"
-      ? data
-      : (data?.text ?? data?.output ?? JSON.stringify(data));
+    (data?.text as unknown) ??
+    (data?.output as unknown) ??
+    JSON.stringify(data);
 
   return { text: String(text ?? ""), raw: data };
 }
