@@ -63,3 +63,10 @@ api/
 # generated / legacy artifacts
 vite.config.d.ts
 vite.config.js
+
+# local cache
+.cache/
+
+# generated vitest artifacts (do not commit)
+vitest.config.js
+vitest.config.d.ts
