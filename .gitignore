@@ -3,6 +3,8 @@ node_modules/
 
 # audit / artefacts générés (locaux + CI upload)
 audit/
+megalinter-reports/
+tmp/
 
 # builds
 dist/
@@ -20,19 +22,17 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+.env*.local
 
 # OS / IDE
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
-dist/
 
+# TS build info
+*.tsbuildinfo
 tsconfig.tsbuildinfo
-
-
-tsconfig.tsbuildinfo
-
 
 # local script backups
 scripts/_bak/
@@ -46,27 +46,19 @@ _wip_backup_*/
 *_sanitize_*.git/
 _bak_*/
 *.bak*
-*.tsbuildinfo
 
-# --- Build outputs ---
-dist/
-megalinter-reports/
-audit/
-tmp/
-.DS_Store
 # local diagnostics (do not commit)
 final_test.mjs
 test_zara.mjs
-# phase1 work kept out of phase0
-api/
 
 # generated / legacy artifacts
 vite.config.d.ts
 vite.config.js
+vitest.config.js
+vitest.config.d.ts
 
 # local cache
 .cache/
 
-# generated vitest artifacts (do not commit)
-vitest.config.js
-vitest.config.d.ts
+# vercel local files (do not commit)
+.vercel
