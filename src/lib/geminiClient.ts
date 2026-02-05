@@ -1,41 +1,33 @@
 export type GeminiGenerateOptions = {
-  /**
-   * Optionnel : si fourni, le client demande explicitement un modèle.
-   * Sinon, le serveur choisit via process.env.GEMINI_MODEL.
-   *
-   * Recommandation : ne pas le fournir par défaut.
-   */
   model?: string;
   temperature?: number;
   topP?: number;
   maxOutputTokens?: number;
   signal?: AbortSignal;
-
-  /**
-   * Optionnel : si tu as déjà un traceId global côté app.
-   * Sinon, geminiGenerate en génère un automatiquement.
-   */
   traceId?: string;
+
+  // NEW
+  expectJson?: boolean;
 };
 
 export type GeminiGenerateResult = {
   text: string;
   raw?: unknown;
+  json?: unknown;
+  jsonError?: string | null;
 };
 
 type GeminiJsonResponse =
   | {
       text?: unknown;
-      output?: unknown;
+      json?: unknown;
+      jsonError?: unknown;
       error?: unknown;
       message?: unknown;
-      traceId?: unknown;
     }
   | Record<string, unknown>;
 
 function makeTraceId(prefix = 'trc'): string {
-  // Browser-friendly. crypto.randomUUID est dispo sur la plupart des navigateurs modernes.
-  // Fallback simple sinon.
   const g = globalThis as any;
   const uuid = g?.crypto?.randomUUID?.();
   if (typeof uuid === 'string' && uuid.length > 0) return `${prefix}_${uuid}`;
@@ -48,8 +40,6 @@ export async function geminiGenerate(
 ): Promise<GeminiGenerateResult> {
   const traceId = (opts.traceId ?? makeTraceId('dbg')).trim();
 
-  // Payload : on n’envoie "model" QUE si opts.model est fourni.
-  // Le serveur fera foi (process.env.GEMINI_MODEL) sinon.
   const payload: Record<string, unknown> = {
     traceId,
     prompt,
@@ -58,9 +48,9 @@ export async function geminiGenerate(
     maxOutputTokens: opts.maxOutputTokens ?? 600,
   };
 
-  if (opts.model && String(opts.model).trim().length > 0) {
+  if (opts.model && String(opts.model).trim().length > 0)
     payload.model = String(opts.model).trim();
-  }
+  if (opts.expectJson === true) payload.expectJson = true;
 
   const r = await fetch('/api/gemini', {
     method: 'POST',
@@ -72,41 +62,38 @@ export async function geminiGenerate(
   const ct = r.headers.get('content-type') ?? '';
   const isJson = ct.includes('application/json');
 
-  // Lecture du body : JSON si possible, sinon texte brut (utile pour messages d'erreur)
   const bodyText = isJson ? null : await r.text().catch(() => '');
   const bodyJson = isJson ? await r.json().catch(() => null) : null;
 
-  // Fail-fast : un 200 avec HTML/text => très souvent un rewrite SPA ou une mauvaise route API.
   if (r.ok && !isJson) {
     const hint = bodyText
       ? ` (extrait: ${String(bodyText).slice(0, 160)})`
       : '';
     throw new Error(
-      `[${traceId}] Réponse inattendue depuis /api/gemini: content-type="${ct || 'inconnu'}" (JSON attendu).${hint}`,
+      `[${traceId}] Réponse inattendue depuis /api/gemini: content-type="${ct || 'inconnu'}".${hint}`,
     );
   }
 
-  // Erreur HTTP : on autorise les erreurs non-JSON (texte) pour afficher un message utile
   if (!r.ok) {
     const data = (bodyJson ?? bodyText) as unknown;
-
     const msg =
       typeof data === 'string'
         ? data
         : ((data as GeminiJsonResponse | null)?.error ??
           (data as GeminiJsonResponse | null)?.message ??
           `Erreur API Gemini (status ${r.status})`);
-
     throw new Error(`[${traceId}] ${String(msg)}`);
   }
 
-  // Succès : JSON garanti ici (cf fail-fast)
   const data = (bodyJson ?? {}) as GeminiJsonResponse;
 
   const text =
-    (data?.text as unknown) ??
-    (data?.output as unknown) ??
-    JSON.stringify(data);
+    (data?.text as unknown) ?? (data as any)?.output ?? JSON.stringify(data);
 
-  return { text: String(text ?? ''), raw: data };
+  return {
+    text: String(text ?? ''),
+    raw: data,
+    json: (data as any)?.json,
+    jsonError: (data as any)?.jsonError ?? null,
+  };
 }
