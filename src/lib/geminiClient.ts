@@ -1,13 +1,22 @@
+export type GeminiMode = 'raw' | 'oracle' | 'guardian';
+
 export type GeminiGenerateOptions = {
+  mode?: GeminiMode;
+
+  // raw
   model?: string;
   temperature?: number;
   topP?: number;
   maxOutputTokens?: number;
   signal?: AbortSignal;
   traceId?: string;
-
-  // NEW
   expectJson?: boolean;
+
+  // oracle/guardian
+  ritual?: unknown;
+  climateSnapshot?: unknown;
+  step?: string;
+  value?: string;
 };
 
 export type GeminiGenerateResult = {
@@ -15,6 +24,9 @@ export type GeminiGenerateResult = {
   raw?: unknown;
   json?: unknown;
   jsonError?: string | null;
+  traceId: string;
+  model?: string;
+  mode?: GeminiMode;
 };
 
 type GeminiJsonResponse =
@@ -22,6 +34,9 @@ type GeminiJsonResponse =
       text?: unknown;
       json?: unknown;
       jsonError?: unknown;
+      traceId?: unknown;
+      model?: unknown;
+      mode?: unknown;
       error?: unknown;
       message?: unknown;
     }
@@ -38,10 +53,11 @@ export async function geminiGenerate(
   prompt: string,
   opts: GeminiGenerateOptions = {},
 ): Promise<GeminiGenerateResult> {
-  const traceId = (opts.traceId ?? makeTraceId('dbg')).trim();
+  const traceId = (opts.traceId ?? makeTraceId('ui')).trim();
 
   const payload: Record<string, unknown> = {
     traceId,
+    mode: opts.mode ?? 'raw',
     prompt,
     temperature: opts.temperature ?? 0.6,
     topP: opts.topP ?? 0.9,
@@ -51,6 +67,12 @@ export async function geminiGenerate(
   if (opts.model && String(opts.model).trim().length > 0)
     payload.model = String(opts.model).trim();
   if (opts.expectJson === true) payload.expectJson = true;
+
+  if (opts.ritual !== undefined) payload.ritual = opts.ritual;
+  if (opts.climateSnapshot !== undefined)
+    payload.climateSnapshot = opts.climateSnapshot;
+  if (opts.step) payload.step = opts.step;
+  if (opts.value) payload.value = opts.value;
 
   const r = await fetch('/api/gemini', {
     method: 'POST',
@@ -70,7 +92,7 @@ export async function geminiGenerate(
       ? ` (extrait: ${String(bodyText).slice(0, 160)})`
       : '';
     throw new Error(
-      `[${traceId}] Réponse inattendue depuis /api/gemini: content-type="${ct || 'inconnu'}".${hint}`,
+      `[${traceId}] Reponse inattendue /api/gemini: content-type="${ct || 'inconnu'}".${hint}`,
     );
   }
 
@@ -87,13 +109,13 @@ export async function geminiGenerate(
 
   const data = (bodyJson ?? {}) as GeminiJsonResponse;
 
-  const text =
-    (data?.text as unknown) ?? (data as any)?.output ?? JSON.stringify(data);
-
   return {
-    text: String(text ?? ''),
+    text: String((data as any)?.text ?? ''),
     raw: data,
     json: (data as any)?.json,
     jsonError: (data as any)?.jsonError ?? null,
+    traceId: String((data as any)?.traceId ?? traceId),
+    model: (data as any)?.model ? String((data as any)?.model) : undefined,
+    mode: (data as any)?.mode ?? opts.mode ?? 'raw',
   };
 }
