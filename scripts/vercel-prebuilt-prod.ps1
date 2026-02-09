@@ -2,6 +2,9 @@
 param(
     [Parameter(Position = 0)]
     [string]$RepoRoot = "",
+    [string]$LocalConfig = "",
+    [string]$AuditLogPath = "",
+    [string]$Stamp = "",
     [switch]$Yes,
     [switch]$PostDeploySmoke,
     [int]$SmokeTimeoutSec = 60
@@ -9,6 +12,32 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$script:AuditLogPath = ""
+$script:AuditStamp = ""
+
+function Write-Log([string]$Message) {
+    Write-Host $Message
+    if (-not [string]::IsNullOrWhiteSpace($script:AuditLogPath)) {
+        Add-Content -Path $script:AuditLogPath -Value $Message
+    }
+}
+
+function Write-LogLines([string[]]$Lines) {
+    if ($null -eq $Lines) { return }
+    foreach ($line in $Lines) { Write-Log $line }
+}
+
+function Initialize-Audit([string]$RepoRoot, [string]$AuditLogPath, [string]$Stamp) {
+    $auditDir = Join-Path $RepoRoot "audit/_latest"
+    New-Item -ItemType Directory -Force -Path $auditDir | Out-Null
+    if ([string]::IsNullOrWhiteSpace($Stamp)) { $Stamp = (Get-Date -Format "yyyyMMdd_HHmmss") }
+    if ([string]::IsNullOrWhiteSpace($AuditLogPath)) {
+        $AuditLogPath = Join-Path $auditDir ("vercel_prebuilt_prod_{0}.log" -f $Stamp)
+    }
+    $script:AuditLogPath = $AuditLogPath
+    $script:AuditStamp = $Stamp
+    New-Item -ItemType File -Force -Path $script:AuditLogPath | Out-Null
+}
 
 function Ensure-Repo([string]$p) {
     if ([string]::IsNullOrWhiteSpace($p)) { $p = (Get-Location).Path }
@@ -38,11 +67,11 @@ function Ensure-WindowsCmd {
         $env:Path = "$system32;$env:Path"
     }
 
-    Write-Host "[vercel-prebuilt][DBG] SystemRoot=$env:SystemRoot"
-    Write-Host "[vercel-prebuilt][DBG] ComSpec=$env:ComSpec"
-    Write-Host "[vercel-prebuilt][DBG] Path contains System32=$($env:Path -match [regex]::Escape($system32))"
+    Write-Log "[vercel-prebuilt][DBG] SystemRoot=$env:SystemRoot"
+    Write-Log "[vercel-prebuilt][DBG] ComSpec=$env:ComSpec"
+    Write-Log "[vercel-prebuilt][DBG] Path contains System32=$($env:Path -match [regex]::Escape($system32))"
 
-    & $env:ComSpec /c "where cmd && echo CMD_OK" | ForEach-Object { Write-Host "[vercel-prebuilt][DBG] $_" }
+    & $env:ComSpec /c "where cmd && echo CMD_OK" | ForEach-Object { Write-Log "[vercel-prebuilt][DBG] $_" }
 
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
         throw "[vercel-prebuilt] node not found in PATH."
@@ -60,18 +89,37 @@ process.exit(r.status ?? 1);
     }
 }
 
+function Log-VercelEnvOverrides([string]$RepoRoot) {
+    $envFile = Join-Path $RepoRoot ".vercel\.env.production.local"
+    if (-not (Test-Path -LiteralPath $envFile)) {
+        Write-Log "[vercel-prebuilt][ENV] .vercel\\.env.production.local not found"
+        return
+    }
+
+    $keys = Get-Content $envFile | ForEach-Object {
+        if ($_ -match '^(PATH|Path|ComSpec|COMSPEC|SystemRoot|windir)\s*=') { $matches[1] }
+    } | Sort-Object -Unique
+
+    if ($null -eq $keys -or $keys.Count -eq 0) {
+        Write-Log "[vercel-prebuilt][ENV] no PATH/ComSpec/SystemRoot/windir overrides detected"
+        return
+    }
+
+    Write-Log ("[vercel-prebuilt][ENV] overrides detected: " + ($keys -join ", "))
+}
+
 function Invoke-Step {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][scriptblock]$Action
     )
-    Write-Host "[vercel-prebuilt] ==> $Name"
+    Write-Log "[vercel-prebuilt] ==> $Name"
     $global:LASTEXITCODE = 0
     & $Action
     if ($LASTEXITCODE -ne 0) {
         throw "[vercel-prebuilt] Step '$Name' FAILED (exit=$LASTEXITCODE)"
     }
-    Write-Host "[vercel-prebuilt] <== $Name OK"
+    Write-Log "[vercel-prebuilt] <== $Name OK"
 }
 
 # Use vercel if available, else npx vercel
@@ -89,28 +137,39 @@ function Invoke-Vercel {
     )
 
     $cmdLine = ($script:UseNpx ? "npx vercel" : "vercel") + " " + ($VercelArgs -join " ")
-    Write-Host "[vercel-prebuilt][CMD] $cmdLine"
+    Write-Log "[vercel-prebuilt][CMD] $cmdLine"
 
+    $output = @()
     if ($script:UseNpx) {
-        if ($Yes) { & npx --yes vercel @VercelArgs }
-        else { & npx vercel @VercelArgs }
+        if ($Yes) { $output = @(& npx --yes vercel @VercelArgs 2>&1) }
+        else { $output = @(& npx vercel @VercelArgs 2>&1) }
     }
     else {
-        & vercel @VercelArgs
+        $output = @(& vercel @VercelArgs 2>&1)
     }
+    $exit = $LASTEXITCODE
+    Write-LogLines $output
+    $global:LASTEXITCODE = $exit
 }
 
 function Invoke-VercelCapture {
     param([Parameter(Mandatory = $true)][string[]]$VercelArgs)
 
     $cmdLine = ($script:UseNpx ? "npx vercel" : "vercel") + " " + ($VercelArgs -join " ")
-    Write-Host "[vercel-prebuilt][CMD] $cmdLine"
+    Write-Log "[vercel-prebuilt][CMD] $cmdLine"
 
+    $output = @()
     if ($script:UseNpx) {
-        if ($Yes) { return @(& npx --yes vercel @VercelArgs 2>&1 | Tee-Object -Variable _out) }
-        return @(& npx vercel @VercelArgs 2>&1 | Tee-Object -Variable _out)
+        if ($Yes) { $output = @(& npx --yes vercel @VercelArgs 2>&1) }
+        else { $output = @(& npx vercel @VercelArgs 2>&1) }
     }
-    return @(& vercel @VercelArgs 2>&1 | Tee-Object -Variable _out)
+    else {
+        $output = @(& vercel @VercelArgs 2>&1)
+    }
+    $exit = $LASTEXITCODE
+    Write-LogLines $output
+    $global:LASTEXITCODE = $exit
+    return $output
 }
 
 function Extract-DeployUrl([string[]]$Lines) {
@@ -125,10 +184,18 @@ function Extract-DeployUrl([string[]]$Lines) {
 }
 
 $RepoRoot = Ensure-Repo $RepoRoot
-Write-Host "[vercel-prebuilt] RepoRoot: $RepoRoot"
-Write-Host "[vercel-prebuilt][DBG] invoker=$($script:UseNpx ? 'npx vercel' : 'vercel')"
+Initialize-Audit -RepoRoot $RepoRoot -AuditLogPath $AuditLogPath -Stamp $Stamp
+Write-Log "[vercel-prebuilt] RepoRoot: $RepoRoot"
+Write-Log "[vercel-prebuilt] AuditLog: $script:AuditLogPath"
+Write-Log "[vercel-prebuilt][DBG] invoker=$($script:UseNpx ? 'npx vercel' : 'vercel')"
 
 Ensure-WindowsCmd
+Log-VercelEnvOverrides -RepoRoot $RepoRoot
+
+$localConfigArgs = @()
+if (-not [string]::IsNullOrWhiteSpace($LocalConfig)) {
+    $localConfigArgs = @("--local-config", $LocalConfig)
+}
 
 # stop processes that lock (rollup/esbuild)
 Get-Process node, vite, vercel -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -142,46 +209,59 @@ try {
     # reset deps
     $reset = Join-Path $RepoRoot "scripts\reset-deps.ps1"
     Invoke-Step -Name "reset-deps" -Action {
-        & pwsh -NoProfile -ExecutionPolicy Bypass -File $reset -RepoRoot $RepoRoot
+        $out = & pwsh -NoProfile -ExecutionPolicy Bypass -File $reset -RepoRoot $RepoRoot 2>&1
+        $exit = $LASTEXITCODE
+        Write-LogLines @($out)
+        $global:LASTEXITCODE = $exit
     }
 
     # versions
-    Invoke-Step -Name "node-version"  -Action { & node --version }
-    Invoke-Step -Name "npm-version"   -Action { & npm --version }
+    Invoke-Step -Name "node-version"  -Action {
+        $out = & node --version 2>&1
+        $exit = $LASTEXITCODE
+        Write-LogLines @($out)
+        $global:LASTEXITCODE = $exit
+    }
+    Invoke-Step -Name "npm-version"   -Action {
+        $out = & npm --version 2>&1
+        $exit = $LASTEXITCODE
+        Write-LogLines @($out)
+        $global:LASTEXITCODE = $exit
+    }
     Invoke-Step -Name "vercel-version" -Action { Invoke-Vercel @("--version") }
 
     # pull env + settings (production)
     Invoke-Step -Name "vercel-pull-prod-env" -Action {
-        $vArgs = @("pull") + $vercelYes + @("--environment", "production")
+        $vArgs = @("pull") + $vercelYes + @("--environment", "production") + $localConfigArgs
         Invoke-Vercel $vArgs
     }
 
     # build prebuilt prod (LOCAL)
     Invoke-Step -Name "vercel-build-prod" -Action {
-        $vArgs = @("build", "--prod") + $vercelYes
+        $vArgs = @("build", "--prod") + $vercelYes + $localConfigArgs
         Invoke-Vercel $vArgs
     }
 
     # deploy prebuilt prod
     $script:LastDeployLines = @()
     Invoke-Step -Name "vercel-deploy-prebuilt-prod" -Action {
-        $vArgs = @("deploy", "--prebuilt", "--prod") + $vercelYes
+        $vArgs = @("deploy", "--prebuilt", "--prod") + $vercelYes + $localConfigArgs
         $script:LastDeployLines = Invoke-VercelCapture $vArgs
     }
 
     $deployUrl = Extract-DeployUrl $script:LastDeployLines
     if ($PostDeploySmoke) {
         if ([string]::IsNullOrWhiteSpace($deployUrl)) {
-            Write-Host "[vercel-prebuilt][WARN] deploy URL not found => smoke skipped" -ForegroundColor Yellow
+            Write-Log "[vercel-prebuilt][WARN] deploy URL not found => smoke skipped"
         }
         else {
             $smokeApi = Join-Path $RepoRoot "scripts\smoke-api.ps1"
-            Write-Host "[vercel-prebuilt] post-deploy smoke-api => $deployUrl"
+            Write-Log "[vercel-prebuilt] post-deploy smoke-api => $deployUrl"
             & pwsh -NoProfile -ExecutionPolicy Bypass -File $smokeApi -BaseUrl $deployUrl -TimeoutSec $SmokeTimeoutSec -RequireCitations
         }
     }
 
-    Write-Host "[vercel-prebuilt] OK" -ForegroundColor Green
+    Write-Log "[vercel-prebuilt] OK"
 }
 finally {
     Pop-Location
