@@ -65,3 +65,6 @@ vitest.config.d.ts
 .vercel/*.local
 .vercel/project.json
 .vercel/*.json
+
+.vercel
+.env*.local
