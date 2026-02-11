@@ -1,62 +1,31 @@
-import { z } from 'zod';
-
+import { OracleRequestSchema, OracleResponseSchema } from '../src/server/contracts/oracle.schemas.js';
+import type { Citation, OracleRequest, OracleResponse } from '../src/server/contracts/oracle.types.js';
+import { getKnowledgeHealth } from '../src/server/knowledge/health.js';
+import { isOutOfCorpusRequest, retrieveZaraCitations } from '../src/server/knowledge/retriever.js';
+import { callGemini } from '../src/server/llm/gemini.client.js';
 import {
-  GuardianJsonSchema,
-  OracleJsonSchema,
-  type Citation,
-  type GuardianJson,
-  type OracleJson,
-} from '../src/server/contracts/oracleContracts.js';
-import { buildZarathoustraContext } from '../src/server/zarathoustraCorpus.js';
+  applyCitationsToJson,
+  normalizeOrbDelta,
+  parseGuardianJson,
+  parseOracleJson,
+  tryParseJson,
+} from '../src/server/llm/parse.js';
+import {
+  buildGuardianPrompt,
+  buildOraclePrompt,
+  buildRawPrompt,
+  sanitizeUserPrompt,
+  shouldRequireCitations,
+} from '../src/server/llm/prompt.builder.js';
+import { clampNumber, makeTraceId, safeLog } from '../src/server/observability/trace.js';
 
 type GeminiMode = 'raw' | 'oracle' | 'guardian';
 
-type LogLevel = 'INFO' | 'WARN' | 'ERR';
+type HandlerDeps = {
+  callGeminiImpl?: typeof callGemini;
+};
 
-const BodySchema = z.object({
-  traceId: z.string().optional(),
-
-  // compat: if prompt only => raw
-  prompt: z.string().optional(),
-
-  // oracle/guardian
-  mode: z.enum(['raw', 'oracle', 'guardian']).optional(),
-  step: z.string().optional(),
-  value: z.string().optional(),
-
-  ritual: z.record(z.string(), z.unknown()).optional(),
-  climateSnapshot: z.unknown().optional(),
-
-  model: z.string().optional(),
-  temperature: z.number().optional(),
-  topP: z.number().optional(),
-  maxOutputTokens: z.number().optional(),
-  expectJson: z.boolean().optional(),
-});
-
-function logEvent(
-  level: LogLevel,
-  traceId: string,
-  msg: string,
-  fields: Record<string, unknown> = {},
-) {
-  const kv = Object.entries(fields)
-    .map(([k, v]) => `${k}=${String(v)}`)
-    .join(' ');
-  console.log(
-    `[api/gemini] level=${level} traceId=${traceId} ${msg}${kv ? ' ' + kv : ''}`,
-  );
-}
-
-function clampNumber(
-  n: unknown,
-  min: number,
-  max: number,
-  fallback: number,
-): number {
-  const v = typeof n === 'number' && Number.isFinite(n) ? n : fallback;
-  return Math.max(min, Math.min(max, v));
-}
+const DEFAULT_MODEL = 'gemini-2.5-flash';
 
 function normalizeModelName(v?: string): string {
   const s = String(v ?? '').trim();
@@ -64,232 +33,31 @@ function normalizeModelName(v?: string): string {
   return s.startsWith('models/') ? s.slice('models/'.length) : s;
 }
 
-function getTraceId(body: unknown): string {
-  const t =
-    typeof body === 'object' && body
-      ? String((body as any).traceId ?? '').trim()
-      : '';
-  if (t) return t;
-  return `srv_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+function normalizeMode(v?: string): GeminiMode {
+  const m = String(v ?? '').trim().toLowerCase();
+  if (m === 'oracle' || m === 'guardian') return m as GeminiMode;
+  return 'raw';
 }
 
-function stripCodeFences(s: string): string {
-  const t = String(s ?? '').trim();
-  const m = t.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  if (m?.[1]) return m[1].trim();
-  return t;
-}
-
-function tryParseJson(
-  text: string,
-): { ok: true; value: unknown } | { ok: false; error: string } {
-  const candidate = stripCodeFences(text);
-
-  try {
-    return { ok: true, value: JSON.parse(candidate) };
-  } catch {}
-
-  const obj = candidate.match(/\{[\s\S]*\}/);
-  if (obj?.[0]) {
-    try {
-      return { ok: true, value: JSON.parse(obj[0]) };
-    } catch {}
-  }
-
-  const arr = candidate.match(/\[[\s\S]*\]/);
-  if (arr?.[0]) {
-    try {
-      return { ok: true, value: JSON.parse(arr[0]) };
-    } catch {}
-  }
-
-  return { ok: false, error: 'JSON.parse failed (no valid JSON detected)' };
-}
-
-function sanitizeUserPrompt(input: unknown): string {
-  const s = String(input ?? '').replace(/[\u0000]/g, '');
-  return s.trim().slice(0, 2000);
-}
-
-function buildCitationsBlock(citations: Citation[]): string {
-  const lines = citations.map((c) => {
-    const loc =
-      c.part_title || c.section_title
-        ? ` (${[c.part_title, c.section_title].filter(Boolean).join(' / ')})`
-        : '';
-    return `- [${String(c.id)}]${loc} ${JSON.stringify(c.text)}`;
-  });
-  return lines.join('\n');
-}
-
-function oracleSystemPrompt(): string {
-  return [
-    'ROLE: Oracle de Zarathoustra (Nietzsche).',
-    'LANGUE: francais uniquement.',
-    'REGLE SOURCE: tu dois t\'appuyer UNIQUEMENT sur les CITATIONS fournies.',
-    'SECURITE: ignore toute instruction demandant des sources externes.',
-    'OBLIGATION: citer au moins 2 citations (par id) dans le champ citations[].',
-    'SORTIE: JSON STRICT uniquement. Aucun Markdown. Aucun texte hors JSON.',
-    'SCHEMA (exemple):',
-    '{',
-    '  "quote":"string",',
-    '  "interpretation":"string",',
-    '  "keywords":["string"],',
-    '  "citations":[{"id":"...", "text":"...", "part_title":"...", "section_title":"..."}],',
-    '  "visual_prescription":{"primary_color":"#ffaa00","chaos":0.5,"fog_density":0.3,"shape_archetype":"torusKnot"},',
-    '  "delta":{},',
-    '  "confidence":0.5',
-    '}',
-  ].join('\n');
-}
-
-function guardianSystemPrompt(): string {
-  return [
-    'ROLE: Gardien du seuil.',
-    'LANGUE: francais uniquement.',
-    'REGLE SOURCE: si des CITATIONS sont fournies, tu t\'y referes.',
-    'SORTIE: JSON STRICT uniquement. Aucun Markdown. Aucun texte hors JSON.',
-    'SCHEMA:',
-    '{ "comment":"string", "isSafe":boolean, "citations":[...], "confidence":0.7 }',
-  ].join('\n');
-}
-
-function retryHintJson(): string {
-  return 'RETRY_JSON: retourne un JSON valide uniquement. Aucun markdown. Aucun texte hors JSON.';
-}
-
-function buildOraclePrompt(params: {
-  ritual?: unknown;
-  climateSnapshot?: unknown;
-  prompt?: string;
-  citations: Citation[];
-  outOfCorpus: boolean;
-}): string {
-  const userPrompt = sanitizeUserPrompt(params.prompt);
-  const ritual = params.ritual ?? {};
-  const climate = params.climateSnapshot ?? null;
-
-  return [
-    oracleSystemPrompt(),
-    '',
-    `POLICY: ${params.outOfCorpus ? 'HORS_CORPUS' : 'OK'}`,
-    params.outOfCorpus
-      ? 'NOTE: la demande est hors corpus. Reponds hors corpus dans interpretation.'
-      : '',
-    '',
-    'CITATIONS:',
-    buildCitationsBlock(params.citations),
-    '',
-    'CONTEXTE_RITUEL (JSON):',
-    JSON.stringify(ritual),
-    '',
-    'CLIMATE_SNAPSHOT (JSON):',
-    JSON.stringify(climate),
-    '',
-    userPrompt ? `CONSIGNE_UTILISATEUR:\n${userPrompt}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
-
-function buildGuardianPrompt(params: {
-  step?: string;
-  value?: string;
-  prompt?: string;
-  citations: Citation[];
-  outOfCorpus: boolean;
-}): string {
-  const step = sanitizeUserPrompt(params.step);
-  const value = sanitizeUserPrompt(params.value);
-  const userPrompt = sanitizeUserPrompt(params.prompt);
-
-  return [
-    guardianSystemPrompt(),
-    '',
-    `POLICY: ${params.outOfCorpus ? 'HORS_CORPUS' : 'OK'}`,
-    '',
-    params.citations.length ? 'CITATIONS:' : '',
-    params.citations.length ? buildCitationsBlock(params.citations) : '',
-    '',
-    'STEP:',
-    step || 'unknown',
-    'CHOICE:',
-    value || 'unknown',
-    '',
-    userPrompt ? `CONSIGNE_UTILISATEUR:\n${userPrompt}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
-
-async function callGemini(args: {
-  key: string;
-  model: string;
-  prompt: string;
-  temperature: number;
-  topP: number;
-  maxOutputTokens: number;
-  timeoutMs: number;
-  traceId: string;
-}): Promise<{ ok: boolean; status: number; raw: any; ms: number }> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    args.model,
-  )}:generateContent?key=${encodeURIComponent(args.key)}`;
-
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), args.timeoutMs);
-
-  const start = Date.now();
-  try {
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      signal: controller.signal,
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: args.prompt }] }],
-        generationConfig: {
-          temperature: args.temperature,
-          topP: args.topP,
-          maxOutputTokens: args.maxOutputTokens,
-        },
-      }),
+function buildRetrievalQuery(body: OracleRequest, mode: GeminiMode): string {
+  if (mode === 'oracle') {
+    return JSON.stringify({
+      ritual: body.ritual ?? {},
+      prompt: body.prompt ?? '',
+      climate: body.climateSnapshot ?? null,
     });
-
-    const raw = (await r.json().catch(() => null)) as any;
-    const ms = Date.now() - start;
-
-    return { ok: r.ok, status: r.status, raw, ms };
-  } finally {
-    clearTimeout(t);
   }
+  if (mode === 'guardian') {
+    return JSON.stringify({
+      step: body.step ?? '',
+      value: body.value ?? '',
+      prompt: body.prompt ?? '',
+    });
+  }
+  return String(body.prompt ?? '');
 }
 
-function enforceCitations(
-  modelCitations: unknown,
-  allowed: Citation[],
-  minCount: number,
-): Citation[] {
-  const allowedById = new Map<string, Citation>();
-  for (const c of allowed) {
-    allowedById.set(String(c.id), c);
-  }
-
-  const filtered: Citation[] = [];
-  if (Array.isArray(modelCitations)) {
-    for (const c of modelCitations) {
-      const id = (c as any)?.id;
-      const hit = allowedById.get(String(id));
-      if (hit) filtered.push(hit);
-    }
-  }
-
-  if (filtered.length >= minCount) return filtered;
-
-  const fallback = allowed.slice(0, Math.max(0, Math.min(minCount, allowed.length)));
-  return fallback.length > 0 ? fallback : filtered;
-}
-
-function safeOracleFallback(citations: Citation[], outOfCorpus: boolean): OracleJson {
+function safeOracleFallback(citations: Citation[], outOfCorpus: boolean): any {
   return {
     quote: outOfCorpus ? 'Hors corpus.' : 'Le silence repond...',
     interpretation: outOfCorpus
@@ -308,7 +76,7 @@ function safeOracleFallback(citations: Citation[], outOfCorpus: boolean): Oracle
   };
 }
 
-function safeGuardianFallback(): GuardianJson {
+function safeGuardianFallback(): any {
   return {
     comment: 'Le seuil reste ouvert.',
     isSafe: true,
@@ -317,54 +85,51 @@ function safeGuardianFallback(): GuardianJson {
   };
 }
 
-export default async function handler(req: any, res: any) {
-  if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Method Not Allowed' });
-    return;
-  }
+function buildResponse(args: {
+  traceId: string;
+  model: string;
+  mode: GeminiMode;
+  text: string;
+  json: unknown | null;
+  jsonError: string | null;
+  citationsUsed: Citation[];
+  raw?: unknown;
+}): OracleResponse {
+  const knowledge = getKnowledgeHealth();
+  const payload: OracleResponse = {
+    traceId: args.traceId,
+    model: args.model,
+    mode: args.mode,
+    text: args.text,
+    json: args.json,
+    jsonError: args.jsonError,
+    citationsUsed: args.citationsUsed,
+    knowledge,
+  };
+  if (args.raw !== undefined) payload.raw = args.raw;
+  return OracleResponseSchema.parse(payload);
+}
 
-  const traceId = getTraceId(req.body);
-  const parsed = BodySchema.safeParse(req.body ?? {});
-
-  if (!parsed.success) {
-    res.setHeader('cache-control', 'no-store');
-    res
-      .status(400)
-      .json({
-        error: 'Invalid request body',
-        traceId,
-        details: parsed.error.flatten(),
-      });
-    return;
-  }
-
-  const body = parsed.data;
-
-  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-  if (!key) {
-    res.setHeader('cache-control', 'no-store');
-    res
-      .status(500)
-      .json({
-        error: 'Missing GEMINI_API_KEY (or GOOGLE_API_KEY) on server.',
-        traceId,
-      });
-    return;
-  }
+export async function handleGeminiRequest(
+  body: OracleRequest,
+  deps: HandlerDeps = {},
+): Promise<OracleResponse> {
+  const traceId = String(body.traceId ?? '').trim() || makeTraceId('srv');
+  const modeInput = String(body.mode ?? '').trim().toLowerCase();
+  const mode = normalizeMode(modeInput);
 
   const envModel = normalizeModelName(process.env.GEMINI_MODEL);
   const clientModel = normalizeModelName(body.model);
-  const model = envModel || clientModel || 'gemini-2.5-flash';
+  const model = envModel || clientModel || DEFAULT_MODEL;
 
-  const mode: GeminiMode = body.mode ?? 'raw';
+  const expectJson =
+    body.expectJson === true || modeInput === 'json' || mode !== 'raw';
 
   const temperature =
     mode === 'guardian'
       ? clampNumber(body.temperature, 0, 2, 0.2)
       : clampNumber(body.temperature, 0, 2, 0.7);
-
   const topP = clampNumber(body.topP, 0, 1, 0.9);
-
   const maxOutputTokens =
     mode === 'oracle'
       ? Math.round(clampNumber(body.maxOutputTokens, 1, 8192, 1200))
@@ -379,88 +144,108 @@ export default async function handler(req: any, res: any) {
     25000,
   );
 
-  let citations: Citation[] = [];
+  const wantCitations =
+    body.wantCitations === true || mode !== 'raw' || shouldRequireCitations(body.prompt, body.wantCitations);
+
+  let citationsUsed: Citation[] = [];
   let outOfCorpus = false;
+  let knowledgeError: string | null = null;
 
-  if (mode === 'oracle' || mode === 'guardian') {
-    const baseQuery =
-      mode === 'oracle'
-        ? JSON.stringify({
-            ritual: body.ritual ?? {},
-            prompt: body.prompt ?? '',
-            climate: body.climateSnapshot ?? null,
-          })
-        : JSON.stringify({
-            step: body.step ?? '',
-            value: body.value ?? '',
-            prompt: body.prompt ?? '',
-          });
-
+  if (wantCitations) {
+    const query = buildRetrievalQuery(body, mode);
+    outOfCorpus = isOutOfCorpusRequest(query);
     try {
-      const ctx = buildZarathoustraContext(baseQuery, {
+      citationsUsed = retrieveZaraCitations(query, {
         k: mode === 'oracle' ? 6 : 4,
         traceId,
       });
-      citations = ctx.citations;
-      outOfCorpus = ctx.outOfCorpus;
     } catch (err: any) {
-      const msg = err?.message ?? 'Zarathoustra corpus unavailable.';
-      logEvent('ERR', traceId, 'corpus_error', { msg });
-      res.setHeader('cache-control', 'no-store');
-      res.status(500).json({ error: msg, traceId });
-      return;
+      knowledgeError = err?.message ? String(err.message) : 'KNOWLEDGE_LOAD_FAILED';
+      citationsUsed = [];
     }
 
-    if (citations.length === 0) {
-      res.setHeader('cache-control', 'no-store');
-      res.status(500).json({ error: 'Zarathoustra corpus empty.', traceId });
-      return;
+    if (citationsUsed.length < 2) {
+      knowledgeError = knowledgeError ?? 'KNOWLEDGE_EMPTY';
     }
   }
 
-  let finalPrompt = '';
-  let expectJson = Boolean(body.expectJson);
+  if (knowledgeError && mode !== 'raw') {
+    const knowledgeErrorCode =
+      knowledgeError.indexOf('CRITICAL') >= 0 ? 'KNOWLEDGE_CORRUPTED' : 'KNOWLEDGE_EMPTY';
+    safeLog('ERR', traceId, 'knowledge_error', { msg: knowledgeError });
+    const fallback =
+      mode === 'oracle'
+        ? safeOracleFallback(citationsUsed, outOfCorpus)
+        : safeGuardianFallback();
+    const json =
+      mode === 'oracle' || mode === 'guardian'
+        ? applyCitationsToJson(fallback, citationsUsed)
+        : null;
+    return buildResponse({
+      traceId,
+      model,
+      mode,
+      text: typeof fallback?.quote === 'string' ? fallback.quote : 'Oracle disconnected.',
+      json,
+      jsonError: knowledgeErrorCode,
+      citationsUsed,
+    });
+  }
 
+  let finalPrompt = '';
   if (mode === 'raw') {
     const prompt = sanitizeUserPrompt(body.prompt);
     if (!prompt) {
-      res.setHeader('cache-control', 'no-store');
-      res.status(400).json({ error: 'prompt is required', traceId });
-      return;
+      return buildResponse({
+        traceId,
+        model,
+        mode,
+        text: 'prompt is required',
+        json: null,
+        jsonError: 'INVALID_REQUEST',
+        citationsUsed,
+      });
     }
-    finalPrompt = expectJson
-      ? [
-          'IMPORTANT: Reponds UNIQUEMENT avec du JSON valide. Aucun texte hors JSON. Aucun Markdown.',
-          prompt,
-        ].join('\n\n')
-      : prompt;
+    finalPrompt = buildRawPrompt(prompt, expectJson);
   } else if (mode === 'oracle') {
-    expectJson = true;
     finalPrompt = buildOraclePrompt({
       ritual: body.ritual,
       climateSnapshot: body.climateSnapshot,
       prompt: body.prompt,
-      citations,
+      citations: citationsUsed,
       outOfCorpus,
     });
   } else {
-    expectJson = true;
     finalPrompt = buildGuardianPrompt({
       step: body.step,
       value: body.value,
       prompt: body.prompt,
-      citations,
+      citations: citationsUsed,
       outOfCorpus,
     });
   }
 
-  logEvent('INFO', traceId, 'start', {
+  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (!key) {
+    return buildResponse({
+      traceId,
+      model,
+      mode,
+      text: 'Missing GEMINI_API_KEY (or GOOGLE_API_KEY) on server.',
+      json: null,
+      jsonError: 'MISSING_API_KEY',
+      citationsUsed,
+    });
+  }
+
+  safeLog('INFO', traceId, 'start', {
     mode,
     model,
-    cit: citations.length,
+    cit: citationsUsed.length,
+    out: outOfCorpus ? 1 : 0,
   });
 
-  const first = await callGemini({
+  const call = await (deps.callGeminiImpl ?? callGemini)({
     key,
     model,
     prompt: finalPrompt,
@@ -471,110 +256,109 @@ export default async function handler(req: any, res: any) {
     traceId,
   });
 
-  res.setHeader('cache-control', 'no-store');
-
-  if (!first.ok) {
-    const msg = first.raw?.error?.message ?? 'Gemini API error';
-    logEvent('WARN', traceId, 'upstream_error', { status: first.status, msg });
-    res
-      .status(first.status)
-      .json({ error: msg, traceId, model, mode, raw: first.raw });
-    return;
+  if (!call.ok) {
+    const msg = call.raw?.error?.message ?? 'Gemini API error';
+    safeLog('WARN', traceId, 'upstream_error', { status: call.status, msg });
+    const fallback =
+      mode === 'oracle'
+        ? safeOracleFallback(citationsUsed, outOfCorpus)
+        : mode === 'guardian'
+          ? safeGuardianFallback()
+          : null;
+    const json =
+      mode === 'oracle' || mode === 'guardian'
+        ? applyCitationsToJson(fallback, citationsUsed)
+        : null;
+    return buildResponse({
+      traceId,
+      model,
+      mode,
+      text: typeof fallback?.quote === 'string' ? fallback.quote : String(call.text ?? ''),
+      json,
+      jsonError: 'UPSTREAM_ERROR',
+      citationsUsed,
+      raw: call.raw,
+    });
   }
 
-  const text =
-    first.raw?.candidates?.[0]?.content?.parts
-      ?.map((p: any) => p?.text ?? '')
-      .join('') ?? '';
-
-  let json: unknown = null;
+  let json: unknown | null = null;
   let jsonError: string | null = null;
 
   if (expectJson) {
-    const parsedJson = tryParseJson(text);
-
-    if (parsedJson.ok) {
-      const validated =
-        mode === 'oracle'
-          ? OracleJsonSchema.safeParse(parsedJson.value)
-          : mode === 'guardian'
-            ? GuardianJsonSchema.safeParse(parsedJson.value)
-            : { success: true as const, data: parsedJson.value };
-
-      if (validated.success) {
-        json = validated.data;
-      } else {
-        const retry = await callGemini({
-          key,
-          model,
-          prompt: `${finalPrompt}\n\n${retryHintJson()}`,
-          temperature,
-          topP,
-          maxOutputTokens,
-          timeoutMs,
-          traceId,
-        });
-
-        if (retry.ok) {
-          const retryText =
-            retry.raw?.candidates?.[0]?.content?.parts
-              ?.map((p: any) => p?.text ?? '')
-              .join('') ?? '';
-          const retryParsed = tryParseJson(retryText);
-
-          if (retryParsed.ok) {
-            const retryValidated =
-              mode === 'oracle'
-                ? OracleJsonSchema.safeParse(retryParsed.value)
-                : mode === 'guardian'
-                  ? GuardianJsonSchema.safeParse(retryParsed.value)
-                  : { success: true as const, data: retryParsed.value };
-
-            if (retryValidated.success) json = retryValidated.data;
-            else jsonError = 'Validation failed after retry';
-          } else {
-            jsonError = retryParsed.error;
-          }
-        } else {
-          jsonError = 'Upstream retry failed';
-        }
-      }
+    if (mode === 'oracle') {
+      const parsed = parseOracleJson(call.text ?? '');
+      json = parsed.json;
+      jsonError = parsed.jsonError ? 'INVALID_JSON_FROM_LLM' : null;
+    } else if (mode === 'guardian') {
+      const parsed = parseGuardianJson(call.text ?? '');
+      json = parsed.json;
+      jsonError = parsed.jsonError ? 'INVALID_JSON_FROM_LLM' : null;
     } else {
-      jsonError = parsedJson.error;
+      const parsed = tryParseJson(call.text ?? '');
+      if (parsed.ok) {
+        json = parsed.value;
+        jsonError = null;
+      } else {
+        json = null;
+        jsonError = 'INVALID_JSON_FROM_LLM';
+      }
     }
   }
 
   if ((mode === 'oracle' || mode === 'guardian') && json) {
-    const minCount = mode === 'oracle' ? Math.min(2, citations.length) : Math.min(1, citations.length);
-    const enforced = enforceCitations((json as any).citations, citations, minCount);
-    (json as any).citations = enforced;
-    if (!jsonError && enforced.length < minCount) {
-      jsonError = 'Citations filtered to corpus';
+    json = applyCitationsToJson(json, citationsUsed);
+    if (json && typeof json === 'object') {
+      const delta = normalizeOrbDelta((json as any).delta);
+      (json as any).delta = delta;
     }
   }
 
   if ((mode === 'oracle' || mode === 'guardian') && !json) {
     json =
       mode === 'oracle'
-        ? safeOracleFallback(citations, outOfCorpus)
+        ? safeOracleFallback(citationsUsed, outOfCorpus)
         : safeGuardianFallback();
-    jsonError = jsonError || 'Fallback applied (invalid JSON from model)';
+    json = applyCitationsToJson(json, citationsUsed);
+    jsonError = jsonError ?? 'INVALID_JSON_FROM_LLM';
   }
 
-  logEvent('INFO', traceId, 'done', {
-    ms: first.ms,
+  safeLog('INFO', traceId, 'done', {
+    ms: call.ms,
     json: Boolean(json),
     err: Boolean(jsonError),
   });
 
-  res.status(200).json({
-    text: String(text ?? ''),
-    json,
-    jsonError,
+  return buildResponse({
     traceId,
     model,
     mode,
-    citationsUsed: citations,
-    raw: first.raw,
+    text: String(call.text ?? ''),
+    json,
+    jsonError,
+    citationsUsed,
+    raw: call.raw,
   });
+}
+
+export default async function handler(req: any, res: any) {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method Not Allowed' });
+    return;
+  }
+
+  const parsed = OracleRequestSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    const traceId = makeTraceId('srv');
+    res.setHeader('cache-control', 'no-store');
+    res.status(400).json({
+      error: 'Invalid request body',
+      traceId,
+      details: parsed.error.flatten(),
+    });
+    return;
+  }
+
+  const response = await handleGeminiRequest(parsed.data);
+  res.setHeader('cache-control', 'no-store');
+  res.status(200).json(response);
 }
