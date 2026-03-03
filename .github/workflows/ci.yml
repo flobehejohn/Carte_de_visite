@@ -1,44 +1,36 @@
-name: ci
+name: CI
 
 on:
   push:
   pull_request:
-  workflow_dispatch:
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
-  test-build:
+  build:
     runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      CI: 'true'
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Node
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: package-lock.json
+          node-version: 22
+          cache: npm
 
-      # Optionnel mais utile sur Windows (long paths)
-      - name: Enable long paths
+      - name: Gate (Fiesta)
         shell: pwsh
-        run: git config --global core.longpaths true
-
-      - name: Install
-        run: npm ci --no-audit --no-fund
-
-      - name: Gate
-        shell: pwsh
-        run: pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate.ps1
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\ci\fiesta-gate.ps1 -Mode ci
 
       - name: Upload audit artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: audit-${{ github.run_number }}-${{ github.sha }}
-          path: audit/**
+          path: |
+            audit/**
+            audit/fiesta/**
           if-no-files-found: warn
           retention-days: 14

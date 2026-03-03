@@ -27,6 +27,7 @@
     "test:ci": "vitest run"
   },
   "dependencies": {
+    "@google/genai": "^1.43.0",
     "@google/generative-ai": "^0.24.1",
     "@types/three": "^0.182.0",
     "framer-motion": "^11.18.2",
@@ -34,7 +35,8 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "three": "^0.182.0",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
     "@types/node": "^25.2.0",
