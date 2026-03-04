@@ -82,6 +82,42 @@ function sanitizeRitualForPrompt(ritual: RitualInput): Record<string, string> {
   return out;
 }
 
+/**
+ * Unwrap robuste du retour de geminiGenerate()
+ * - soit un envelope /api/gemini: { ok, mode, text, json, ... }
+ * - soit directement un payload
+ * - si json absent mais text est un JSON-string -> on tente extractFirstJsonObject(text)
+ */
+function unwrapGeminiPayload(r: any): {
+  env: any;
+  payload: any;
+  mode: string | null;
+} {
+  const env = r as any;
+  const mode = env?.mode ? String(env.mode) : null;
+
+  // payload privilégié = env.json si présent
+  let payload: any = null;
+  if (env && typeof env === 'object' && 'json' in env) payload = env.json;
+
+  // fallback: si r est déjà un payload
+  if (
+    !payload &&
+    env &&
+    typeof env === 'object' &&
+    (env.comment || env.quote || env.interpretation)
+  ) {
+    payload = env;
+  }
+
+  // fallback: text contenant du JSON
+  if (!payload && typeof env?.text === 'string') {
+    payload = extractFirstJsonObject(env.text);
+  }
+
+  return { env, payload, mode };
+}
+
 function buildVisualParams(raw: any): VisualParams {
   const normalized = normalizeVisualParams(raw || {});
   const visualParams: VisualParams = {
@@ -181,21 +217,34 @@ export async function getStepGuidance(
       maxOutputTokens: 400,
     });
 
-    const data =
-      r.json ??
-      (typeof r.text === 'string' ? extractFirstJsonObject(r.text) : null);
+    const { env, payload, mode } = unwrapGeminiPayload(r);
 
-    if (!data) return { comment: 'Le seuil reste ouvert.', isSafe: true };
+    if (!payload) return { comment: 'Le seuil reste ouvert.', isSafe: true };
 
-    let comment = String((data as any).comment || 'Le seuil reste ouvert.');
-    const isSafe = Boolean((data as any).isSafe ?? true);
-
-    if (guard.shouldRetry(comment)) {
-      // light client-side retry (server already does 1 retry)
-      comment = comment.replace(/[A-Za-z]/g, '');
+    // Déduire un comment robuste selon mode/payload/envelope
+    let comment = '';
+    if (mode === 'guardian') {
+      comment = String(payload?.comment ?? env?.text ?? '');
+    } else if (mode === 'oracle') {
+      comment = String(
+        payload?.interpretation ?? payload?.quote ?? env?.text ?? '',
+      );
+    } else {
+      comment = String(payload?.comment ?? env?.text ?? '');
     }
 
-    return { comment: comment.trim() || 'Le seuil reste ouvert.', isSafe };
+    comment = comment.trim();
+
+    // isSafe: vrai uniquement si le payload guardian l'explicite, sinon défaut "true" (UX)
+    const isSafe = Boolean(payload?.isSafe ?? payload?.is_safe ?? true);
+
+    // IMPORTANT: ne plus “vider” le texte (ancien replace(/[A-Za-z]/g,'') => comment vide)
+    if (guard.shouldRetry(comment)) {
+      // normalisation non-destructive
+      comment = comment.replace(/\s+/g, ' ').trim();
+    }
+
+    return { comment: comment || 'Le seuil reste ouvert.', isSafe };
   } catch (e) {
     logger.warn('Guardian error:', e);
     return { comment: 'Le seuil reste ouvert.', isSafe: true };
@@ -229,13 +278,10 @@ export async function consultOracle(
       maxOutputTokens: 1200,
     });
 
-    const data =
-      r.json ??
-      (typeof r.text === 'string' ? extractFirstJsonObject(r.text) : null);
+    const { payload } = unwrapGeminiPayload(r);
+    if (!payload) return fallbackOracle(ritual);
 
-    if (!data) return fallbackOracle(ritual);
-
-    const result = buildOracleResult(ritual, data);
+    const result = buildOracleResult(ritual, payload);
     const combined = `${result.quote} ${result.interpretation}`;
 
     if (guard.shouldRetry(combined)) return fallbackOracle(ritual);
