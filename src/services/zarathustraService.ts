@@ -84,9 +84,9 @@ function sanitizeRitualForPrompt(ritual: RitualInput): Record<string, string> {
 
 /**
  * Unwrap robuste du retour de geminiGenerate()
- * - soit un envelope /api/gemini: { ok, mode, text, json, ... }
- * - soit directement un payload
- * - si json absent mais text est un JSON-string -> on tente extractFirstJsonObject(text)
+ * - soit envelope /api/gemini: { ok, mode, text, json, ... }
+ * - soit payload direct
+ * - si json absent mais text contient du JSON => extractFirstJsonObject(text)
  */
 function unwrapGeminiPayload(r: any): {
   env: any;
@@ -96,11 +96,11 @@ function unwrapGeminiPayload(r: any): {
   const env = r as any;
   const mode = env?.mode ? String(env.mode) : null;
 
-  // payload privilégié = env.json si présent
   let payload: any = null;
+
   if (env && typeof env === 'object' && 'json' in env) payload = env.json;
 
-  // fallback: si r est déjà un payload
+  // déjà payload ?
   if (
     !payload &&
     env &&
@@ -110,7 +110,7 @@ function unwrapGeminiPayload(r: any): {
     payload = env;
   }
 
-  // fallback: text contenant du JSON
+  // JSON dans text ?
   if (!payload && typeof env?.text === 'string') {
     payload = extractFirstJsonObject(env.text);
   }
@@ -202,26 +202,36 @@ export async function getStepGuidance(
   const guard = new ZaraLangGuard(!!opts?.debug);
 
   try {
+    const stepA = toAscii(step);
+    const valueA = toAscii(value);
+
+    // ✅ IMPORTANT: inclure step + value dans le PROMPT lui-même
+    // pour ne plus dépendre du fait que le serveur réinjecte `value`.
     const prompt = [
-      'Decide si le choix est acceptable dans le rituel.',
-      'Reponds court, utile, sans moraliser.',
-      'Format JSON strict attendu.',
+      'Tu es le Gardien du Seuil.',
+      'Analyse le texte utilisateur et dis si c est acceptable dans le rituel.',
+      'Réponds court, utile, sans moraliser.',
+      'FORMAT JSON STRICT OBLIGATOIRE:',
+      '{"comment": string, "isSafe": boolean, "confidence": number}',
+      '',
+      `ETAPE: ${stepA}`,
+      `TEXTE: ${valueA}`,
     ].join('\n');
 
     const r = await geminiGenerate(prompt, {
       mode: 'guardian',
-      step: toAscii(step),
-      value: toAscii(value),
+      // on garde aussi step/value pour le retriever côté serveur (si utilisé)
+      step: stepA,
+      value: valueA,
       expectJson: true,
       temperature: 0.2,
-      maxOutputTokens: 400,
+      maxOutputTokens: 500,
     });
 
     const { env, payload, mode } = unwrapGeminiPayload(r);
-
     if (!payload) return { comment: 'Le seuil reste ouvert.', isSafe: true };
 
-    // Déduire un comment robuste selon mode/payload/envelope
+    // comment robuste
     let comment = '';
     if (mode === 'guardian') {
       comment = String(payload?.comment ?? env?.text ?? '');
@@ -235,12 +245,11 @@ export async function getStepGuidance(
 
     comment = comment.trim();
 
-    // isSafe: vrai uniquement si le payload guardian l'explicite, sinon défaut "true" (UX)
+    // isSafe: si absent, on garde UX permissif
     const isSafe = Boolean(payload?.isSafe ?? payload?.is_safe ?? true);
 
-    // IMPORTANT: ne plus “vider” le texte (ancien replace(/[A-Za-z]/g,'') => comment vide)
+    // retry NON destructeur
     if (guard.shouldRetry(comment)) {
-      // normalisation non-destructive
       comment = comment.replace(/\s+/g, ' ').trim();
     }
 
