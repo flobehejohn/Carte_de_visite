@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { OracleRequestSchema } from '../contracts/oracle.schemas.js';
 import { handleGeminiRequest } from '../../../api/gemini.js';
+import { OracleRequestSchema } from '../contracts/oracle.schemas.js';
 
 const stubCall = async () => {
   const payload = {
@@ -35,12 +35,15 @@ describe('knowledge layer contract', () => {
     });
 
     const res = await handleGeminiRequest(req, { callGeminiImpl: stubCall });
+    const out = res.response; // ✅ OracleResponse
 
-    expect(res.citationsUsed.length).toBeGreaterThanOrEqual(2);
-    expect(res.citationsUsed.every((c) => c.source === 'zarathoustra')).toBe(true);
-    expect(res.citationsUsed.every((c) => String(c.id).length > 0)).toBe(true);
+    expect(out.citationsUsed.length).toBeGreaterThanOrEqual(2);
+    expect(out.citationsUsed.every((c) => c.source === 'zarathoustra')).toBe(
+      true,
+    );
+    expect(out.citationsUsed.every((c) => String(c.id).length > 0)).toBe(true);
 
-    const json = res.json as any;
+    const json = out.json as any;
     expect(json).toBeTruthy();
     expect(Array.isArray(json.citations)).toBe(true);
     expect(json.citations.length).toBeGreaterThanOrEqual(2);
@@ -58,6 +61,10 @@ describe('knowledge layer contract', () => {
     });
 
     const res = await handleGeminiRequest(req, { callGeminiImpl: stubCall });
-    expect(res.citationsUsed.every((c) => c.source === 'zarathoustra')).toBe(true);
+    const out = res.response;
+
+    expect(out.citationsUsed.every((c) => c.source === 'zarathoustra')).toBe(
+      true,
+    );
   });
 });
