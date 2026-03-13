@@ -1,17 +1,31 @@
-var _a, _b;
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
-var port = Number((_a = process.env.PORT) !== null && _a !== void 0 ? _a : '5173');
-export default defineConfig({
-    plugins: [react()],
-    server: {
-        host: '127.0.0.1',
-        port: port,
-        strictPort: true,
-    },
-    preview: {
-        host: '127.0.0.1',
-        port: Number((_b = process.env.PORT) !== null && _b !== void 0 ? _b : '4173'),
-        strictPort: true,
-    },
+import { defineConfig, loadEnv } from 'vite';
+export default defineConfig(function (_a) {
+    var mode = _a.mode;
+    var env = loadEnv(mode, process.cwd(), '');
+    var port = Number(env.PORT || process.env.PORT || '5173');
+    var previewPort = Number(env.PREVIEW_PORT || process.env.PREVIEW_PORT || '4173');
+    var apiTarget = String(env.VITE_API_PROXY_TARGET ||
+        process.env.VITE_API_PROXY_TARGET ||
+        'http://127.0.0.1:3000').trim();
+    return {
+        plugins: [react()],
+        server: {
+            host: '127.0.0.1',
+            port: port,
+            strictPort: true,
+            proxy: {
+                '/api': {
+                    target: apiTarget,
+                    changeOrigin: true,
+                    secure: false,
+                },
+            },
+        },
+        preview: {
+            host: '127.0.0.1',
+            port: previewPort,
+            strictPort: true,
+        },
+    };
 });

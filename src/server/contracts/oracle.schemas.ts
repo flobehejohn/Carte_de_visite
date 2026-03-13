@@ -1,11 +1,14 @@
 import { z } from 'zod';
 
+export const MAX_CITATIONS = 12 as const;
+
 export const JsonErrorCodeSchema = z.enum([
   'NONE',
   'INVALID_REQUEST',
   'MISSING_API_KEY',
   'UPSTREAM_ERROR',
   'INVALID_JSON_FROM_LLM',
+  'SCHEMA_VALIDATION_FAILED',
   'KNOWLEDGE_EMPTY',
   'KNOWLEDGE_CORRUPTED',
   'INTERNAL_ERROR',
@@ -25,8 +28,7 @@ export const OracleRequestSchema = z
     prompt: z.string().min(1),
     mode: z.string().min(1).optional(),
     wantCitations: z.boolean().optional(),
-    minCitations: z.number().int().nonnegative().optional(),
-
+    minCitations: z.number().int().min(0).max(MAX_CITATIONS).optional(),
     ritual: z
       .object({
         step: z.string().optional(),
@@ -37,7 +39,6 @@ export const OracleRequestSchema = z
     climateSnapshot: z.unknown().optional(),
     step: z.string().optional(),
     value: z.string().optional(),
-
     model: z.string().optional(),
     temperature: z.number().optional(),
     topP: z.number().optional(),
@@ -46,9 +47,6 @@ export const OracleRequestSchema = z
   })
   .passthrough();
 
-/**
- * Citation “wire-safe”
- */
 export const CitationSchema = z
   .object({
     id: z.union([z.string(), z.number()]).optional(),
@@ -66,11 +64,9 @@ export const ModelCitationSchema = z
     text: z.string().optional(),
     score: z.coerce.number().optional(),
     source: z.string().optional(),
-
     title: z.string().optional(),
     section: z.string().optional(),
     url: z.string().optional(),
-
     part_title: z.string().optional(),
     section_title: z.string().optional(),
     tags: z.array(z.string()).optional(),
@@ -86,7 +82,6 @@ export const VisualPrescriptionSchema = z
     chaos: z.number().min(0).max(1).optional(),
     fog_density: z.number().min(0).max(1).optional(),
     shape_archetype: z.string().optional(),
-
     palette_mode: z.string().optional(),
     wire_layers: z.number().int().optional(),
     particle_density: z.number().min(0).max(1).optional(),
@@ -130,12 +125,11 @@ export const OracleResponseSchema = z
     model: z.string().optional().default(''),
     mode: z.enum(['raw', 'oracle', 'guardian']),
     text: z.string(),
-
     json: z.unknown().nullable().default(null),
     jsonError: JsonErrorCodeSchema.nullable().optional().default(null),
-
+    rawJsonError: JsonErrorCodeSchema.nullable().optional(),
+    finalJsonError: JsonErrorCodeSchema.nullable().optional(),
     citationsUsed: z.array(CitationSchema).default([]),
-
     knowledge: z
       .object({
         corpusLoaded: z.boolean(),
@@ -146,14 +140,20 @@ export const OracleResponseSchema = z
       })
       .passthrough()
       .optional(),
-
     raw: z.unknown().optional(),
+    meta: z.unknown().optional(),
+    violations: z
+      .array(
+        z.object({
+          code: z.string().min(1),
+          message: z.string().min(1),
+        }),
+      )
+      .optional(),
+    debug: z.unknown().optional(),
   })
   .passthrough();
 
-/**
- * Wire envelope (HTTP response body)
- */
 export const ApiErrorEnvelopeSchema = z
   .object({
     ok: z.literal(false),

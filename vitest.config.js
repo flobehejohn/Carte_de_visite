@@ -1,9 +1,10 @@
 import { defineConfig } from 'vitest/config';
 export default defineConfig({
     test: {
-        // On teste UNIQUEMENT le code source réel
-        include: ['src/**/*.{test,spec}.{ts,tsx,js,jsx}'],
-        // On exclut tous les artefacts / backups / sorties
+        setupFiles: ['src/test/setup.ts'],
+        include: [
+            'src/**/*.{test,spec}.{ts,tsx,js,jsx}',
+        ],
         exclude: [
             '**/node_modules/**',
             '**/dist/**',
@@ -11,12 +12,16 @@ export default defineConfig({
             '**/coverage/**',
             '**/.git/**',
             '**/audit/**',
+            '**/artifacts/**',
             '**/_bak*/**',
             '**/_bak_*/**',
             '**/_archive*/**',
         ],
         environment: 'node',
-        // optionnel : si tu veux des erreurs plus lisibles
-        // reporters: ["default"],
+        globals: true,
+        passWithNoTests: false,
+        testTimeout: 30000,
+        hookTimeout: 30000,
+        reporters: ['default'],
     },
 });

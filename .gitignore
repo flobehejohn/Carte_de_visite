@@ -88,3 +88,7 @@ megalinter-reports/
 # =========================
 vite.config.d.ts
 vitest.config.d.ts
+.vercel
+.env*.local
+
+.ci-local/

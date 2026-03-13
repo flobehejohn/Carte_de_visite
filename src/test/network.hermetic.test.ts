@@ -7,4 +7,10 @@ describe('test hermeticity', () => {
       /TEST_NETWORK_BLOCKED/,
     );
   });
+
+  it('blocks outbound fetch calls to non-loopback hosts', () => {
+    expect(() => fetch('https://example.com')).toThrow(
+      /TEST_NETWORK_BLOCKED/,
+    );
+  });
 });

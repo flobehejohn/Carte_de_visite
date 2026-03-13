@@ -6,6 +6,15 @@ import {
 } from '../contracts/oracle.schemas.js';
 import type { Citation } from '../contracts/oracle.types.js';
 
+function isJsonRepairAllowed(): boolean {
+  const raw =
+    process.env.GEMINI_ALLOW_JSON_REPAIR ??
+    process.env.GEMINI_JSON_REPAIR ??
+    '';
+  const v = String(raw).trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
 export function stripCodeFences(s: string): string {
   const t = String(s ?? '').trim();
   const m = t.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
@@ -13,11 +22,56 @@ export function stripCodeFences(s: string): string {
   return t;
 }
 
-function tryExtractBracedObject(s: string): string {
-  const i = s.indexOf('{');
-  const j = s.lastIndexOf('}');
-  if (i >= 0 && j > i) return s.slice(i, j + 1);
-  return s;
+/**
+ * Extraction robuste du premier JSON (objet ou array) depuis un texte
+ * - respecte les strings/escapes
+ */
+function extractJsonCandidate(s: string): string | null {
+  const t = String(s ?? '').trim();
+  const iObj = t.indexOf('{');
+  const iArr = t.indexOf('[');
+  const starts = [iObj, iArr].filter((x) => x >= 0);
+  if (!starts.length) return null;
+
+  const start = Math.min(...starts);
+  const open = t[start];
+  const close = open === '{' ? '}' : ']';
+
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+
+  for (let i = start; i < t.length; i++) {
+    const ch = t[i];
+
+    if (inStr) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (ch === '\\') {
+        esc = true;
+        continue;
+      }
+      if (ch === '"') {
+        inStr = false;
+        continue;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inStr = true;
+      continue;
+    }
+
+    if (ch === open) depth++;
+    if (ch === close) depth--;
+
+    if (depth === 0) return t.slice(start, i + 1);
+  }
+
+  return t.slice(start);
 }
 
 function removeTrailingCommas(s: string): string {
@@ -74,26 +128,32 @@ function escapeBadCharsInsideStrings(s: string): string {
 export function tryParseJson(
   text: string,
 ): { ok: true; value: unknown } | { ok: false; error: string } {
-  const candidate0 = stripCodeFences(text);
+  const raw = stripCodeFences(text);
+  const candidate = extractJsonCandidate(raw) ?? raw;
 
+  // 1) parse direct
   try {
-    return { ok: true, value: JSON.parse(candidate0) };
-  } catch {}
+    return { ok: true, value: JSON.parse(candidate) };
+  } catch (e1: any) {
+    if (!isJsonRepairAllowed()) {
+      return {
+        ok: false,
+        error: `JSON.parse failed (repair disabled): ${String(
+          e1?.message ?? e1,
+        )}`,
+      };
+    }
+  }
 
-  const obj = candidate0.match(/\{[\s\S]*\}/);
-  const candidate1 = obj?.[0] ? obj[0] : tryExtractBracedObject(candidate0);
-
+  // 2) repair minimal
+  const repaired = removeTrailingCommas(escapeBadCharsInsideStrings(candidate));
   try {
-    return { ok: true, value: JSON.parse(candidate1) };
-  } catch {}
-
-  const candidate2 = removeTrailingCommas(
-    escapeBadCharsInsideStrings(candidate1),
-  );
-  try {
-    return { ok: true, value: JSON.parse(candidate2) };
-  } catch (e: any) {
-    return { ok: false, error: String(e?.message ?? 'JSON.parse failed') };
+    return { ok: true, value: JSON.parse(repaired) };
+  } catch (e2: any) {
+    return {
+      ok: false,
+      error: `JSON.parse failed after repair: ${String(e2?.message ?? e2)}`,
+    };
   }
 }
 
