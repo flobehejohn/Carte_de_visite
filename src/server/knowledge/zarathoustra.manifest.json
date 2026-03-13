@@ -1,36 +1,36 @@
 {
-  "generatedAt": "2026-02-05T12:19:41.7216005+01:00",
+  "generatedAt": "2026-03-13T16:44:23.3987889+01:00",
   "knowledgeDir": "src/server/knowledge",
   "files": [
     {
       "name": "zarathoustra.sentences.tagged.json",
-      "sha256": "2c93f16c2ef891b21d00e76b826d732d9947d52a974b9a1f7f419bfa4fdab251",
-      "bytes": 3102312
+      "sha256": "4d26a9ed218c384b7ade0cdbcc792915040326cc0f131ce0f7ecd38a562f99ff",
+      "bytes": 3010991
     },
     {
       "name": "zarathoustra.structure.json",
-      "sha256": "c838c9af2a9bca3d6de4d05920c64f68ab8e47506fde3cb5711b9976113ce501",
-      "bytes": 22289
+      "sha256": "a0b77787e5516dc0d36559c56b6f541fcbecbf68ba5191ffc8216b295db6f294",
+      "bytes": 21394
     },
     {
       "name": "zarathoustra.txt",
-      "sha256": "11b787f7dc6e8d4406721c5751dfa2de5c104d031d6276d98d4dab0c6b6045b4",
-      "bytes": 654384
+      "sha256": "e872eb80ceef11dafcfd3f9908268be0c2f6ca044f841f3214babd4d268d2121",
+      "bytes": 646029
     },
     {
       "name": "zarathoustra.clean.txt",
-      "sha256": "8ed50d3ece780b2cb6b87e01d1b0dd8ef65f757eaa0995850acb7d6375147998",
-      "bytes": 642630
+      "sha256": "d6d6d2c289e7d862bf93784c4e2dc60594bd98eeed2a5190a5ebb5fd93089ddb",
+      "bytes": 634840
     },
     {
       "name": "zarathoustra.sentences.json",
-      "sha256": "5a4d387cf9aa16ee9d51d4d81a3fcb01405c4e35dc75cb06326701a71dab154f",
-      "bytes": 1709058
+      "sha256": "5e9e7908bd3465f63b5657853907967d76eb5ef5217b972f9ae58d3fbbe36aec",
+      "bytes": 1666441
     },
     {
       "name": "zarathoustra.sentences.misses.log",
-      "sha256": "aaab20351fe1fa534f48f2658947a245ccf6e6a146f622e2186b24fa97384be9",
-      "bytes": 32185
+      "sha256": "074db65a26094d4fb405eb5c4667b3967ee039d857b5a49dfeba37cd073f2d85",
+      "bytes": 31351
     }
   ]
 }
