@@ -17,8 +17,7 @@ $fileNames = @(
   'zarathoustra.structure.json',
   'zarathoustra.txt',
   'zarathoustra.clean.txt',
-  'zarathoustra.sentences.json',
-  'zarathoustra.sentences.misses.log'
+  'zarathoustra.sentences.json'
 )
 
 $textExtensions = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
