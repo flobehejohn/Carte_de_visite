@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import {
+  GuardianGuidanceSchema,
+  OracleCompositionSchema,
+  OracleHermeneuticV2Schema,
+} from './gemini.contracts.js';
 
 const JsonErrorCodeSchema = z
   .enum(['INVALID_JSON_FROM_LLM', 'SCHEMA_VALIDATION_FAILED'])
@@ -85,6 +90,9 @@ export const GeminiEnvelopeSchema = z
       })
       .passthrough()
       .optional(),
+    guidance: GuardianGuidanceSchema.nullable().optional(),
+    hermeneutic: OracleHermeneuticV2Schema.nullable().optional(),
+    composition: OracleCompositionSchema.nullable().optional(),
     debug: z.unknown().optional(),
   })
   .passthrough()
