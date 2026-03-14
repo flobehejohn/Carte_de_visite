@@ -133,6 +133,24 @@ const stubRawOk = async () => {
   };
 };
 
+const stubStructuredInvalidJson = async () => {
+  return {
+    ok: false,
+    status: 422,
+    text: '{"quote":"Florian, ton nom repond',
+    raw: {
+      structured: false,
+      fallback: false,
+      repairApplied: false,
+      reason: 'INVALID_JSON_FROM_LLM',
+      parseError: 'JSON.parse failed (repair disabled)',
+      rawJsonError: 'INVALID_JSON_FROM_LLM',
+      retryCount: 1,
+    },
+    ms: 5,
+  };
+};
+
 function readStructuredUsed(body: any): boolean {
   return Boolean(
     body?.meta?.structuredUsed ??
@@ -312,5 +330,40 @@ describe('fail-closed strict invariants (handler)', () => {
 
     expect(Array.isArray(res.body.citationsUsed)).toBe(true);
     expect(res.body.citationsUsed.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('returns HTTP 422 when oracle JSON is invalid instead of accepting a synthetic fallback as final state', async () => {
+    process.env.GEMINI_STRUCTURED_OUTPUTS = '1';
+
+    retrieveMock.mockReturnValue([
+      citation('1'),
+      citation('2'),
+      citation('3'),
+      citation('4'),
+      citation('5'),
+      citation('6'),
+    ]);
+
+    const handler = createHandler({
+      callGeminiStructuredImpl: stubStructuredInvalidJson as any,
+      callGeminiImpl: stubRawOk as any,
+    });
+
+    const req = makeOracleReq(2);
+    const res = makeRes();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(422);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error.code).toBe('STRICT_INVARIANT_VIOLATION');
+    expect(res.body.json).toBeNull();
+    expect(readFinalJsonError(res.body)).toBe('INVALID_JSON_FROM_LLM');
+    expect(readStructuredUsed(res.body)).toBe(false);
+
+    const codes = res.body.violations.map((v: any) => v.code);
+    expect(codes).toContain('JSON_EMPTY');
+    expect(codes).toContain('JSON_ERROR');
+    expect(codes).toContain('STRUCTURED_NOT_USED');
   });
 });

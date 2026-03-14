@@ -185,15 +185,6 @@ function buildOracleResult(ritual: RitualInput, data: any): OracleResult {
   };
 }
 
-function fallbackOracle(ritual: RitualInput): OracleResult {
-  return buildOracleResult(ritual, {
-    quote: 'Le silence repond...',
-    interpretation: 'Sans voix, le texte demeure. Recommence le geste.',
-    keywords: ['silence', 'texte', 'seuil'],
-    visual_prescription: SAFE_FALLBACK_VISUAL,
-  });
-}
-
 export async function getStepGuidance(
   step: string,
   value: string,
@@ -211,6 +202,7 @@ export async function getStepGuidance(
       'Tu es le Gardien du Seuil.',
       'Analyse le texte utilisateur et dis si c est acceptable dans le rituel.',
       'Réponds court, utile, sans moraliser.',
+      'Un prenom ou nom isole n est pas un motif de rejet par defaut.',
       'FORMAT JSON STRICT OBLIGATOIRE:',
       '{"comment": string, "isSafe": boolean, "confidence": number}',
       '',
@@ -274,6 +266,7 @@ export async function consultOracle(
       'Tu es Zarathoustra.',
       'Donne une reponse-oracle breve mais vivante.',
       'Tu dois t appuyer sur les citations fournies par le serveur.',
+      'Si l entree est minimale, transforme-la en symbole vivant au lieu de la juger vide.',
       'Format JSON strict attendu.',
     ].join('\n');
 
@@ -288,16 +281,22 @@ export async function consultOracle(
     });
 
     const { payload } = unwrapGeminiPayload(r);
-    if (!payload) return fallbackOracle(ritual);
+    if (!payload) {
+      throw new Error('Oracle payload missing in API response.');
+    }
 
     const result = buildOracleResult(ritual, payload);
     const combined = `${result.quote} ${result.interpretation}`;
 
-    if (guard.shouldRetry(combined)) return fallbackOracle(ritual);
+    if (guard.shouldRetry(combined)) {
+      throw new Error('Oracle output rejected by language guard.');
+    }
 
     return result;
   } catch (error) {
     logger.warn('Oracle error:', error);
-    return fallbackOracle(ritual);
+    throw error instanceof Error
+      ? error
+      : new Error('Oracle invocation failed.');
   }
 }

@@ -171,6 +171,7 @@ const INITIAL_FORM = {
 export default function RitualWizard() {
   const {
     checkStep,
+    error,
     guidanceLoading,
     lastGuidance,
     clearGuidance,
@@ -381,6 +382,20 @@ export default function RitualWizard() {
                   “<Typewriter text={lastResult.quote} />”
                 </div>
               </motion.div>
+            ) : error ? (
+              <motion.div
+                key={`error-top-${stage}`}
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="glass-clear inline-block max-w-xl"
+              >
+                <p className="text-[11px] font-mono uppercase tracking-[0.35em] text-red-200/70 mb-3">
+                  Oracle indisponible
+                </p>
+                <p className="text-lg md:text-xl text-red-100 italic font-oracle leading-relaxed">
+                  {error}
+                </p>
+              </motion.div>
             ) : (
               <motion.div
                 key={`top-${stage}-${viewState}`}
@@ -442,7 +457,31 @@ export default function RitualWizard() {
               </motion.div>
             )}
 
-            {!lastResult && !loading && (
+            {!lastResult && !loading && error && (
+              <motion.div
+                key={`error-bottom-${stage}`}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="w-full flex flex-col items-center gap-4"
+              >
+                <button
+                  type="button"
+                  onClick={handleFinalDraw}
+                  className="mt-2 px-8 py-2 bg-white/10 hover:bg-white hover:text-black border border-white/20 text-white transition-all uppercase text-xs tracking-widest rounded shadow-lg pointer-events-auto"
+                >
+                  Reessayer l invocation
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="px-8 py-2 border border-amber-500/50 text-amber-200 hover:bg-amber-500 hover:text-black uppercase tracking-widest text-xs transition-all pointer-events-auto"
+                >
+                  Recommencer le rituel
+                </button>
+              </motion.div>
+            )}
+
+            {!lastResult && !loading && !error && (
               <motion.div
                 key={`bottom-${stage}-${viewState}`}
                 initial={{ opacity: 0, y: 20 }}

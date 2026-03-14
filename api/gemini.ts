@@ -107,6 +107,24 @@ function normalizeModelName(v?: string): string {
   return s.startsWith('models/') ? s.slice('models/'.length) : s;
 }
 
+function normalizeJsonContractError(code: unknown): string {
+  const s = String(code ?? '').trim();
+  if (!s) return 'INVALID_JSON_FROM_LLM';
+  if (s === 'INVALID_JSON_SCHEMA') return 'SCHEMA_VALIDATION_FAILED';
+  if (JSON_ERROR_ALLOWED.has(s)) return s;
+  return 'INVALID_JSON_FROM_LLM';
+}
+
+function mergeRawMeta(
+  raw: unknown,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...(raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}),
+    ...patch,
+  };
+}
+
 function normalizeMode(v?: string): GeminiMode {
   const m = String(v ?? '')
     .trim()
@@ -918,6 +936,8 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
   }
 
   let json: unknown | null = null;
+  let jsonErrorCode: string | null = null;
+  let responseRaw = (call as any)?.raw ?? null;
 
   if (!call.ok) {
     const rawAny = (call as any).raw ?? null;
@@ -931,36 +951,27 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
       parseStage: rawAny?.parseStage ?? undefined,
     });
 
-    const fallback =
-      mode === 'oracle'
-        ? safeOracleFallback(citationsUsed, outOfCorpus)
-        : mode === 'guardian'
-          ? safeGuardianFallback()
-          : null;
+    const normalizedReason = normalizeJsonContractError(reason);
+    const rawJsonError =
+      rawAny?.rawJsonError != null
+        ? normalizeJsonContractError(rawAny.rawJsonError)
+        : normalizedReason;
 
-    json =
-      mode === 'oracle' || mode === 'guardian'
-        ? applyCitationsToJson(fallback, citationsUsed)
-        : null;
+    responseRaw = mergeRawMeta(rawAny, {
+      rawJsonError: rawJsonError === 'UPSTREAM_ERROR' ? null : rawJsonError,
+    });
+    jsonErrorCode = normalizedReason;
 
     return {
       response: buildResponse({
         traceId,
         model,
         mode,
-        text:
-          typeof (fallback as any)?.quote === 'string'
-            ? (fallback as any).quote
-            : typeof (fallback as any)?.comment === 'string'
-              ? (fallback as any).comment
-              : String((call as any).text ?? ''),
-        json,
-        jsonError:
-          reason === 'UPSTREAM_ERROR'
-            ? 'UPSTREAM_ERROR'
-            : 'INVALID_JSON_FROM_LLM',
+        text: String((call as any).text ?? ''),
+        json: null,
+        jsonError: jsonErrorCode,
         citationsUsed,
-        raw: (call as any).raw,
+        raw: responseRaw,
       }),
       retrieveMs,
       llmMs,
@@ -971,12 +982,19 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
     if (mode === 'oracle') {
       const parsed = parseOracleJson((call as any).text ?? '');
       json = parsed.json;
+      jsonErrorCode = parsed.jsonError
+        ? normalizeJsonContractError(parsed.jsonError)
+        : null;
     } else if (mode === 'guardian') {
       const parsed = parseGuardianJson((call as any).text ?? '');
       json = parsed.json;
+      jsonErrorCode = parsed.jsonError
+        ? normalizeJsonContractError(parsed.jsonError)
+        : null;
     } else {
       const parsed = tryParseJson((call as any).text ?? '');
       json = parsed.ok ? parsed.value : null;
+      jsonErrorCode = parsed.ok ? null : 'INVALID_JSON_FROM_LLM';
     }
   }
 
@@ -989,15 +1007,24 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
   }
 
   if ((mode === 'oracle' || mode === 'guardian') && !json) {
-    json =
-      mode === 'oracle'
-        ? safeOracleFallback(citationsUsed, outOfCorpus)
-        : safeGuardianFallback();
+    const rawMeta = normalizeRawContractMeta((call as any)?.raw);
+    const finalJsonError =
+      jsonErrorCode ?? rawMeta.rawJsonError ?? 'INVALID_JSON_FROM_LLM';
 
-    json = applyCitationsToJson(json, citationsUsed);
+    logEvent('WARN', traceId, 'final_json_missing', {
+      mode,
+      code: finalJsonError,
+      reason: rawMeta.reason ?? undefined,
+      parseError: rawMeta.parseError ?? undefined,
+    });
+
+    responseRaw = mergeRawMeta((call as any)?.raw, {
+      rawJsonError: normalizeJsonContractError(finalJsonError),
+    });
+    jsonErrorCode = normalizeJsonContractError(finalJsonError);
   }
 
-  const raw = (call as any)?.raw ?? null;
+  const raw = responseRaw ?? (call as any)?.raw ?? null;
   const rawMeta = normalizeRawContractMeta(raw);
 
   logEvent('INFO', traceId, 'done', {
@@ -1019,7 +1046,7 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
       mode,
       text: String((call as any).text ?? ''),
       json,
-      jsonError: rawMeta.rawJsonError,
+      jsonError: jsonErrorCode ?? rawMeta.rawJsonError,
       citationsUsed,
       raw,
     }),
