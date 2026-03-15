@@ -48,20 +48,32 @@ const NATIVE_ORACLE_SCHEMA: Schema = {
   type: Type.OBJECT,
   properties: {
     quote: { type: Type.STRING } as any,
-    interpretation: { type: Type.STRING } as any,
+    opening_image: { type: Type.STRING } as any,
+    central_tension: { type: Type.STRING } as any,
+    reversal: { type: Type.STRING } as any,
+    imperative: { type: Type.STRING } as any,
+    return_axis: { type: Type.STRING } as any,
     keywords: {
       type: Type.ARRAY,
       items: { type: Type.STRING } as any,
-      minItems: 1,
-      maxItems: 12,
+      minItems: 4,
+      maxItems: 10,
     } as any,
-    citation_ids: {
+    anchors: {
       type: Type.ARRAY,
-      items: { type: Type.STRING } as any,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          citation_id: { type: Type.STRING } as any,
+          role: { type: Type.STRING } as any,
+          motif: { type: Type.STRING } as any,
+          claim: { type: Type.STRING } as any,
+        },
+        required: ['citation_id', 'role', 'motif', 'claim'],
+      } as any,
       minItems: 2,
-      maxItems: 64,
+      maxItems: 4,
     } as any,
-    delta: { type: Type.OBJECT } as any,
     confidence: { type: Type.NUMBER } as any,
     visual_prescription: {
       type: Type.OBJECT,
@@ -76,9 +88,13 @@ const NATIVE_ORACLE_SCHEMA: Schema = {
   },
   required: [
     'quote',
-    'interpretation',
+    'opening_image',
+    'central_tension',
+    'reversal',
+    'imperative',
+    'return_axis',
     'keywords',
-    'citation_ids',
+    'anchors',
     'confidence',
     'visual_prescription',
   ],
@@ -357,23 +373,31 @@ function strictNormalizeOracle(input: any): any {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
   const o: any = { ...input };
 
-  if (Object.prototype.hasOwnProperty.call(o, 'quote')) {
-    o.quote = String(o.quote ?? '');
-  }
-  if (Object.prototype.hasOwnProperty.call(o, 'interpretation')) {
-    o.interpretation = String(o.interpretation ?? '');
+  for (const field of [
+    'quote',
+    'opening_image',
+    'central_tension',
+    'reversal',
+    'imperative',
+    'return_axis',
+  ]) {
+    if (Object.prototype.hasOwnProperty.call(o, field)) {
+      o[field] = String(o[field] ?? '');
+    }
   }
   if (Array.isArray(o.keywords)) {
     o.keywords = o.keywords
       .map((x: any) => String(x ?? ''))
       .filter(Boolean)
-      .slice(0, 12);
+      .slice(0, 10);
   }
-  if (Array.isArray(o.citation_ids)) {
-    o.citation_ids = o.citation_ids
-      .map((x: any) => String(x ?? ''))
-      .filter(Boolean)
-      .slice(0, 64);
+  if (Array.isArray(o.anchors)) {
+    o.anchors = o.anchors.slice(0, 4).map((anchor: any) => ({
+      citation_id: String(anchor?.citation_id ?? ''),
+      role: String(anchor?.role ?? ''),
+      motif: String(anchor?.motif ?? ''),
+      claim: String(anchor?.claim ?? ''),
+    }));
   }
   if (Object.prototype.hasOwnProperty.call(o, 'confidence')) {
     const n =

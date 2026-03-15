@@ -1,10 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { handleGeminiRequest } from '../../../api/gemini.js';
-import {
-  OracleJsonSchema,
-  OracleRequestSchema,
-} from '../contracts/oracle.schemas.js';
+import { OracleRequestSchema } from '../contracts/oracle.schemas.js';
 import type { Citation } from '../contracts/oracle.types.js';
 import {
   loadZaraSentences,
@@ -19,14 +16,47 @@ type RawImpl = NonNullable<HandlerDeps['callGeminiImpl']>;
 type CitationLike = Citation | Record<string, unknown>;
 
 const PROMPT = 'Rituel: je franchis le seuil et je cite Zarathoustra.';
+const NAME_OR_NICKNAME = 'mapping-proof';
 
-function toStringArray(input: unknown): string[] {
-  if (!Array.isArray(input)) {
-    return [];
-  }
-  return input
-    .map((value) => String(value ?? '').trim())
-    .filter((value) => value.length > 0);
+function buildOracleRetrievalQuery(prompt: string, nameOrNickname: string): string {
+  return JSON.stringify({
+    ritual: { nameOrNickname },
+    prompt,
+    climate: null,
+  });
+}
+
+function makeOracleHermeneuticPayload(citationIds: string[]) {
+  return {
+    quote: 'Test quote',
+    opening_image: 'Une lueur se tient dans la phrase.',
+    central_tension: 'Le passage cherche sa figure juste.',
+    reversal: 'La citation devient axe de transformation.',
+    imperative: 'Tiens le fil du texte sans te raidir.',
+    return_axis: 'Reviens aux images quand le sens se disperse.',
+    keywords: ['lueur', 'passage', 'axe', 'retour'],
+    anchors: [
+      {
+        citation_id: citationIds[0],
+        role: 'anchor',
+        motif: 'lueur',
+        claim: 'Le corpus fixe le premier point d appui.',
+      },
+      {
+        citation_id: citationIds[1],
+        role: 'turn',
+        motif: 'axe',
+        claim: 'La citation oriente le mouvement du rite.',
+      },
+    ],
+    confidence: 0.5,
+    visual_prescription: {
+      primary_color: '#88aaff',
+      chaos: 0.3,
+      fog_density: 0.2,
+      shape_archetype: 'torusKnot',
+    },
+  };
 }
 
 function getStringField(
@@ -105,20 +135,7 @@ function assertCitationMatchesCorpus(
 
 function makeStructuredStub(citationIds: string[]): StructuredImpl {
   return async (args) => {
-    const payload = {
-      quote: 'Test quote',
-      interpretation: 'Test interpretation',
-      keywords: ['test'],
-      citation_ids: citationIds,
-      delta: {},
-      confidence: 0.5,
-      visual_prescription: {
-        primary_color: '#88aaff',
-        chaos: 0.3,
-        fog_density: 0.2,
-        shape_archetype: 'torusKnot',
-      },
-    };
+    const payload = makeOracleHermeneuticPayload(citationIds);
 
     return {
       ok: true,
@@ -185,7 +202,10 @@ describe('citation mapping contract', () => {
     const corpus = loadZaraSentences();
     const corpusById = indexCorpusById(corpus);
 
-    const expected = retrieveZaraCitations(PROMPT, { k: 6 });
+    const expected = retrieveZaraCitations(
+      buildOracleRetrievalQuery(PROMPT, NAME_OR_NICKNAME),
+      { k: 6 },
+    );
     const selectedIds = expected
       .slice(0, 2)
       .map((citation) => getCitationId(citation))
@@ -196,7 +216,7 @@ describe('citation mapping contract', () => {
     const req = OracleRequestSchema.parse({
       mode: 'oracle',
       prompt: PROMPT,
-      ritual: { nameOrNickname: 'mapping-proof' },
+      ritual: { nameOrNickname: NAME_OR_NICKNAME },
       expectJson: true,
       wantCitations: true,
       minCitations: 2,
@@ -214,37 +234,20 @@ describe('citation mapping contract', () => {
       assertCitationMatchesCorpus(citation, corpusById);
     }
 
-    const parsedJson = OracleJsonSchema.parse(response.json) as Record<
-      string,
-      unknown
-    >;
+    expect(response.json).toBeTruthy();
+    expect(response.hermeneutic).toBeTruthy();
 
-    const jsonCitationIds = toStringArray(parsedJson.citation_ids);
-    expect(jsonCitationIds).toEqual(selectedIds);
-
-    const jsonCitations = Array.isArray(parsedJson.citations)
-      ? parsedJson.citations
-      : [];
-
-    expect(jsonCitations.length).toBeGreaterThanOrEqual(selectedIds.length);
+    const anchorIds = response.hermeneutic?.anchors.map((anchor) =>
+      String(anchor.citation_id),
+    );
+    expect(anchorIds).toEqual(selectedIds);
 
     const responseCitationIds = new Set(
       response.citationsUsed.map((citation) => getCitationId(citation)),
     );
 
-    const jsonIds: string[] = [];
-    for (const rawCitation of jsonCitations) {
-      const citation = rawCitation as CitationLike;
-      assertCitationMatchesCorpus(citation, corpusById);
-
-      const id = getCitationId(citation);
-      jsonIds.push(id);
-      expect(responseCitationIds.has(id)).toBe(true);
-    }
-
-    expect(jsonIds.slice(0, selectedIds.length)).toEqual(selectedIds);
     for (const id of selectedIds) {
-      expect(jsonIds.includes(id)).toBe(true);
+      expect(responseCitationIds.has(id)).toBe(true);
     }
   });
 });

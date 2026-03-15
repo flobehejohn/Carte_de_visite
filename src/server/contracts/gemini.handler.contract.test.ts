@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHandler } from '../../../api/gemini.js';
 import { MAX_CITATIONS } from './oracle.schemas.js';
+import { retrieveZaraCitations } from '../knowledge/retriever.js';
 
 function makeRes() {
   const res: any = {
@@ -49,6 +50,60 @@ const stubRawOk = async () => {
     text: JSON.stringify(payload),
     raw: { structured: false },
     ms: 5,
+  };
+};
+
+const makeStructuredOracleHermeneuticOk = (citationIds: string[]) => {
+  return async (args: any) => {
+    const payload = {
+      quote: 'Florian avance comme une flamme sobre dans le vent.',
+      opening_image: 'Une flamme mince se tient au bord du seuil.',
+      central_tension: 'Le nom cherche une forme plus haute que lui-meme.',
+      reversal: 'Ce qui semblait simple devient un appel a se depasser.',
+      imperative: 'Porte ce nom comme une discipline de legerete.',
+      return_axis: 'Reviens a la flamme quand le poids revient.',
+      keywords: ['flamme', 'seuil', 'retour', 'legerete'],
+      anchors: [
+        {
+          citation_id: citationIds[0],
+          role: 'anchor',
+          motif: 'flamme dansante',
+          claim: 'Le nom prend figure de legerete active.',
+        },
+        {
+          citation_id: citationIds[1],
+          role: 'turn',
+          motif: 'depassement',
+          claim: 'Le rite transforme le nom en passage.',
+        },
+      ],
+      visual_prescription: {
+        primary_color: '#ffd700',
+      chaos: 0.32,
+      fog_density: 0.14,
+      shape_archetype: 'spiral',
+    },
+    confidence: 0.88,
+  };
+
+    return {
+      ok: true,
+      status: 200,
+      text: JSON.stringify(payload),
+      jsonCandidate: payload,
+      raw: {
+        traceId: args.traceId,
+        model: args.model,
+        structured: true,
+        fallback: false,
+        repairApplied: false,
+        reason: 'NATIVE_OK',
+        parseError: null,
+        rawJsonError: null,
+        retryCount: 0,
+      },
+      ms: 5,
+    };
   };
 };
 
@@ -175,6 +230,53 @@ describe('api/gemini handler contract', () => {
     expect(Array.isArray(res.body.citationsUsed)).toBe(true);
     expect(res.body.citationsUsed.length).toBeGreaterThanOrEqual(2);
     expect(res.body.jsonError).toBe(null);
+  });
+
+  it('A3bis: oracle structured success returns hermeneutic while keeping json/raw/meta/debug', async () => {
+    process.env.GEMINI_STRUCTURED_OUTPUTS = '1';
+
+    const prompt = 'Rituel: test oracle structure';
+    const oracleQuery = JSON.stringify({
+      ritual: { nameOrNickname: 'test' },
+      prompt,
+      climate: null,
+    });
+    const citationIds = retrieveZaraCitations(oracleQuery, { k: 6 })
+      .slice(0, 2)
+      .map((citation) => String(citation.id));
+
+    const handler = createHandler({
+      callGeminiStructuredImpl: makeStructuredOracleHermeneuticOk(
+        citationIds,
+      ) as any,
+      callGeminiImpl: stubRawOk as any,
+    });
+
+    const req: any = {
+      method: 'POST',
+      headers: {},
+      body: {
+        mode: 'oracle',
+        prompt,
+        expectJson: true,
+        wantCitations: true,
+        minCitations: 2,
+        ritual: { nameOrNickname: 'test' },
+      },
+    };
+
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.mode).toBe('oracle');
+    expect(res.body.hermeneutic?.quote).toContain('flamme');
+    expect(Array.isArray(res.body.hermeneutic?.anchors)).toBe(true);
+    expect(res.body.json).toBeTruthy();
+    expect(res.body.raw).toBeTruthy();
+    expect(res.body.meta).toBeTruthy();
+    expect(res.body.debug).toBeTruthy();
   });
 
   it('A4: guardian success returns deterministic guidance while keeping json.comment', async () => {

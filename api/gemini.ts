@@ -17,6 +17,7 @@ import type {
   StrictViolation,
 } from '../src/server/gemini/contract-types.js';
 import { evaluateStrictInvariants } from '../src/server/gemini/evaluate-strict-invariants.js';
+import { validateOracleHermeneuticAnchors } from '../src/server/gemini/oracle-hermeneutic.js';
 import {
   normalizeFinalState,
   normalizeRawContractMeta,
@@ -48,7 +49,10 @@ import {
   safeLog,
 } from '../src/server/observability/trace.js';
 import { composeGuardianGuidanceFromPayload } from '../src/shared/guardian/composeGuidance.js';
-import { GeminiEnvelopeSchema } from '../src/shared/contracts/gemini.response.contracts.js';
+import {
+  GeminiEnvelopeSchema,
+} from '../src/shared/contracts/gemini.response.contracts.js';
+import { OracleHermeneuticV2Schema } from '../src/shared/contracts/gemini.contracts.js';
 
 type HandlerDeps = {
   callGeminiImpl?: typeof callGemini;
@@ -155,6 +159,11 @@ function buildGuardianApiGuidance(
       tone: finalJson.tone,
     },
   );
+}
+
+function hasStructuredOracleHermeneutic(response: unknown): boolean {
+  if (!isRecord(response)) return false;
+  return isRecord(response.hermeneutic);
 }
 
 function buildRetrievalQuery(body: OracleRequest, mode: GeminiMode): string {
@@ -271,6 +280,7 @@ function buildResponse(args: {
   mode: GeminiMode;
   text: string;
   json: unknown | null;
+  hermeneutic?: OracleResponse['hermeneutic'];
   jsonError: string | null;
   citationsUsed: Citation[];
   raw?: unknown;
@@ -282,6 +292,7 @@ function buildResponse(args: {
     mode: args.mode,
     text: args.text,
     json: args.json,
+    hermeneutic: args.hermeneutic,
     jsonError: toJsonError(args.jsonError),
     citationsUsed: args.citationsUsed,
     knowledge,
@@ -960,6 +971,7 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
   }
 
   let json: unknown | null = null;
+  let hermeneutic: OracleResponse['hermeneutic'] = null;
   let jsonErrorCode: string | null = null;
   let responseRaw = (call as any)?.raw ?? null;
 
@@ -1004,11 +1016,55 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
 
   if (expectJson) {
     if (mode === 'oracle') {
-      const parsed = parseOracleJson((call as any).text ?? '');
-      json = parsed.json;
-      jsonErrorCode = parsed.jsonError
-        ? normalizeJsonContractError(parsed.jsonError)
-        : null;
+      const structuredCandidate = (call as any)?.jsonCandidate;
+
+      if (structuredWanted && isRecord(structuredCandidate)) {
+        json = structuredCandidate;
+
+        const parsedHermeneutic =
+          OracleHermeneuticV2Schema.safeParse(structuredCandidate);
+
+        if (!parsedHermeneutic.success) {
+          hermeneutic = null;
+          jsonErrorCode = 'SCHEMA_VALIDATION_FAILED';
+          responseRaw = mergeRawMeta((call as any)?.raw, {
+            rawJsonError: 'SCHEMA_VALIDATION_FAILED',
+            reason: 'SCHEMA_VALIDATION_FAILED',
+            issues: parsedHermeneutic.error.flatten(),
+          });
+        } else {
+          const anchorValidation = validateOracleHermeneuticAnchors(
+            parsedHermeneutic.data,
+            citationsUsed,
+          );
+
+          if (!anchorValidation.ok) {
+            hermeneutic = null;
+            jsonErrorCode = 'SCHEMA_VALIDATION_FAILED';
+            responseRaw = mergeRawMeta((call as any)?.raw, {
+              rawJsonError: 'SCHEMA_VALIDATION_FAILED',
+              reason: 'ORACLE_ANCHOR_CITATION_MISSING',
+              error: anchorValidation.error,
+              missingCitationIds: anchorValidation.missingCitationIds,
+              missingRoles: anchorValidation.missingRoles,
+            });
+
+            logEvent('WARN', traceId, 'oracle_anchor_validation_failed', {
+              missingCitationIds: anchorValidation.missingCitationIds,
+              missingRoles: anchorValidation.missingRoles,
+            });
+          } else {
+            hermeneutic = parsedHermeneutic.data;
+            jsonErrorCode = null;
+          }
+        }
+      } else {
+        const parsed = parseOracleJson((call as any).text ?? '');
+        json = parsed.json;
+        jsonErrorCode = parsed.jsonError
+          ? normalizeJsonContractError(parsed.jsonError)
+          : null;
+      }
     } else if (mode === 'guardian') {
       const parsed = parseGuardianJson((call as any).text ?? '');
       json = parsed.json;
@@ -1022,13 +1078,22 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
     }
   }
 
-  if ((mode === 'oracle' || mode === 'guardian') && json) {
+  if (mode === 'guardian' && json) {
+    json = applyCitationsToJson(json, citationsUsed);
+    if (json && typeof json === 'object') {
+      const delta = normalizeOrbDelta((json as any).delta);
+      (json as any).delta = delta;
+    }
+  } else if (mode === 'oracle' && json && hermeneutic == null) {
     json = applyCitationsToJson(json, citationsUsed);
     if (json && typeof json === 'object') {
       const delta = normalizeOrbDelta((json as any).delta);
       (json as any).delta = delta;
     }
   }
+
+  const finalOracleStructuredMissing =
+    mode === 'oracle' && structuredWanted && hermeneutic == null;
 
   if ((mode === 'oracle' || mode === 'guardian') && !json) {
     const rawMeta = normalizeRawContractMeta((call as any)?.raw);
@@ -1043,6 +1108,17 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
     });
 
     responseRaw = mergeRawMeta((call as any)?.raw, {
+      rawJsonError: normalizeJsonContractError(finalJsonError),
+    });
+    jsonErrorCode = normalizeJsonContractError(finalJsonError);
+  }
+
+  if (finalOracleStructuredMissing) {
+    const rawMeta = normalizeRawContractMeta(responseRaw ?? (call as any)?.raw);
+    const finalJsonError =
+      jsonErrorCode ?? rawMeta.rawJsonError ?? 'SCHEMA_VALIDATION_FAILED';
+
+    responseRaw = mergeRawMeta(responseRaw ?? (call as any)?.raw, {
       rawJsonError: normalizeJsonContractError(finalJsonError),
     });
     jsonErrorCode = normalizeJsonContractError(finalJsonError);
@@ -1070,6 +1146,7 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
       mode,
       text: String((call as any).text ?? ''),
       json,
+      hermeneutic,
       jsonError: jsonErrorCode ?? rawMeta.rawJsonError,
       citationsUsed,
       raw,
@@ -1158,7 +1235,15 @@ export function createHandler(deps: HandlerDeps = {}) {
 
       const reqMode = normalizeMode(String((body as any).mode ?? ''));
       const minCitations = getMinCitationsEffective(body, reqMode);
-      const finalSchema = pickFinalJsonSchema(reqMode);
+      const structuredOracleHermeneutic =
+        reqMode === 'oracle' && hasStructuredOracleHermeneutic(baseResponse);
+      const finalSchema = structuredOracleHermeneutic
+        ? OracleHermeneuticV2Schema
+        : pickFinalJsonSchema(reqMode);
+      const finalCandidate =
+        structuredOracleHermeneutic
+          ? baseResponse?.hermeneutic ?? null
+          : baseResponse?.json ?? null;
 
       const finalState =
         reqMode === 'raw' || !finalSchema
@@ -1177,7 +1262,7 @@ export function createHandler(deps: HandlerDeps = {}) {
           : normalizeFinalState({
               mode: reqMode,
               schema: finalSchema as any,
-              finalJsonCandidate: baseResponse?.json ?? null,
+              finalJsonCandidate: finalCandidate,
               raw: baseResponse?.raw,
               citationsUsed: Array.isArray(baseResponse?.citationsUsed)
                 ? baseResponse.citationsUsed
@@ -1203,6 +1288,14 @@ export function createHandler(deps: HandlerDeps = {}) {
         reqMode === 'guardian'
           ? buildGuardianApiGuidance(body, finalState.finalJson)
           : null;
+      const hermeneutic =
+        structuredOracleHermeneutic && reqMode === 'oracle'
+          ? finalState.finalJson
+          : null;
+      const jsonPayload =
+        structuredOracleHermeneutic && reqMode === 'oracle'
+          ? baseResponse?.json ?? null
+          : finalState.finalJson;
 
       const payload = {
         ok: violations.length === 0,
@@ -1210,7 +1303,8 @@ export function createHandler(deps: HandlerDeps = {}) {
         model: baseResponse?.model ?? '',
         mode: reqMode,
         text: String(baseResponse?.text ?? ''),
-        json: finalState.finalJson,
+        json: jsonPayload,
+        hermeneutic,
         jsonError: finalState.finalJsonError,
         rawJsonError: finalState.raw.rawJsonError,
         finalJsonError: finalState.finalJsonError,
