@@ -44,6 +44,27 @@ export interface OracleResult {
   interpretation: string;
   keywords: string[];
   ritual: RitualInput;
+  hermeneutic?: {
+    quote?: string;
+    keywords?: string[];
+    anchors?: Array<{
+      citation_id: string;
+      role: 'anchor' | 'tension' | 'turn';
+      motif: string;
+      claim: string;
+    }>;
+  } | null;
+  composition?: {
+    prose: string;
+    motifs?: Array<{
+      citation_id: string;
+      role: 'anchor' | 'tension' | 'turn';
+      motif: string;
+      claim: string;
+      part_title?: string;
+      section_title?: string;
+    }>;
+  } | null;
 
   tone: { sentiment: number; intensity: number; mysticism?: number };
   themeScores?: any[];

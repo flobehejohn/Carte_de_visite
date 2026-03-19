@@ -13,7 +13,12 @@ export type StrictViolationCode =
   | 'CORPUS_NOT_LOADED'
   | 'CITATIONS_TOO_LOW'
   | 'SOURCE_LEAK'
-  | 'CITATION_ID_EMPTY';
+  | 'CITATION_ID_EMPTY'
+  | 'GUIDANCE_MISSING'
+  | 'GUIDANCE_EMPTY_ECHO'
+  | 'GUIDANCE_EMPTY_SUBCOMMENT'
+  | 'ANCHOR_ROLE_COVERAGE_MISSING'
+  | 'COMPOSITION_EMPTY';
 
 export type CitationLike = {
   id?: string | number | null;
@@ -49,4 +54,6 @@ export type NormalizedContractState<TJson = unknown> = {
   raw: RawContractMeta;
   citationsUsed: CitationLike[];
   knowledge: { corpusLoaded?: boolean | null } | null | undefined;
+  guidance?: Record<string, unknown> | null;
+  composition?: Record<string, unknown> | null;
 };

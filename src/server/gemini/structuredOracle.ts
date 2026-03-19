@@ -2,6 +2,7 @@
 import { GoogleGenAI, Schema, Type } from '@google/genai';
 import { z } from 'zod';
 import type { JsonErrorCode, RawContractMeta } from './contract-types.js';
+import { normalizeOracleAnchorRole } from './oracle-hermeneutic.js';
 import {
   GuardianStructuredSchema,
   OracleStructuredSchema,
@@ -65,7 +66,13 @@ const NATIVE_ORACLE_SCHEMA: Schema = {
         type: Type.OBJECT,
         properties: {
           citation_id: { type: Type.STRING } as any,
-          role: { type: Type.STRING } as any,
+          role: {
+            type: Type.STRING,
+            format: 'enum',
+            enum: ['anchor', 'tension', 'turn'],
+            description:
+              'Canonical oracle anchor role. Use only anchor, tension, or turn.',
+          } as any,
           motif: { type: Type.STRING } as any,
           claim: { type: Type.STRING } as any,
         },
@@ -394,7 +401,9 @@ function strictNormalizeOracle(input: any): any {
   if (Array.isArray(o.anchors)) {
     o.anchors = o.anchors.slice(0, 4).map((anchor: any) => ({
       citation_id: String(anchor?.citation_id ?? ''),
-      role: String(anchor?.role ?? ''),
+      role:
+        normalizeOracleAnchorRole(anchor?.role) ??
+        String(anchor?.role ?? '').trim(),
       motif: String(anchor?.motif ?? ''),
       claim: String(anchor?.claim ?? ''),
     }));

@@ -10,6 +10,11 @@
   },
   "scripts": {
     "dev": "vite",
+    "dev:web": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "dev:web:open": "vite --host 127.0.0.1 --port 5173 --strictPort --open",
+    "dev:vercel": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/run/dev.ps1 -Mode vercel -BindHost 127.0.0.1 -Port 3000",
+    "dev:api": "npm run dev:vercel",
+    "dev:unified": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/run/dev.ps1 -Mode unified -BindHost 127.0.0.1 -Port 3000 -WebHost 127.0.0.1 -WebPort 5173",
     "typecheck": "npm run typecheck:client && npm run typecheck:server",
     "typecheck:client": "tsc -p tsconfig.client.json --noEmit --pretty false",
     "typecheck:server": "tsc -p tsconfig.server.json --noEmit --pretty false",
@@ -27,7 +32,10 @@
     "test:seq:scene": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/vitest-seq.ps1",
     "ph3:lock": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/ph3-lock.ps1",
     "audit:cleanup": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/cleanup-audit.ps1 -KeepLast 10",
-    "audit:orb": "tsx scripts/orb-deep-audit.ts --runs 10 --out audit/orb_audit_report.txt"
+    "audit:orb": "tsx scripts/orb-deep-audit.ts --runs 10 --out audit/orb_audit_report.txt",
+    "runtime:stop": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/run/stop-local-stack.ps1",
+    "runtime:check:3000": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/run/runtime-check.ps1 -BaseUrl http://127.0.0.1:3000",
+    "runtime:check:5173": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/run/runtime-check.ps1 -BaseUrl http://127.0.0.1:5173"
   },
   "dependencies": {
     "@google/genai": "^1.43.0",

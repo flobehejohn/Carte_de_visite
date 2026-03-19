@@ -19,7 +19,10 @@ import type {
 import { composeOracleComposition } from '../src/server/gemini/compose-oracle-composition.js';
 import { enrichOracleCompositionMotifs } from '../src/server/gemini/enrich-oracle-motifs.js';
 import { evaluateStrictInvariants } from '../src/server/gemini/evaluate-strict-invariants.js';
-import { validateOracleHermeneuticAnchors } from '../src/server/gemini/oracle-hermeneutic.js';
+import {
+  normalizeOracleHermeneuticRoles,
+  validateOracleHermeneuticAnchors,
+} from '../src/server/gemini/oracle-hermeneutic.js';
 import {
   normalizeFinalState,
   normalizeRawContractMeta,
@@ -1025,9 +1028,11 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
 
       if (structuredWanted && isRecord(structuredCandidate)) {
         json = structuredCandidate;
+        const normalizedStructuredCandidate =
+          normalizeOracleHermeneuticRoles(structuredCandidate);
 
         const parsedHermeneutic =
-          OracleHermeneuticV2Schema.safeParse(structuredCandidate);
+          OracleHermeneuticV2Schema.safeParse(normalizedStructuredCandidate);
 
         if (!parsedHermeneutic.success) {
           hermeneutic = null;
@@ -1323,14 +1328,6 @@ export function createHandler(deps: HandlerDeps = {}) {
               knowledge: baseResponse?.knowledge,
             });
 
-      const violations = isFailClosedStrictOn(reqMode)
-        ? evaluateStrictInvariants(finalState as any, {
-            minCitations,
-            lockedSource: 'zarathoustra',
-            structuredOutputsOn: isStructuredOutputsOn(),
-          })
-        : [];
-
       const citations = Array.isArray(baseResponse?.citationsUsed)
         ? baseResponse.citationsUsed
         : [];
@@ -1349,6 +1346,26 @@ export function createHandler(deps: HandlerDeps = {}) {
         structuredOracleHermeneutic && reqMode === 'oracle'
           ? baseResponse?.json ?? null
           : finalState.finalJson;
+      const composition =
+        reqMode === 'oracle' &&
+        baseResponse?.composition &&
+        typeof baseResponse.composition === 'object'
+          ? baseResponse.composition
+          : null;
+      const violations = isFailClosedStrictOn(reqMode)
+        ? evaluateStrictInvariants(
+            {
+              ...finalState,
+              guidance,
+              composition,
+            },
+            {
+              minCitations,
+              lockedSource: 'zarathoustra',
+              structuredOutputsOn: isStructuredOutputsOn(),
+            },
+          )
+        : [];
 
       const payload = {
         ok: violations.length === 0,
@@ -1358,7 +1375,7 @@ export function createHandler(deps: HandlerDeps = {}) {
         text: String(baseResponse?.text ?? ''),
         json: jsonPayload,
         hermeneutic,
-        composition: reqMode === 'oracle' ? baseResponse?.composition ?? null : null,
+        composition,
         jsonError: finalState.finalJsonError,
         rawJsonError: finalState.raw.rawJsonError,
         finalJsonError: finalState.finalJsonError,

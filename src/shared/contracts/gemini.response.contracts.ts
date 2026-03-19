@@ -19,6 +19,11 @@ const StrictViolationSchema = z.object({
     'CITATIONS_TOO_LOW',
     'SOURCE_LEAK',
     'CITATION_ID_EMPTY',
+    'GUIDANCE_MISSING',
+    'GUIDANCE_EMPTY_ECHO',
+    'GUIDANCE_EMPTY_SUBCOMMENT',
+    'ANCHOR_ROLE_COVERAGE_MISSING',
+    'COMPOSITION_EMPTY',
   ]),
   message: z.string().min(1),
 });

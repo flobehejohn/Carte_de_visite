@@ -6,6 +6,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { getLightsSnapshot } from '../../scene/modules/orbLighting';
 import { RitualOrchestrator } from '../../scene/RitualOrchestrator';
 import { LightSafetyGovernor } from '../../scene/safety/LightSafetyGovernor';
+import { getOracleTextLength } from '../../services/zarathustraService';
 
 interface Oracle3DSceneProps {
   formData: any;
@@ -488,14 +489,10 @@ export function Oracle3DScene({ formData, stage, loading, result }: Oracle3DScen
     const progress = result ? 1.0 : (loading ? 0.95 : Math.max(0, (stage - 1) / 9));
 
     if (result?.visualParams) {
-      const quoteLen = result.quote?.length ?? 0;
-      const interpLen = result.interpretation?.length ?? 0;
-      const textLength = quoteLen + interpLen;
-
       orch.setRitualData({
         visualParams: result.visualParams,
         seed: result.seed ?? result.visualParams?.seed ?? undefined,
-        textLength
+        textLength: getOracleTextLength(result),
       });
     }
 

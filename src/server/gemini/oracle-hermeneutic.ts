@@ -10,8 +10,49 @@ const ORACLE_ANCHOR_ROLES: OracleAnchorRole[] = [
   'turn',
 ];
 
+const ORACLE_ANCHOR_ROLE_SYNONYMS: Record<string, OracleAnchorRole> = {
+  fondation: 'anchor',
+  fondateur: 'anchor',
+  avertissement: 'tension',
+  observateur: 'tension',
+  vision: 'turn',
+  guide: 'turn',
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function normalizeCitationId(value: unknown): string {
   return String(value ?? '').trim();
+}
+
+export function normalizeOracleAnchorRole(value: unknown): OracleAnchorRole | null {
+  const role = String(value ?? '').trim().toLowerCase();
+  if (role === 'anchor' || role === 'tension' || role === 'turn') {
+    return role;
+  }
+  return ORACLE_ANCHOR_ROLE_SYNONYMS[role] ?? null;
+}
+
+export function normalizeOracleHermeneuticRoles(input: unknown): unknown {
+  if (!isRecord(input) || !Array.isArray(input.anchors)) {
+    return input;
+  }
+
+  return {
+    ...input,
+    anchors: input.anchors.map((anchor) => {
+      if (!isRecord(anchor)) return anchor;
+
+      return {
+        ...anchor,
+        role:
+          normalizeOracleAnchorRole(anchor.role) ??
+          String(anchor.role ?? '').trim(),
+      };
+    }),
+  };
 }
 
 export function collectOracleAnchorRoles(

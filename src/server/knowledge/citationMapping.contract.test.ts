@@ -44,6 +44,12 @@ function makeOracleHermeneuticPayload(citationIds: string[]) {
       },
       {
         citation_id: citationIds[1],
+        role: 'tension',
+        motif: 'poids',
+        claim: 'La citation garde le passage sous une exigence plus haute.',
+      },
+      {
+        citation_id: citationIds[2],
         role: 'turn',
         motif: 'axe',
         claim: 'La citation oriente le mouvement du rite.',
@@ -207,11 +213,11 @@ describe('citation mapping contract', () => {
       { k: 6 },
     );
     const selectedIds = expected
-      .slice(0, 2)
+      .slice(0, 3)
       .map((citation) => getCitationId(citation))
       .filter((id) => id.length > 0);
 
-    expect(selectedIds.length).toBe(2);
+    expect(selectedIds.length).toBe(3);
 
     const req = OracleRequestSchema.parse({
       mode: 'oracle',
