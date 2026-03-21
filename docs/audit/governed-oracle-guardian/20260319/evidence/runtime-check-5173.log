@@ -1,0 +1,32 @@
+
+> oracle-zarathustra-llmed@0.1.0 runtime:check:5173
+> pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/run/runtime-check.ps1 -BaseUrl http://127.0.0.1:5173
+
+
+=== ROOT CHECK http://127.0.0.1:5173 ===
+root status=200
+
+=== GUARDIAN http://127.0.0.1:5173 ===
+
+[32;1mStatusCode : [0m200
+
+[guardian] OK
+
+=== ORACLE http://127.0.0.1:5173 ===
+
+[32;1mStatusCode : [0m200
+
+[oracle] OK
+
+=== SUMMARY ===
+
+[32;1mBaseUrl          : [0mhttp://127.0.0.1:5173
+[32;1mGuardianStatus   : [0m200
+[32;1mOracleStatus     : [0m200
+[32;1mOracleRoles      : [0manchor, tension, turn
+[32;1mOracleMotifRoles : [0manchor, tension, turn
+[32;1mOracleCitations  : [0m6
+[32;1mOracleTraceId    : [0msrv_191d5253-e30b-405c-87a9-c46d1a8f3391
+
+
+RUNTIME CHECK OK.

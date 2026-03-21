@@ -1,0 +1,39 @@
+[Climate] preset=Aurore__V09 fog=0.0217 bloom=(0.21,0.11,0.90) glow=0.26 bg=0.55
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore__V10 fog=0.0201 bloom=(0.19,0.13,0.89) glow=0.27 bg=0.55
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore fog=0.0220 bloom=(0.20,0.12,0.86) glow=0.25 bg=0.55
+[Climate] preset=Aurore__V06 fog=0.0230 bloom=(0.21,0.13,0.77) glow=0.24 bg=0.58
+[Climate] preset=Aurore__V11 fog=0.0235 bloom=(0.23,0.12,0.88) glow=0.28 bg=0.54
+
+ [32m✓[39m src/scene/params/ClimateController.foregroundOpacityMul.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 151[2mms[22m[39m
+ [32m✓[39m src/server/contracts/guardian.microcopy.contract.test.ts [2m([22m[2m11 tests[22m[2m)[22m[90m 34[2mms[22m[39m
+ [32m✓[39m src/server/gemini/enrich-oracle-motifs.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 13[2mms[22m[39m
+ [32m✓[39m src/scene/render/optics/transparency.test.ts [2m([22m[2m4 tests[22m[2m)[22m[90m 13[2mms[22m[39m
+[90mstdout[2m | src/scene/safety/LightSafetyGovernor.test.ts[2m > [22m[2mLightSafetyGovernor[2m > [22m[2mclamps after max over duration
+[22m[39m[LightSafety] active=false reason=bloom overMs=100 cooldownMs=0 factor=1.00
+
+[90mstdout[2m | src/scene/safety/LightSafetyGovernor.test.ts[2m > [22m[2mLightSafetyGovernor[2m > [22m[2mresets over timer when signal falls under low threshold
+[22m[39m[LightSafety] active=false reason=bloom overMs=100 cooldownMs=0 factor=1.00
+
+[90mstdout[2m | src/scene/safety/LightSafetyGovernor.test.ts[2m > [22m[2mLightSafetyGovernor[2m > [22m[2mkeeps factor capped during cooldown even if signal drops
+[22m[39m[LightSafety] active=false reason=bloom overMs=100 cooldownMs=0 factor=1.00
+
+ [32m✓[39m src/scene/safety/LightSafetyGovernor.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 15[2mms[22m[39m
+ [32m✓[39m src/server/contracts/oracle.hermeneutic.schema.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 15[2mms[22m[39m
+ [32m✓[39m src/server/knowledge/knowledgeIntegrity.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 287[2mms[22m[39m
+ [32m✓[39m src/services/visualParams.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 11[2mms[22m[39m
+ [32m✓[39m src/server/gemini/guardian-guidance.test.ts [2m([22m[2m4 tests[22m[2m)[22m[90m 16[2mms[22m[39m
+ [32m✓[39m src/ci/fiesta.discovery.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 31[2mms[22m[39m
+ [32m✓[39m src/server/knowledge/retriever.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 37[2mms[22m[39m
+ [32m✓[39m src/services/jsonExtract.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 9[2mms[22m[39m
+ [32m✓[39m src/server/contracts/oracle.wire.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 22[2mms[22m[39m
+ [32m✓[39m src/scene/RitualOrchestrator.opacityWiring.test.js [2m([22m[2m1 test[22m[2m)[22m[90m 8[2mms[22m[39m
+ [32m✓[39m src/services/zaraLangGuard.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 16[2mms[22m[39m
+ [32m✓[39m src/test/network.hermetic.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 28[2mms[22m[39m
+ [32m✓[39m src/components/oracle/RitualWizard.result.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[90m 255[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m34 passed[39m[22m[90m (34)[39m
+[2m      Tests [22m [1m[32m114 passed[39m[22m[90m (114)[39m
+[2m   Start at [22m 21:08:51
+[2m   Duration [22m 20.59s[2m (transform 2.90s, setup 443ms, collect 11.11s, tests 4.46s, environment 2.36s, prepare 14.57s)[22m
