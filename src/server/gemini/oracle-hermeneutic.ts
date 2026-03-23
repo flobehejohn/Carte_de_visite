@@ -3,21 +3,10 @@ import type {
   OracleAnchorRole,
   OracleHermeneuticV2,
 } from '../contracts/oracle.types.js';
-
-const ORACLE_ANCHOR_ROLES: OracleAnchorRole[] = [
-  'anchor',
-  'tension',
-  'turn',
-];
-
-const ORACLE_ANCHOR_ROLE_SYNONYMS: Record<string, OracleAnchorRole> = {
-  fondation: 'anchor',
-  fondateur: 'anchor',
-  avertissement: 'tension',
-  observateur: 'tension',
-  vision: 'turn',
-  guide: 'turn',
-};
+import {
+  normalizeOracleAnchorRole,
+  ORACLE_ANCHOR_ROLES,
+} from './oracle-anchor-role.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -25,14 +14,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizeCitationId(value: unknown): string {
   return String(value ?? '').trim();
-}
-
-export function normalizeOracleAnchorRole(value: unknown): OracleAnchorRole | null {
-  const role = String(value ?? '').trim().toLowerCase();
-  if (role === 'anchor' || role === 'tension' || role === 'turn') {
-    return role;
-  }
-  return ORACLE_ANCHOR_ROLE_SYNONYMS[role] ?? null;
 }
 
 export function normalizeOracleHermeneuticRoles(input: unknown): unknown {
@@ -43,13 +24,15 @@ export function normalizeOracleHermeneuticRoles(input: unknown): unknown {
   return {
     ...input,
     anchors: input.anchors.map((anchor) => {
-      if (!isRecord(anchor)) return anchor;
+      if (!isRecord(anchor)) {
+        return anchor;
+      }
+
+      const normalized = normalizeOracleAnchorRole(anchor.role);
 
       return {
         ...anchor,
-        role:
-          normalizeOracleAnchorRole(anchor.role) ??
-          String(anchor.role ?? '').trim(),
+        role: normalized ?? String(anchor.role ?? '').trim(),
       };
     }),
   };
@@ -58,9 +41,16 @@ export function normalizeOracleHermeneuticRoles(input: unknown): unknown {
 export function collectOracleAnchorRoles(
   hermeneutic: Pick<OracleHermeneuticV2, 'anchors'>,
 ): Set<OracleAnchorRole> {
-  return new Set(
-    hermeneutic.anchors.map((anchor) => anchor.role) as OracleAnchorRole[],
-  );
+  const roles = new Set<OracleAnchorRole>();
+
+  for (const anchor of hermeneutic.anchors ?? []) {
+    const normalized = normalizeOracleAnchorRole((anchor as any)?.role);
+    if (normalized) {
+      roles.add(normalized);
+    }
+  }
+
+  return roles;
 }
 
 export function listMissingOracleAnchorRoles(
@@ -92,7 +82,7 @@ export function validateOracleHermeneuticAnchors(
 
   const missingCitationIds = Array.from(
     new Set(
-      hermeneutic.anchors
+      (hermeneutic.anchors ?? [])
         .map((anchor) => normalizeCitationId(anchor.citation_id))
         .filter((id) => id.length > 0 && !resolvedIds.has(id)),
     ),

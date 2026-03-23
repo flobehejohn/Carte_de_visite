@@ -1,15 +1,8 @@
 import type {
   NormalizedContractState,
-  StrictViolationCode,
   StrictViolation,
 } from './contract-types.js';
-import type { OracleAnchorRole } from '../contracts/oracle.types.js';
-
-const ORACLE_ANCHOR_ROLES: OracleAnchorRole[] = [
-  'anchor',
-  'tension',
-  'turn',
-];
+import { listMissingOracleAnchorRoles } from './oracle-hermeneutic.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -25,33 +18,10 @@ function getTrimmedString(
 
 function pushViolation(
   violations: StrictViolation[],
-  code: StrictViolationCode,
+  code: StrictViolation['code'],
   message: string,
 ): void {
   violations.push({ code, message });
-}
-
-function normalizeOracleAnchorRole(value: unknown): OracleAnchorRole | null {
-  const role = String(value ?? '').trim().toLowerCase();
-  if (role === 'anchor' || role === 'tension' || role === 'turn') {
-    return role;
-  }
-  return null;
-}
-
-function listMissingOracleAnchorRoles(finalJson: unknown): OracleAnchorRole[] {
-  if (!isRecord(finalJson) || !Array.isArray(finalJson.anchors)) {
-    return [];
-  }
-
-  const present = new Set<OracleAnchorRole>();
-  for (const anchor of finalJson.anchors) {
-    if (!isRecord(anchor)) continue;
-    const role = normalizeOracleAnchorRole(anchor.role);
-    if (role) present.add(role);
-  }
-
-  return ORACLE_ANCHOR_ROLES.filter((role) => !present.has(role));
 }
 
 export function evaluateStrictInvariants(
@@ -69,32 +39,37 @@ export function evaluateStrictInvariants(
   }
 
   if (options.structuredOutputsOn === false) {
-    violations.push({
-      code: 'STRUCTURED_OUTPUTS_DISABLED',
-      message: 'GEMINI_STRUCTURED_OUTPUTS=0 (structured outputs disabled)',
-    });
+    pushViolation(
+      violations,
+      'STRUCTURED_OUTPUTS_DISABLED',
+      'GEMINI_STRUCTURED_OUTPUTS=0 (structured outputs disabled)',
+    );
   }
 
   if (!state.knowledge?.corpusLoaded) {
-    violations.push({
-      code: 'CORPUS_NOT_LOADED',
-      message: 'knowledge.corpusLoaded !== true',
-    });
+    pushViolation(
+      violations,
+      'CORPUS_NOT_LOADED',
+      'knowledge.corpusLoaded !== true',
+    );
   }
 
   const citations = state.citationsUsed ?? [];
+
   if (citations.length < options.minCitations) {
-    violations.push({
-      code: 'CITATIONS_TOO_LOW',
-      message: `citationsUsed.length=${citations.length} < ${options.minCitations}`,
-    });
+    pushViolation(
+      violations,
+      'CITATIONS_TOO_LOW',
+      `citationsUsed.length=${citations.length} < ${options.minCitations}`,
+    );
   }
 
   if (citations.some((c) => String(c?.id ?? '').trim().length === 0)) {
-    violations.push({
-      code: 'CITATION_ID_EMPTY',
-      message: 'one or more citationsUsed entries have empty id',
-    });
+    pushViolation(
+      violations,
+      'CITATION_ID_EMPTY',
+      'one or more citationsUsed entries have empty id',
+    );
   }
 
   const sources = Array.from(
@@ -109,24 +84,23 @@ export function evaluateStrictInvariants(
     sources.length === 0 ||
     sources.some((source) => source !== options.lockedSource.toLowerCase())
   ) {
-    violations.push({
-      code: 'SOURCE_LEAK',
-      message: `sources=${sources.join(',') || '(empty)'} expected=${options.lockedSource}`,
-    });
+    pushViolation(
+      violations,
+      'SOURCE_LEAK',
+      `sources=${sources.join(',') || '(empty)'} expected=${options.lockedSource}`,
+    );
   }
 
   if (state.finalJson == null) {
-    violations.push({
-      code: 'JSON_EMPTY',
-      message: 'finalJson is null',
-    });
+    pushViolation(violations, 'JSON_EMPTY', 'finalJson is null');
   }
 
   if (state.finalJsonError !== null) {
-    violations.push({
-      code: 'JSON_ERROR',
-      message: `finalJsonError=${state.finalJsonError}`,
-    });
+    pushViolation(
+      violations,
+      'JSON_ERROR',
+      `finalJsonError=${state.finalJsonError}`,
+    );
   }
 
   if (!state.structuredUsed) {
@@ -167,7 +141,10 @@ export function evaluateStrictInvariants(
   }
 
   if (state.mode === 'oracle' && hasValidGovernedState) {
-    const missingRoles = listMissingOracleAnchorRoles(state.finalJson);
+    const missingRoles = isRecord(state.finalJson)
+      ? listMissingOracleAnchorRoles(state.finalJson as any)
+      : [];
+
     if (missingRoles.length > 0) {
       pushViolation(
         violations,

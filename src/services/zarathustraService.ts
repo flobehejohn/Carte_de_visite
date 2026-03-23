@@ -1,4 +1,5 @@
 import { OracleResult, RitualInput } from '../domain/types';
+import { geminiGenerate } from '../lib/geminiClient';
 import {
   composeGuardianGuidanceFromPayload as composeDeterministicGuardianGuidance,
   getGuardianStepDefaults,
@@ -8,7 +9,6 @@ import {
   type GuardianSymbolicFocus,
   type GuardianTone,
 } from '../shared/guardian/composeGuidance';
-import { geminiGenerate } from '../lib/geminiClient';
 import { extractFirstJsonObject } from './jsonExtract';
 import { normalizeVisualParams, VisualParams } from './visualParams';
 import { ZaraLangGuard } from './zaraLangGuard';
@@ -158,7 +158,9 @@ function composeGuardianComment(echo: string, subcomment: string): string {
   return `${a}\n\n${b}`;
 }
 
-function readGuardianGuidanceBlock(input: unknown): GuardianGuidanceBlock | null {
+function readGuardianGuidanceBlock(
+  input: unknown,
+): GuardianGuidanceBlock | null {
   if (!isRecord(input)) return null;
 
   const echo = normalizeWhitespace(input.echo);
@@ -195,6 +197,7 @@ export function extractGuidanceParts(input?: string | null): {
     .split(/\n\s*\n/)
     .map((part) => part.trim())
     .filter(Boolean);
+
   if (parts.length <= 1) {
     return { echo: parts[0] ?? clean, subcomment: '' };
   }
@@ -220,9 +223,8 @@ export function getOraclePrimaryProse(
 export function getOracleTextLength(
   input?: Pick<OracleResult, 'composition' | 'interpretation' | 'quote'> | null,
 ): number {
-  const quote = normalizeWhitespace(input?.quote);
-  const prose = getOraclePrimaryProse(input);
-  return `${quote}${prose}`.length;
+  const finalText = getOraclePrimaryProse(input);
+  return finalText.length;
 }
 
 function normalizeConfidence(value: unknown, fallback = 0.86): number {
@@ -466,9 +468,13 @@ function pickSentenceFromCitations(data: any, env?: any) {
     : Array.isArray(env?.citationsUsed)
       ? env.citationsUsed
       : [];
+
   const compositionMotifs = Array.isArray(env?.composition?.motifs)
     ? env.composition.motifs
-    : [];
+    : Array.isArray(data?.composition?.motifs)
+      ? data.composition.motifs
+      : [];
+
   const citationIds =
     compositionMotifs.length > 0
       ? compositionMotifs.map((motif: any) => String(motif?.citation_id ?? ''))
@@ -489,27 +495,42 @@ function buildOracleResult(
   data: any,
   env?: any,
 ): OracleResult {
+  const resolvedHermeneutic = isRecord(env?.hermeneutic)
+    ? env.hermeneutic
+    : isRecord(data?.hermeneutic)
+      ? data.hermeneutic
+      : null;
+
+  const resolvedComposition = isRecord(env?.composition)
+    ? env.composition
+    : isRecord(data?.composition)
+      ? data.composition
+      : null;
+
   const quote = normalizeWhitespace(
     data?.quote || 'Le silence ne ferme rien : il demande une autre entrée.',
   );
+
   const interpretation = normalizeWhitespace(
-    env?.composition?.prose ||
+    resolvedComposition?.prose ||
       data?.interpretation ||
       data?.quote ||
       'L’oracle demeure en attente, comme une porte encore à pousser.',
   );
+
   const keywords = Array.isArray(data?.keywords)
     ? data.keywords.map((k: any) => String(k))
-    : Array.isArray(env?.hermeneutic?.keywords)
-      ? env.hermeneutic.keywords.map((k: any) => String(k))
+    : Array.isArray(resolvedHermeneutic?.keywords)
+      ? resolvedHermeneutic.keywords.map((k: any) => String(k))
       : [];
 
   const vpRaw =
     data?.visual_prescription ||
-    env?.hermeneutic?.visual_prescription ||
+    resolvedHermeneutic?.visual_prescription ||
     data?.visualParams ||
     data?.visual_params ||
     {};
+
   const visualParams = buildVisualParams(vpRaw);
 
   const first = pickSentenceFromCitations(data, env);
@@ -527,15 +548,15 @@ function buildOracleResult(
     interpretation,
     keywords,
     ritual,
-    hermeneutic: isRecord(env?.hermeneutic) ? env.hermeneutic : null,
-    composition: isRecord(env?.composition) ? env.composition : null,
+    hermeneutic: resolvedHermeneutic,
+    composition: resolvedComposition,
     tone: { sentiment: 0.5, intensity: 1.0, mysticism: 0.7 },
     themeScores: [],
     visualParams,
     textLength: getOracleTextLength({
       quote,
       interpretation,
-      composition: isRecord(env?.composition) ? env.composition : null,
+      composition: resolvedComposition,
     }),
     seed: visualParams.seed,
     mainTheme: { themeId: 'will', score: 1, label: 'Volonte' },
@@ -612,6 +633,7 @@ export async function getStepGuidance(
       comment: rawComment,
       isSafe: payload?.isSafe ?? payload?.is_safe ?? true,
     });
+
     const governedGuidance = readGuardianGuidanceBlock(env?.guidance);
     const fallbackComment = normalizeWhitespace(rawComment);
 

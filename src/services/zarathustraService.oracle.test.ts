@@ -100,6 +100,49 @@ describe('consultOracle', () => {
     expect(result.composition?.prose).toContain('Le nom devient un seuil tendu');
   });
 
+  it('uses composition.prose length when governed prose already embeds the quote', async () => {
+    const prose =
+      'Florian, ton nom repond comme une flamme legere au-dessus du poids. Dans cette aurore, ta question devient un passage.';
+
+    geminiGenerateMock.mockResolvedValue({
+      traceId: 'ui_test',
+      mode: 'oracle',
+      text: 'message brut a ignorer',
+      json: {
+        quote:
+          'Florian, ton nom repond comme une flamme legere au-dessus du poids.',
+        interpretation:
+          'Dans cette aurore, ta question devient un passage et non un simple miroir.',
+        composition: {
+          prose,
+          blocks: {
+            opening:
+              'Florian, ton nom repond comme une flamme legere au-dessus du poids.',
+            tension:
+              'Dans cette aurore, ta question devient un passage et non un simple miroir.',
+            turn: 'Le retour se fait mouvement.',
+            imperative: 'Avance sans te replier.',
+          },
+          motifs: [],
+        },
+        citations: [
+          {
+            id: '5190',
+            text: 'Zarathoustra le danseur, Zarathoustra le leger...',
+            part_title: 'QUATRIEME ET DERNIERE PARTIE',
+            section_title: 'DE L HOMME SUPERIEUR',
+            source: 'zarathoustra',
+          },
+        ],
+        citation_ids: ['5190'],
+      },
+    });
+
+    const result = await consultOracle(ritual);
+
+    expect(result.textLength).toBe(prose.length);
+  });
+
   it('fails closed when the oracle payload is missing instead of fabricating a fallback', async () => {
     geminiGenerateMock.mockResolvedValue({
       traceId: 'ui_test',

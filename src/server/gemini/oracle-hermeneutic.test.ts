@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  normalizeOracleAnchorRole,
-  normalizeOracleHermeneuticRoles,
+  collectOracleAnchorRoles,
   validateOracleHermeneuticAnchors,
 } from './oracle-hermeneutic.js';
 
@@ -79,58 +78,33 @@ describe('validateOracleHermeneuticAnchors', () => {
     if (!result.ok) return;
     expect(result.missingRoles).toEqual(['tension']);
   });
-});
 
-describe('normalizeOracleAnchorRole', () => {
-  it('canonicalizes the explicitly allowed oracle anchor role synonyms', () => {
-    expect(normalizeOracleAnchorRole('fondation')).toBe('anchor');
-    expect(normalizeOracleAnchorRole('fondateur')).toBe('anchor');
-    expect(normalizeOracleAnchorRole('avertissement')).toBe('tension');
-    expect(normalizeOracleAnchorRole('observateur')).toBe('tension');
-    expect(normalizeOracleAnchorRole('vision')).toBe('turn');
-    expect(normalizeOracleAnchorRole('guide')).toBe('turn');
-  });
+  it('normalizes anchor role aliases through the shared helper', () => {
+    const hermeneutic = makeHermeneutic() as any;
 
-  it('keeps unknown roles invalid instead of widening the contract', () => {
-    expect(normalizeOracleAnchorRole('presage')).toBeNull();
-  });
-});
+    hermeneutic.anchors = [
+      {
+        citation_id: '5190',
+        role: 'opening',
+        motif: 'flamme dansante',
+        claim: 'Le nom prend figure de légèreté active.',
+      },
+      {
+        citation_id: '3421',
+        role: 'pivot',
+        motif: 'dépassement',
+        claim: 'Le rite transforme le nom en passage.',
+      },
+      {
+        citation_id: '28',
+        role: 'tension',
+        motif: 'poids',
+        claim: 'Le poids demande une forme plus haute.',
+      },
+    ];
 
-describe('normalizeOracleHermeneuticRoles', () => {
-  it('rewrites the observed live roles to canonical oracle roles without touching citation ids', () => {
-    const normalized = normalizeOracleHermeneuticRoles({
-      ...makeHermeneutic(),
-      anchors: [
-        {
-          citation_id: '5190',
-          role: 'fondateur',
-          motif: 'flamme dansante',
-          claim: 'Le nom prend figure de légèreté active.',
-        },
-        {
-          citation_id: '3421',
-          role: 'observateur',
-          motif: 'dépassement',
-          claim: 'Le rite transforme le nom en passage.',
-        },
-        {
-          citation_id: '28',
-          role: 'guide',
-          motif: 'poids',
-          claim: 'Le passage exige une forme plus haute.',
-        },
-      ],
-    }) as ReturnType<typeof makeHermeneutic>;
+    const roles = collectOracleAnchorRoles(hermeneutic);
 
-    expect(normalized.anchors.map((anchor) => anchor.role)).toEqual([
-      'anchor',
-      'tension',
-      'turn',
-    ]);
-    expect(normalized.anchors.map((anchor) => anchor.citation_id)).toEqual([
-      '5190',
-      '3421',
-      '28',
-    ]);
+    expect(Array.from(roles).sort()).toEqual(['anchor', 'tension', 'turn']);
   });
 });

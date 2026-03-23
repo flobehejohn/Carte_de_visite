@@ -9,6 +9,7 @@ function normalizeFragment(value: string): string {
     .replace(/[\r\n]+/g, ' ')
     .replace(/[.!?]+/g, ',')
     .replace(/[:;]+/g, ',')
+    .replace(/(?:,\s*){2,}/g, ', ')
     .replace(/\s*,\s*/g, ', ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -51,7 +52,9 @@ function renderTitleLead(motif: OracleComposition['motifs'][number]): string {
   return '';
 }
 
-function renderSupportClause(motif: OracleComposition['motifs'][number]): string {
+function renderSupportClause(
+  motif: OracleComposition['motifs'][number],
+): string {
   const titleLead = renderTitleLead(motif);
   const claim = lowerFirst(normalizeFragment(motif.claim));
 
@@ -70,19 +73,16 @@ export function composeOracleComposition(
   const tensionMotif = pickMotif(motifs, 'tension', 1);
   const turnMotif = pickMotif(motifs, 'turn', motifs.length - 1);
 
+  const openingImage = normalizeFragment(hermeneutic.opening_image);
+  const openingMotifClause = `Le motif de ${normalizeFragment(anchorMotif.motif)} ouvre le passage`;
+
   const blocks: OracleComposition['blocks'] = {
-    opening: toSentence(
-      hermeneutic.quote,
-      `${hermeneutic.opening_image}, le motif de ${normalizeFragment(anchorMotif.motif)} ouvre le passage`,
-    ),
+    opening: toSentence(hermeneutic.quote, openingImage, openingMotifClause),
     tension: toSentence(
       hermeneutic.central_tension,
       renderSupportClause(tensionMotif),
     ),
-    turn: toSentence(
-      hermeneutic.reversal,
-      renderSupportClause(turnMotif),
-    ),
+    turn: toSentence(hermeneutic.reversal, renderSupportClause(turnMotif)),
     imperative: toSentence(hermeneutic.imperative, hermeneutic.return_axis),
   };
 
