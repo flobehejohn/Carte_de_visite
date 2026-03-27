@@ -34,6 +34,7 @@ function Resolve-FirstCommandPath {
 
 $Npm = Resolve-FirstCommandPath -Names @('npm.cmd', 'npm')
 $Npx = Resolve-FirstCommandPath -Names @('npx.cmd', 'npx')
+$Pwsh = Resolve-FirstCommandPath -Names @('pwsh.exe', 'pwsh', 'powershell.exe', 'powershell')
 
 function Invoke-LoggedCommand {
     param(
@@ -45,6 +46,7 @@ function Invoke-LoggedCommand {
     $LogPath = Join-Path $OutDir "$Name.log"
 
     Write-Host "==> $Name" -ForegroundColor Cyan
+
     & $FilePath @Arguments 2>&1 | Tee-Object -FilePath $LogPath
 
     if ($LASTEXITCODE -ne 0) {
@@ -58,35 +60,55 @@ if (-not $SkipNpmInstall) {
 
 Invoke-LoggedCommand -Name 'typecheck' -FilePath $Npm -Arguments @('run', 'typecheck')
 
-Invoke-LoggedCommand -Name 'vitest.oracle3d.audit' -FilePath $Npx -Arguments @(
-    'vitest',
-    'run',
-    '.\src\components\oracle\Oracle3DScene.audit.integration.test.ts'
+Invoke-LoggedCommand -Name 'verify.layer.governance' -FilePath $Pwsh -Arguments @(
+    '-NoProfile',
+    '-ExecutionPolicy', 'Bypass',
+    '-File', '.\scripts\certification\Verify-LayerGovernance.ps1',
+    '-RepoRoot', $ResolvedRepoRoot
 )
 
-Invoke-LoggedCommand -Name 'vitest.orbFluid.contract' -FilePath $Npx -Arguments @(
-    'vitest',
-    'run',
-    '.\src\scene\modules\orbFluidParticles.contract.test.ts'
+$MandatoryVitestTargets = @(
+    '.\src\components\oracle\Oracle3DScene.audit.integration.test.ts',
+    '.\src\components\oracle\Oracle3DScene.cycle.test.tsx',
+    '.\src\scene\modules\orbFluidParticles.contract.test.ts',
+    '.\src\scene\modules\orbFluidParticles.exports.ast.test.ts',
+    '.\src\scene\modules\orbFluidParticles.integration.test.ts',
+    '.\src\scene\render\optics\transparency.test.ts',
+    '.\src\scene\render\materials\applyMaterials.integration.test.ts'
 )
 
-Invoke-LoggedCommand -Name 'vitest.orbFluid.exports.ast' -FilePath $Npx -Arguments @(
-    'vitest',
-    'run',
-    '.\src\scene\modules\orbFluidParticles.exports.ast.test.ts'
+$OptionalVitestTargets = @(
+    '.\src\scene\RitualOrchestrator.opacityWiring.test.js',
+    '.\src\scene\RitualOrchestrator.orderLock.test.js'
 )
 
-Invoke-LoggedCommand -Name 'vitest.orbFluid.integration' -FilePath $Npx -Arguments @(
-    'vitest',
-    'run',
-    '.\src\scene\modules\orbFluidParticles.integration.test.ts'
-)
+foreach ($target in $MandatoryVitestTargets) {
+    if (-not (Test-Path $target)) {
+        throw "Test manquant : $target"
+    }
 
-Invoke-LoggedCommand -Name 'vitest.transparency' -FilePath $Npx -Arguments @(
-    'vitest',
-    'run',
-    '.\src\scene\render\optics\transparency.test.ts'
-)
+    $leafBase = [IO.Path]::GetFileNameWithoutExtension($target)
+    $safeName = ('vitest.' + $leafBase).Replace(' ', '_')
+
+    Invoke-LoggedCommand -Name $safeName -FilePath $Npx -Arguments @(
+        'vitest',
+        'run',
+        $target
+    )
+}
+
+foreach ($target in $OptionalVitestTargets) {
+    if (Test-Path $target) {
+        $leafBase = [IO.Path]::GetFileNameWithoutExtension($target)
+        $safeName = ('vitest.' + $leafBase).Replace(' ', '_')
+
+        Invoke-LoggedCommand -Name $safeName -FilePath $Npx -Arguments @(
+            'vitest',
+            'run',
+            $target
+        )
+    }
+}
 
 if (-not $SkipFullVitest) {
     Invoke-LoggedCommand -Name 'vitest.full' -FilePath $Npx -Arguments @(
@@ -108,7 +130,7 @@ $SummaryPath = Join-Path $OutDir 'summary.json'
 $Summary | ConvertTo-Json -Depth 5 | Set-Content -Path $SummaryPath -Encoding utf8
 
 Write-Host ''
-Write-Host 'Phase 2 Oracle3D audit gate: OK' -ForegroundColor Green
+Write-Host 'Phase 2 & 3 Oracle3D audit gate: OK' -ForegroundColor Green
 Write-Host "Logs: $OutDir" -ForegroundColor DarkGray
 
 if ($PassThru) {
