@@ -35,6 +35,7 @@ function createFluidCtx(): any {
     scene,
     orbGroup,
     layersGroup,
+    fluidParticlesConfig: {},
   };
 }
 
@@ -52,7 +53,10 @@ function asMaterialArray(
 function collectTextures(material: THREE.Material): THREE.Texture[] {
   const textures: THREE.Texture[] = [];
 
-  for (const value of Object.values(material as Record<string, unknown>)) {
+  // CORRECTION TS2352 : Passage par unknown
+  for (const value of Object.values(
+    material as unknown as Record<string, unknown>,
+  )) {
     if (value instanceof THREE.Texture) {
       textures.push(value);
     }
@@ -67,6 +71,7 @@ function scanBaseLayerFeedback(
 ): FeedbackHit[] {
   const hits: FeedbackHit[] = [];
 
+  // Note: traverseVisible remplace traverse pour respecter la logique de rendu
   scene.traverseVisible((obj) => {
     if (obj.userData?.postprocessIsolation === true) return;
     if (!objectUsesLayer(obj, ORB_BASE_RENDER_LAYER)) return;
@@ -182,6 +187,7 @@ describe('Oracle3DScene audit integration', () => {
   it('keeps a lightweight audit surface in Oracle3DScene without pinning brittle line-by-line implementation details', () => {
     const text = fs.readFileSync(FILE, 'utf8');
 
+    // On vérifie uniquement les invariants de structure primaires de la scène React
     expect(text).toContain('const composer = new EffectComposer(renderer);');
     expect(text).toContain('const animate = (time: number) => {');
     expect(text).toContain('composer.render();');
