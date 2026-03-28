@@ -130,6 +130,7 @@ describe('Oracle3DScene ritual cycle contract', () => {
   let root: Root;
 
   beforeEach(() => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -142,6 +143,7 @@ describe('Oracle3DScene ritual cycle contract', () => {
     container.remove();
     vi.clearAllMocks();
     vi.restoreAllMocks();
+    delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
   });
 
   function renderScene(props: {
