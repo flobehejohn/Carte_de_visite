@@ -128,12 +128,19 @@ import { Oracle3DScene } from './Oracle3DScene';
 describe('Oracle3DScene ritual cycle contract', () => {
   let container: HTMLDivElement;
   let root: Root;
+  let rafSpy: ReturnType<typeof vi.fn>;
+  let cafSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
+
+    rafSpy = vi.fn(() => 1);
+    cafSpy = vi.fn();
+    vi.stubGlobal('requestAnimationFrame', rafSpy);
+    vi.stubGlobal('cancelAnimationFrame', cafSpy);
   });
 
   afterEach(() => {
@@ -143,6 +150,7 @@ describe('Oracle3DScene ritual cycle contract', () => {
     container.remove();
     vi.clearAllMocks();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
   });
 
@@ -213,5 +221,30 @@ describe('Oracle3DScene ritual cycle contract', () => {
       initBeforeSeedChange,
     );
     expect(orchestratorSpies.initRitual).toHaveBeenLastCalledWith('beta');
+  });
+
+  it('does not relaunch the ritual when the seed stays stable across result refreshes', () => {
+    renderScene({
+      formData: { seed: 'alpha' },
+      stage: 2,
+      loading: false,
+      result: { seed: 'alpha', visualParams: { seed: 'alpha' } },
+    });
+
+    const initAfterFirstStableSeed = orchestratorSpies.initRitual.mock.calls.length;
+
+    renderScene({
+      formData: { seed: 'alpha' },
+      stage: 3,
+      loading: false,
+      result: {
+        seed: 'alpha',
+        visualParams: { seed: 'alpha', variant: 'refresh' },
+      },
+    });
+
+    expect(orchestratorSpies.initRitual.mock.calls.length).toBe(
+      initAfterFirstStableSeed,
+    );
   });
 });

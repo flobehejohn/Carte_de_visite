@@ -372,6 +372,9 @@ function snapshotCandidateSignature(candidates: FeedbackCandidate[]): string {
   );
 }
 
+const AUDIT_RUNTIME_ENABLED =
+  import.meta.env.DEV || import.meta.env.MODE === 'test';
+
 export function Oracle3DScene({
   formData,
   stage,
@@ -426,7 +429,7 @@ export function Oracle3DScene({
       }
     };
 
-    if (import.meta.env.DEV && (window as any).__ORB_ACTIVE_SCENE__) {
+    if (AUDIT_RUNTIME_ENABLED && (window as any).__ORB_ACTIVE_SCENE__) {
       disposeSceneResources((window as any).__ORB_ACTIVE_SCENE__);
       (window as any).__ORB_ACTIVE_SCENE__ = null;
     }
@@ -656,11 +659,11 @@ export function Oracle3DScene({
       },
     };
 
-    if (import.meta.env.DEV) {
+    if (AUDIT_RUNTIME_ENABLED) {
       (window as any).__ORB_ACTIVE_SCENE__ = activeRefs;
     }
 
-    if (import.meta.env.DEV) {
+    if (AUDIT_RUNTIME_ENABLED) {
       const colorToHex = (c: unknown) => {
         try {
           const cc = c as any;
@@ -1251,14 +1254,18 @@ export function Oracle3DScene({
       lastRitualSeedRef.current = '';
 
       if (
-        import.meta.env.DEV &&
+        AUDIT_RUNTIME_ENABLED &&
         (window as any).__ORB_ACTIVE_SCENE__ === activeRefs
       ) {
         delete (window as any).__ORB_ACTIVE_SCENE__;
       }
 
-      if (import.meta.env.DEV && (window as any).__ORB_AUDIT__) {
+      if (AUDIT_RUNTIME_ENABLED && (window as any).__ORB_AUDIT__) {
         delete (window as any).__ORB_AUDIT__;
+      }
+
+      if (AUDIT_RUNTIME_ENABLED && (window as any).__ORB_AUDIT_READY__) {
+        delete (window as any).__ORB_AUDIT_READY__;
       }
     };
   }, []);
