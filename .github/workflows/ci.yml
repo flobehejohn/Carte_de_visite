@@ -1,4 +1,4 @@
-name: ci
+name: CI
 
 on:
   push:
@@ -6,39 +6,158 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  CI: 'true'
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
-  test-build:
-    runs-on: windows-latest
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          cache: 'npm'
+          node-version: 22
+          cache: npm
           cache-dependency-path: package-lock.json
 
-      # Optionnel mais utile sur Windows (long paths)
-      - name: Enable long paths
-        shell: pwsh
-        run: git config --global core.longpaths true
+      - name: Setup npm 11
+        run: |
+          set -eo pipefail
+          npm install -g npm@11.3.0
+          node --version
+          npm --version
 
-      - name: Install
-        run: npm ci --no-audit --no-fund
+      - name: npm ci
+        run: |
+          set -eo pipefail
+          npm ci 2>&1 | tee ci-npm-ci.log
 
-      - name: Gate
-        shell: pwsh
-        run: pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate.ps1
+      - name: Typecheck
+        run: |
+          set -eo pipefail
+          npm run typecheck 2>&1 | tee ci-typecheck.log
 
-      - name: Upload audit artifacts
+      - name: Upload typecheck artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: audit-${{ github.run_number }}-${{ github.sha }}
-          path: audit/**
+          name: typecheck-${{ github.run_number }}-${{ github.sha }}
+          path: |
+            ci-npm-ci.log
+            ci-typecheck.log
+            audit/_latest/**
+            artifacts/gate*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup npm 11
+        run: |
+          set -eo pipefail
+          npm install -g npm@11.3.0
+          node --version
+          npm --version
+
+      - name: npm ci
+        run: |
+          set -eo pipefail
+          npm ci 2>&1 | tee ci-npm-ci.log
+
+      - name: Vitest
+        run: |
+          set -eo pipefail
+          npx vitest run --config ./vitest.config.ts 2>&1 | tee ci-vitest.log
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tests-${{ github.run_number }}-${{ github.sha }}
+          path: |
+            ci-npm-ci.log
+            ci-vitest.log
+            audit/_latest/**
+            artifacts/gate*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs:
+      - typecheck
+      - tests
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup npm 11
+        run: |
+          set -eo pipefail
+          npm install -g npm@11.3.0
+          node --version
+          npm --version
+
+      - name: npm ci
+        run: |
+          set -eo pipefail
+          npm ci 2>&1 | tee ci-npm-ci.log
+
+      - name: Build
+        run: |
+          set -eo pipefail
+          npm run build 2>&1 | tee ci-build.log
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ github.run_number }}-${{ github.sha }}
+          path: |
+            ci-npm-ci.log
+            ci-build.log
+            dist/**
+            audit/_latest/**
+            artifacts/gate*.json
           if-no-files-found: warn
           retention-days: 14

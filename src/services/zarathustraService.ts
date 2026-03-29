@@ -1,17 +1,17 @@
 import { OracleResult, RitualInput } from '../domain/types';
 import { geminiGenerate } from '../lib/geminiClient';
+import {
+  composeGuardianGuidanceFromPayload as composeDeterministicGuardianGuidance,
+  getGuardianStepDefaults,
+  type GuardianGuidanceBlock,
+  type GuardianMovement,
+  type GuardianPayloadLike,
+  type GuardianSymbolicFocus,
+  type GuardianTone,
+} from '../shared/guardian/composeGuidance';
 import { extractFirstJsonObject } from './jsonExtract';
 import { normalizeVisualParams, VisualParams } from './visualParams';
 import { ZaraLangGuard } from './zaraLangGuard';
-
-/**
- * zarathustraService - version "client-safe" (Vercel API proxy)
- * - ZÉRO clé côté client : tout passe par /api/gemini
- * - Robust: no crash if API fails (fallback)
- * - Strict JSON parsing (first parseable object)
- * - FR-only enforcement with max 1 retry
- * - Visual params normalization
- */
 
 export type ClimateSnapshot = {
   progress?: number;
@@ -31,7 +31,18 @@ export type ClimateSnapshot = {
 type OracleOptions = {
   climateSnapshot?: ClimateSnapshot | null;
   debug?: boolean;
-  traceId?: string;
+};
+
+export type { GuardianMovement, GuardianSymbolicFocus, GuardianTone };
+
+export type GuardianGuidance = GuardianGuidanceBlock & {
+  comment: string;
+  isSafe: boolean;
+  confidence: number;
+  symbolic_focus: GuardianSymbolicFocus;
+  movement: GuardianMovement;
+  tone: GuardianTone;
+  rewrite_hint: string;
 };
 
 const SAFE_FALLBACK_VISUAL: Required<
@@ -47,6 +58,19 @@ const SAFE_FALLBACK_VISUAL: Required<
 };
 
 const LOG_THROTTLE_MS = 1200;
+
+const GENERIC_GUARDIAN_PATTERNS = [
+  /\bacceptable\b/i,
+  /\bsans signal de danger\b/i,
+  /\baucun signal de danger\b/i,
+  /\bn apporte pas de sens\b/i,
+  /\bmanque de sens\b/i,
+  /\bvalid\w*\b/i,
+  /\bok\b/i,
+  /\bpeut etre accepte\b/i,
+  /\best recevable\b/i,
+  /\bnom ou prenom simple\b/i,
+];
 
 function createThrottledLogger(prefix: string, throttleMs = LOG_THROTTLE_MS) {
   let lastLogMs = 0;
@@ -72,11 +96,42 @@ function createThrottledLogger(prefix: string, throttleMs = LOG_THROTTLE_MS) {
 
 const logger = createThrottledLogger('Zarathoustra');
 
-function makeTraceId(prefix = 'zara'): string {
-  const g = globalThis as any;
-  const uuid = g?.crypto?.randomUUID?.();
-  if (typeof uuid === 'string' && uuid.length > 0) return `${prefix}_${uuid}`;
-  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+function isDevRuntime(): boolean {
+  const meta = import.meta as ImportMeta & {
+    env?: { DEV?: boolean };
+  };
+  return Boolean(meta.env?.DEV);
+}
+
+function logDevRuntimeEvent(
+  kind: 'guardian_fallback_or_guardian_error',
+  details: Record<string, unknown>,
+) {
+  if (!isDevRuntime()) return;
+  logger.warn(`[dev:${kind}]`, details);
+}
+
+function toAscii(input: unknown): string {
+  const raw = String(input ?? '');
+  try {
+    return raw
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, ' ')
+      .trim();
+  } catch {
+    return raw.replace(/[^\x09\x0A\x0D\x20-\x7E]/g, ' ').trim();
+  }
+}
+
+function normalizeWhitespace(input: unknown): string {
+  return String(input ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function stripDiacritics(input: string): string {
@@ -87,124 +142,300 @@ function stripDiacritics(input: string): string {
   }
 }
 
-function toAscii(input: unknown): string {
-  const raw = stripDiacritics(String(input ?? ''));
-  return raw.replace(/[^\x09\x0A\x0D\x20-\x7E]/g, ' ').trim();
-}
-
 function sanitizeRitualForPrompt(ritual: RitualInput): Record<string, string> {
   const out: Record<string, string> = {};
   if (!ritual) return out;
-  for (const [k, v] of Object.entries(ritual)) {
-    out[k] = toAscii(v);
-  }
+  for (const [k, v] of Object.entries(ritual)) out[k] = toAscii(v);
   return out;
 }
 
-function fmtNumber(value: unknown, digits = 3): string {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return 'na';
-  return n.toFixed(digits);
+function composeGuardianComment(echo: string, subcomment: string): string {
+  const a = normalizeWhitespace(echo);
+  const b = normalizeWhitespace(subcomment);
+  if (!a && !b) return '';
+  if (!a) return b;
+  if (!b) return a;
+  return `${a}\n\n${b}`;
 }
 
-function fmtColor(value: unknown): string | null {
-  if (typeof value === 'string') {
-    const s = toAscii(value);
-    if (/^#[0-9a-fA-F]{6}$/.test(s)) return s;
-    if (/^0x[0-9a-fA-F]{6}$/.test(s)) return `#${s.slice(2)}`;
-    return null;
-  }
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    const hex = Math.max(0, Math.min(0xffffff, Math.round(value)))
-      .toString(16)
-      .padStart(6, '0');
-    return `#${hex}`;
-  }
-  return null;
+function readGuardianGuidanceBlock(
+  input: unknown,
+): GuardianGuidanceBlock | null {
+  if (!isRecord(input)) return null;
+
+  const echo = normalizeWhitespace(input.echo);
+  const subcomment = normalizeWhitespace(input.subcomment);
+  if (!echo || !subcomment) return null;
+
+  const unsafeHint = normalizeWhitespace(input.unsafeHint);
+  return {
+    echo,
+    subcomment,
+    unsafeHint: unsafeHint || null,
+  };
 }
 
-export function climateToPrompt(snapshot?: ClimateSnapshot | null): string {
-  if (!snapshot) return 'CLIMATE: none';
-  const parts: string[] = [];
-  if (snapshot.presetName) parts.push(`preset=${toAscii(snapshot.presetName)}`);
-  if (snapshot.mood) parts.push(`mood=${toAscii(snapshot.mood)}`);
-  if (snapshot.progress != null)
-    parts.push(`progress=${fmtNumber(snapshot.progress, 2)}`);
-
-  const fogColor = fmtColor(snapshot.fog?.color);
-  if (snapshot.fog?.density != null || fogColor) {
-    parts.push(
-      `fog(density=${fmtNumber(snapshot.fog?.density, 4)},color=${fogColor ?? 'na'})`,
-    );
-  }
-
-  if (snapshot.bloom) {
-    parts.push(
-      `bloom(strength=${fmtNumber(snapshot.bloom.strength, 2)},radius=${fmtNumber(
-        snapshot.bloom.radius,
-        2,
-      )},threshold=${fmtNumber(snapshot.bloom.threshold, 2)})`,
-    );
-  }
-
-  if (snapshot.volume) {
-    parts.push(
-      `volume(glow=${fmtNumber(snapshot.volume.glowIntensity, 2)},bg=${fmtNumber(
-        snapshot.volume.backgroundStrength,
-        2,
-      )},soft=${fmtNumber(snapshot.volume.softness, 2)},vignette=${fmtNumber(
-        snapshot.volume.vignette,
-        2,
-      )})`,
-    );
-  }
-
-  if (snapshot.palette) {
-    const pPrimary = fmtColor(snapshot.palette.primary);
-    const pAccent = fmtColor(snapshot.palette.accent);
-    const pMode = snapshot.palette.mode ? toAscii(snapshot.palette.mode) : 'na';
-    parts.push(
-      `palette(mode=${pMode},primary=${pPrimary ?? 'na'},accent=${pAccent ?? 'na'})`,
-    );
-  }
-
-  return parts.length ? `CLIMATE: ${parts.join(' ')}` : 'CLIMATE: none';
-}
-
-function buildOraclePrompt(
-  ritual: RitualInput,
-  climateSnapshot?: ClimateSnapshot | null,
-  opts?: { retryReason?: string },
+function composeGuardianCommentFromEnvelope(
+  guidance: unknown,
+  fallbackComment: unknown,
 ): string {
-  const lines: string[] = [];
-  if (opts?.retryReason)
-    lines.push(`RETRY_REASON: ${toAscii(opts.retryReason)}`);
-  lines.push(`RITUAL: ${JSON.stringify(sanitizeRitualForPrompt(ritual))}`);
-  lines.push(climateToPrompt(climateSnapshot));
-  lines.push(
-    'SORTIE: JSON uniquement. Aucun markdown. Aucun texte hors JSON. Aucun ```.',
-  );
-  return lines.join('\n');
+  const governed = readGuardianGuidanceBlock(guidance);
+  if (governed) {
+    return composeGuardianComment(governed.echo, governed.subcomment);
+  }
+  return normalizeWhitespace(fallbackComment);
 }
 
-function buildGuardianPrompt(
+export function extractGuidanceParts(input?: string | null): {
+  echo: string;
+  subcomment: string;
+} {
+  const clean = String(input ?? '').trim();
+  if (!clean) return { echo: '', subcomment: '' };
+
+  const parts = clean
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length <= 1) {
+    return { echo: parts[0] ?? clean, subcomment: '' };
+  }
+
+  return {
+    echo: parts[0],
+    subcomment: parts.slice(1).join(' '),
+  };
+}
+
+export function getOraclePrimaryProse(
+  input?: Pick<OracleResult, 'composition' | 'interpretation' | 'quote'> | null,
+): string {
+  const prose = normalizeWhitespace(input?.composition?.prose);
+  if (prose) return prose;
+
+  const interpretation = normalizeWhitespace(input?.interpretation);
+  if (interpretation) return interpretation;
+
+  return normalizeWhitespace(input?.quote);
+}
+
+export function getOracleTextLength(
+  input?: Pick<OracleResult, 'composition' | 'interpretation' | 'quote'> | null,
+): number {
+  const finalText = getOraclePrimaryProse(input);
+  return finalText.length;
+}
+
+function normalizeConfidence(value: unknown, fallback = 0.86): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  if (n < 0) return 0;
+  if (n > 1) return 1;
+  return n;
+}
+
+function normalizeGuardianFocus(
+  value: unknown,
+  fallback: GuardianSymbolicFocus,
+): GuardianSymbolicFocus {
+  switch (
+    String(value ?? '')
+      .trim()
+      .toLowerCase()
+  ) {
+    case 'threshold':
+      return 'threshold';
+    case 'climate':
+      return 'climate';
+    case 'burden':
+      return 'burden';
+    case 'fracture':
+      return 'fracture';
+    case 'desire':
+      return 'desire';
+    case 'renunciation':
+      return 'renunciation';
+    case 'circle':
+      return 'circle';
+    case 'return':
+      return 'return';
+    case 'form':
+      return 'form';
+    case 'question':
+      return 'question';
+    default:
+      return fallback;
+  }
+}
+
+function normalizeGuardianMovement(
+  value: unknown,
+  fallback: GuardianMovement,
+): GuardianMovement {
+  switch (
+    String(value ?? '')
+      .trim()
+      .toLowerCase()
+  ) {
+    case 'opening':
+      return 'opening';
+    case 'deepening':
+      return 'deepening';
+    case 'clarifying':
+      return 'clarifying';
+    case 'crossing':
+      return 'crossing';
+    case 'naming':
+      return 'naming';
+    case 'orienting':
+      return 'orienting';
+    case 'releasing':
+      return 'releasing';
+    case 'holding':
+      return 'holding';
+    case 'receiving':
+      return 'receiving';
+    default:
+      return fallback;
+  }
+}
+
+function normalizeGuardianTone(
+  value: unknown,
+  fallback: GuardianTone,
+): GuardianTone {
+  switch (
+    String(value ?? '')
+      .trim()
+      .toLowerCase()
+  ) {
+    case 'calm':
+      return 'calm';
+    case 'grave':
+      return 'grave';
+    case 'ardent':
+      return 'ardent';
+    case 'clear':
+      return 'clear';
+    default:
+      return fallback;
+  }
+}
+
+function defaultGuardianConfig(step: string) {
+  return getGuardianStepDefaults(step);
+}
+
+function looksGuardianGeneric(comment: string): boolean {
+  const clean = normalizeWhitespace(comment);
+  if (!clean) return true;
+
+  const ascii = stripDiacritics(clean.toLowerCase());
+  if (clean.length < 28) return true;
+
+  return GENERIC_GUARDIAN_PATTERNS.some((pattern) => pattern.test(ascii));
+}
+
+export function buildGuardianGuidanceFromPayload(
   step: string,
   value: string,
-  opts?: { retryReason?: string },
-): string {
-  const lines: string[] = [];
-  if (opts?.retryReason)
-    lines.push(`RETRY_REASON: ${toAscii(opts.retryReason)}`);
-  lines.push(`STEP: ${toAscii(step)}`);
-  lines.push(`CHOICE: ${toAscii(value)}`);
-  lines.push(
-    'SORTIE: JSON uniquement. Aucun markdown. Aucun texte hors JSON. Aucun ```.',
+  payload: GuardianPayloadLike = {},
+): GuardianGuidance {
+  const defaults = defaultGuardianConfig(step);
+  const isSafe = Boolean(payload?.isSafe ?? payload?.is_safe ?? true);
+  const confidence = normalizeConfidence(
+    payload?.confidence,
+    isSafe ? 0.9 : 0.74,
   );
-  return lines.join('\n');
+
+  const rawComment = normalizeWhitespace(payload?.comment);
+  const symbolic_focus = normalizeGuardianFocus(
+    payload?.symbolic_focus,
+    defaults.symbolic_focus,
+  );
+  const movement = normalizeGuardianMovement(
+    payload?.movement,
+    defaults.movement,
+  );
+  const tone = normalizeGuardianTone(payload?.tone, defaults.tone);
+
+  const rewrite_hint =
+    normalizeWhitespace(payload?.rewrite_hint) || defaults.rewrite_hint;
+
+  const deterministicGuidance = composeDeterministicGuardianGuidance(
+    step,
+    value,
+    {
+      isSafe,
+      symbolic_focus,
+      movement,
+      tone,
+    },
+  );
+
+  const deterministicComment = composeGuardianComment(
+    deterministicGuidance.echo,
+    deterministicGuidance.subcomment,
+  );
+
+  if (!rawComment || looksGuardianGeneric(rawComment)) {
+    return {
+      comment: deterministicComment,
+      ...deterministicGuidance,
+      isSafe,
+      confidence,
+      symbolic_focus,
+      movement,
+      tone,
+      rewrite_hint,
+    };
+  }
+
+  return {
+    comment: deterministicComment,
+    ...deterministicGuidance,
+    isSafe,
+    confidence,
+    symbolic_focus,
+    movement,
+    tone,
+    rewrite_hint,
+  };
 }
 
-function extractJson(text: string): any | null {
-  return extractFirstJsonObject(text);
+/**
+ * Unwrap robuste du retour de geminiGenerate()
+ * - soit envelope /api/gemini: { ok, mode, text, json, ... }
+ * - soit payload direct
+ * - si json absent mais text contient du JSON => extractFirstJsonObject(text)
+ */
+function unwrapGeminiPayload(r: any): {
+  env: any;
+  payload: any;
+  mode: string | null;
+} {
+  const env = r as any;
+  const mode = env?.mode ? String(env.mode) : null;
+
+  let payload: any = null;
+
+  if (env && typeof env === 'object' && 'json' in env) payload = env.json;
+
+  if (
+    !payload &&
+    env &&
+    typeof env === 'object' &&
+    (env.comment || env.quote || env.interpretation)
+  ) {
+    payload = env;
+  }
+
+  if (!payload && typeof env?.text === 'string') {
+    payload = extractFirstJsonObject(env.text);
+  }
+
+  return { env, payload, mode };
 }
 
 function buildVisualParams(raw: any): VisualParams {
@@ -231,276 +462,219 @@ function buildVisualParams(raw: any): VisualParams {
   return visualParams;
 }
 
-function buildOracleResult(ritual: RitualInput, data: any): OracleResult {
-  const quote = String(data?.quote || 'Le silence répond...');
-  const interpretation = String(
-    data?.interpretation || 'L’oracle demeure en attente.',
+function pickSentenceFromCitations(data: any, env?: any) {
+  const citations = Array.isArray(data?.citations)
+    ? data.citations
+    : Array.isArray(env?.citationsUsed)
+      ? env.citationsUsed
+      : [];
+
+  const compositionMotifs = Array.isArray(env?.composition?.motifs)
+    ? env.composition.motifs
+    : Array.isArray(data?.composition?.motifs)
+      ? data.composition.motifs
+      : [];
+
+  const citationIds =
+    compositionMotifs.length > 0
+      ? compositionMotifs.map((motif: any) => String(motif?.citation_id ?? ''))
+      : Array.isArray(data?.citation_ids)
+        ? data.citation_ids.map((id: any) => String(id))
+        : [];
+
+  const firstMatching =
+    citationIds.length > 0
+      ? citations.find((c: any) => citationIds.includes(String(c?.id)))
+      : null;
+
+  return firstMatching || citations[0] || null;
+}
+
+function buildOracleResult(
+  ritual: RitualInput,
+  data: any,
+  env?: any,
+): OracleResult {
+  const resolvedHermeneutic = isRecord(env?.hermeneutic)
+    ? env.hermeneutic
+    : isRecord(data?.hermeneutic)
+      ? data.hermeneutic
+      : null;
+
+  const resolvedComposition = isRecord(env?.composition)
+    ? env.composition
+    : isRecord(data?.composition)
+      ? data.composition
+      : null;
+
+  const quote = normalizeWhitespace(
+    data?.quote || 'Le silence ne ferme rien : il demande une autre entrée.',
   );
+
+  const interpretation = normalizeWhitespace(
+    resolvedComposition?.prose ||
+      data?.interpretation ||
+      data?.quote ||
+      'L’oracle demeure en attente, comme une porte encore à pousser.',
+  );
+
   const keywords = Array.isArray(data?.keywords)
     ? data.keywords.map((k: any) => String(k))
-    : [];
+    : Array.isArray(resolvedHermeneutic?.keywords)
+      ? resolvedHermeneutic.keywords.map((k: any) => String(k))
+      : [];
+
   const vpRaw =
     data?.visual_prescription ||
+    resolvedHermeneutic?.visual_prescription ||
     data?.visualParams ||
     data?.visual_params ||
     {};
+
   const visualParams = buildVisualParams(vpRaw);
-  const textLength = `${quote}${interpretation}`.length;
+
+  const first = pickSentenceFromCitations(data, env);
+
+  const sentence = {
+    id: String(first?.id ?? `z-${Date.now()}`),
+    text: String(first?.text ?? first?.quote ?? quote),
+    part_title: String(first?.part_title ?? 'Zarathoustra'),
+    section_title: String(first?.section_title ?? 'Source'),
+  };
 
   return {
-    sentence: {
-      id: `z-${Date.now()}`,
-      text: quote,
-      part_title: 'Oracle',
-      section_title: 'Revelation',
-    },
+    sentence,
     quote,
     interpretation,
     keywords,
     ritual,
+    hermeneutic: resolvedHermeneutic,
+    composition: resolvedComposition,
     tone: { sentiment: 0.5, intensity: 1.0, mysticism: 0.7 },
     themeScores: [],
     visualParams,
-    textLength,
+    textLength: getOracleTextLength({
+      quote,
+      interpretation,
+      composition: resolvedComposition,
+    }),
     seed: visualParams.seed,
     mainTheme: { themeId: 'will', score: 1, label: 'Volonte' },
   };
-}
-
-function hslToHex(h: number, s: number, l: number): string {
-  const hue2rgb = (p: number, q: number, t: number) => {
-    if (t < 0) t += 1;
-    if (t > 1) t -= 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
-  };
-
-  let r: number, g: number, b: number;
-
-  if (s === 0) {
-    r = g = b = l;
-  } else {
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    r = hue2rgb(p, q, h + 1 / 3);
-    g = hue2rgb(p, q, h);
-    b = hue2rgb(p, q, h - 1 / 3);
-  }
-
-  const toHex = (x: number) => {
-    const v = Math.max(0, Math.min(255, Math.round(x * 255)));
-    return v.toString(16).padStart(2, '0');
-  };
-
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-}
-
-function fallbackOracle(ritual: RitualInput): OracleResult {
-  const seed = JSON.stringify(ritual || {});
-  let h = 2166136261;
-  for (let i = 0; i < seed.length; i += 1)
-    h = Math.imul(h ^ seed.charCodeAt(i), 16777619);
-  const r = () => {
-    h += h << 13;
-    h ^= h >>> 7;
-    h += h << 3;
-    h ^= h >>> 17;
-    h += h << 5;
-    return (h >>> 0) / 4294967296;
-  };
-
-  const hue = r();
-  const chaos = 0.25 + r() * 0.55;
-  const fog = 0.15 + r() * 0.55;
-  const shapes = ['sphere', 'icosa', 'torus', 'torusKnot'] as const;
-  const shape = shapes[Math.floor(r() * shapes.length)];
-  const primary = hslToHex(hue, 0.65, 0.55);
-
-  const visualParams = buildVisualParams({
-    primary_color: primary,
-    chaos,
-    fog_density: fog,
-    shape_archetype: shape,
-  });
-
-  const quote = 'Le silence répond...';
-  const interpretation =
-    'L’API ne répond pas : l’oracle tisse un motif intérieur (mode dégradé).';
-  const textLength = `${quote}${interpretation}`.length;
-
-  return {
-    sentence: {
-      id: `z-${Date.now()}`,
-      text: quote,
-      part_title: 'Oracle',
-      section_title: 'Revelation',
-    },
-    quote,
-    interpretation,
-    keywords: ['silence', 'motif', 'respiration'],
-    ritual,
-    tone: { sentiment: 0.5, intensity: 0.8, mysticism: 0.7 },
-    themeScores: [],
-    visualParams,
-    textLength,
-    seed: visualParams.seed,
-    mainTheme: { themeId: 'will', score: 1, label: 'Volonte' },
-  };
-}
-
-const ORACLE_SYSTEM_PROMPT = [
-  'ROLE: Zarathoustra.',
-  'LANGUE: francais uniquement. Aucun anglais, aucun franglais.',
-  'STYLE: litteraire, court mais vivant.',
-  'SORTIE: JSON uniquement. Aucun markdown. Aucun texte hors JSON. Aucun ```.',
-  'REGLES_VISUELLES:',
-  "- primary_color: string '#RRGGBB'",
-  '- chaos: float 0..1',
-  '- fog_density: float 0..1',
-  "- shape_archetype: one of 'sphere','icosa','torus','torusKnot','tetra','octa','box','cone','dodeca','capsule','octaDetail','knotComplex'",
-  'OPTIONNEL:',
-  "- palette_mode: 'mono'|'complement'|'split'|'triad'|'analog'",
-  '- wire_layers: int 2..6',
-  '- particle_density: float 0..1',
-  "- motion_signature: 'calm'|'breath'|'link'|'storm'|'burst'",
-  'JSON_SCHEMA:',
-  '{',
-  '  "quote":"string",',
-  '  "interpretation":"string",',
-  '  "keywords":["string"],',
-  '  "visual_prescription":{',
-  '    "primary_color":"#ffaa00",',
-  '    "chaos":0.5,',
-  '    "fog_density":0.3,',
-  '    "shape_archetype":"torusKnot"',
-  '  }',
-  '}',
-].join('\n');
-
-const ORACLE_RETRY_JSON =
-  'RETRY_JSON: retourne un JSON valide uniquement. Aucun markdown. Aucun texte hors JSON. Aucun ```.';
-const ORACLE_RETRY_FR =
-  'RETRY_FR: reformule en francais uniquement. Aucun anglais. JSON uniquement.';
-
-const GUARDIAN_SYSTEM_PROMPT = [
-  'ROLE: Gardien du seuil.',
-  'LANGUE: francais uniquement. Aucun anglais, aucun franglais.',
-  'SORTIE: JSON uniquement. Aucun markdown. Aucun texte hors JSON. Aucun ```.',
-  'JSON_SCHEMA:',
-  '{ "comment":"string", "isSafe":boolean }',
-].join('\n');
-
-const GUARDIAN_RETRY_JSON =
-  'RETRY_JSON: retourne un JSON valide uniquement. Aucun markdown. Aucun texte hors JSON. Aucun ```.';
-const GUARDIAN_RETRY_FR =
-  'RETRY_FR: reformule en francais uniquement. Aucun anglais. JSON uniquement.';
-
-async function requestJsonWithRetry(
-  traceId: string,
-  prompts: string[],
-  allowJsonRetry: boolean,
-  retryHint: string,
-  opts?: { temperature?: number; topP?: number; maxOutputTokens?: number },
-): Promise<{ data: any | null; rawText: string; jsonRetryUsed: boolean }> {
-  const joined = prompts.join('\n\n');
-
-  const first = await geminiGenerate(joined, {
-    traceId,
-    temperature: opts?.temperature ?? 0.9,
-    topP: opts?.topP ?? 0.95,
-    maxOutputTokens: opts?.maxOutputTokens ?? 1200,
-  });
-
-  const firstText = String(first.text ?? '');
-  const firstData = extractJson(firstText);
-
-  if (firstData || !allowJsonRetry) {
-    return { data: firstData, rawText: firstText, jsonRetryUsed: false };
-  }
-
-  const retryPrompts = [...prompts, retryHint];
-  const retryJoined = retryPrompts.join('\n\n');
-
-  const retry = await geminiGenerate(retryJoined, {
-    traceId,
-    temperature: opts?.temperature ?? 0.9,
-    topP: opts?.topP ?? 0.95,
-    maxOutputTokens: opts?.maxOutputTokens ?? 1200,
-  });
-
-  const retryText = String(retry.text ?? '');
-  const retryData = extractJson(retryText);
-
-  return { data: retryData, rawText: retryText, jsonRetryUsed: true };
 }
 
 export async function getStepGuidance(
   step: string,
   value: string,
-  opts?: { debug?: boolean; traceId?: string },
-): Promise<{ comment: string; isSafe: boolean }> {
-  const traceId = (opts?.traceId ?? makeTraceId('guard')).trim();
+  opts?: { debug?: boolean },
+): Promise<GuardianGuidance> {
   const guard = new ZaraLangGuard(!!opts?.debug);
 
   try {
-    const basePrompt = buildGuardianPrompt(step, value);
-    const basePrompts = [GUARDIAN_SYSTEM_PROMPT, basePrompt];
+    const stepA = toAscii(step);
+    const valueA = toAscii(value);
+    const valueDisplay = normalizeWhitespace(value);
 
-    let jsonRetryUsed = false;
+    const prompt = [
+      'Tu es le Gardien du Seuil.',
+      'Tu verifies une etape du rituel et tu aides l utilisateur a poursuivre.',
+      'Reponds en JSON strict.',
+      'Le contrat doit toujours contenir: comment, isSafe, confidence.',
+      'Ajoute si possible: symbolic_focus, movement, tone, rewrite_hint.',
+      'symbolic_focus ∈ threshold|climate|burden|fracture|desire|renunciation|circle|return|form|question.',
+      'movement ∈ opening|deepening|clarifying|crossing|naming|orienting|releasing|holding|receiving.',
+      'tone ∈ calm|grave|ardent|clear.',
+      'comment = une seule phrase courte, specifique a l etape, attentive aux mots fournis, jamais bureaucratique.',
+      'Si isSafe=true, la phrase doit ouvrir la suite en interpretant legerement le texte.',
+      'INTERDIT: "acceptable", "sans signal de danger", "valide", "ok", "n apporte pas de sens", "simple".',
+      'Pour un prenom simple, transforme-le en seuil symbolique sobre.',
+      'FORMAT JSON STRICT OBLIGATOIRE:',
+      '{"comment": string, "isSafe": boolean, "confidence": number, "symbolic_focus"?: string, "movement"?: string, "tone"?: string, "rewrite_hint"?: string}',
+      '',
+      `ETAPE: ${stepA}`,
+      `TEXTE: ${valueA}`,
+    ].join('\n');
 
-    const first = await requestJsonWithRetry(
-      traceId,
-      basePrompts,
-      true,
-      GUARDIAN_RETRY_JSON,
-      {
-        temperature: 0.8,
-        topP: 0.9,
-        maxOutputTokens: 500,
-      },
-    );
+    const r = await geminiGenerate(prompt, {
+      mode: 'guardian',
+      step: stepA,
+      value: valueA,
+      expectJson: true,
+      temperature: 0.2,
+      maxOutputTokens: 500,
+    });
 
-    jsonRetryUsed = first.jsonRetryUsed;
+    const { env, payload, mode } = unwrapGeminiPayload(r);
 
-    if (!first.data) return { comment: 'Le silence répond...', isSafe: true };
-
-    let comment = String(first.data.comment || 'Le silence répond...');
-    let isSafe = Boolean(first.data.isSafe ?? true);
-
-    if (guard.shouldRetry(comment)) {
-      const retryPrompt = buildGuardianPrompt(step, value, {
-        retryReason: 'EN_LIKELY',
+    if (!payload) {
+      logDevRuntimeEvent('guardian_fallback_or_guardian_error', {
+        reason: 'payload_missing',
+        step: stepA,
+        value: valueDisplay,
+        traceId: r?.traceId ?? null,
       });
-      const retryPrompts = [
-        GUARDIAN_SYSTEM_PROMPT,
-        retryPrompt,
-        GUARDIAN_RETRY_FR,
-      ];
-
-      const retry = await requestJsonWithRetry(
-        traceId,
-        retryPrompts,
-        !jsonRetryUsed,
-        GUARDIAN_RETRY_JSON,
-        {
-          temperature: 0.6,
-          topP: 0.9,
-          maxOutputTokens: 500,
-        },
-      );
-
-      if (retry.data) {
-        comment = String(retry.data.comment || comment);
-        isSafe = Boolean(retry.data.isSafe ?? isSafe);
-      }
+      return buildGuardianGuidanceFromPayload(stepA, valueDisplay, {
+        isSafe: true,
+      });
     }
 
-    return { comment, isSafe };
+    const rawComment =
+      mode === 'guardian'
+        ? composeGuardianCommentFromEnvelope(
+            env?.guidance,
+            payload?.comment ?? env?.text ?? '',
+          )
+        : mode === 'oracle'
+          ? String(payload?.interpretation ?? payload?.quote ?? env?.text ?? '')
+          : String(payload?.comment ?? env?.text ?? '');
+
+    const guidance = buildGuardianGuidanceFromPayload(stepA, valueDisplay, {
+      ...(payload && typeof payload === 'object' ? payload : {}),
+      comment: rawComment,
+      isSafe: payload?.isSafe ?? payload?.is_safe ?? true,
+    });
+
+    const governedGuidance = readGuardianGuidanceBlock(env?.guidance);
+    const fallbackComment = normalizeWhitespace(rawComment);
+
+    const finalGuidance = governedGuidance
+      ? {
+          ...guidance,
+          ...governedGuidance,
+          comment: composeGuardianComment(
+            governedGuidance.echo,
+            governedGuidance.subcomment,
+          ),
+        }
+      : fallbackComment && !looksGuardianGeneric(fallbackComment)
+        ? {
+            ...guidance,
+            comment: fallbackComment,
+          }
+        : guidance;
+
+    if (guard.shouldRetry(rawComment)) {
+      logDevRuntimeEvent('guardian_fallback_or_guardian_error', {
+        reason: 'language_guard_retry',
+        step: stepA,
+        value: valueDisplay,
+        traceId: r?.traceId ?? null,
+      });
+      return buildGuardianGuidanceFromPayload(stepA, valueDisplay, {
+        ...finalGuidance,
+        comment: '',
+      });
+    }
+
+    return finalGuidance;
   } catch (e) {
+    logDevRuntimeEvent('guardian_fallback_or_guardian_error', {
+      reason: e instanceof Error ? e.message : 'guardian_error',
+      step,
+      value: normalizeWhitespace(value),
+    });
     logger.warn('Guardian error:', e);
-    return { comment: 'Le silence répond...', isSafe: true };
+    return buildGuardianGuidanceFromPayload(step, value, { isSafe: true });
   }
 }
 
@@ -508,77 +682,50 @@ export async function consultOracle(
   ritual: RitualInput,
   opts?: OracleOptions,
 ): Promise<OracleResult> {
-  const traceId = (opts?.traceId ?? makeTraceId('oracle')).trim();
+  logger.log('Invocation for:', ritual?.nameOrNickname || 'unknown');
 
-  logger.log(
-    'Invocation for:',
-    ritual?.nameOrNickname || 'unknown',
-    'traceId=',
-    traceId,
-  );
-
+  const cleanRitual = sanitizeRitualForPrompt(ritual);
   const guard = new ZaraLangGuard(!!opts?.debug);
-  const basePrompt = buildOraclePrompt(ritual, opts?.climateSnapshot ?? null);
-  const basePrompts = [ORACLE_SYSTEM_PROMPT, basePrompt];
 
   try {
-    let jsonRetryUsed = false;
+    const prompt = [
+      'Tu es Zarathoustra.',
+      'Donne une reponse-oracle breve mais vivante.',
+      'Tu dois t appuyer sur les citations fournies par le serveur.',
+      'Lis les mots du rituel comme des signes en tension : peur, desir, sacrifice, poids, lien aux autres, retour.',
+      'Integre les formulations de l utilisateur au lieu de les survoler.',
+      'Produis une lecture symbolique, dynamique et philosophique, pas une simple validation.',
+      'Si l entree est minimale, transforme-la en symbole vivant au lieu de la juger vide.',
+      'Format JSON strict attendu.',
+    ].join('\n');
 
-    const first = await requestJsonWithRetry(
-      traceId,
-      basePrompts,
-      true,
-      ORACLE_RETRY_JSON,
-      {
-        temperature: 1.0,
-        topP: 0.95,
-        maxOutputTokens: 1400,
-      },
-    );
+    const r = await geminiGenerate(prompt, {
+      mode: 'oracle',
+      ritual: cleanRitual,
+      climateSnapshot: opts?.climateSnapshot ?? null,
+      expectJson: true,
+      temperature: 0.7,
+      topP: 0.9,
+      maxOutputTokens: 1200,
+    });
 
-    jsonRetryUsed = first.jsonRetryUsed;
-
-    if (!first.data) {
-      logger.warn('Oracle response not JSON; fallback. traceId=', traceId);
-      return fallbackOracle(ritual);
+    const { payload } = unwrapGeminiPayload(r);
+    if (!payload) {
+      throw new Error('Oracle payload missing in API response.');
     }
 
-    let result = buildOracleResult(ritual, first.data);
+    const result = buildOracleResult(ritual, payload, r);
     const combined = `${result.quote} ${result.interpretation}`;
 
     if (guard.shouldRetry(combined)) {
-      const retryPrompt = buildOraclePrompt(
-        ritual,
-        opts?.climateSnapshot ?? null,
-        {
-          retryReason: 'EN_LIKELY',
-        },
-      );
-      const retryPrompts = [ORACLE_SYSTEM_PROMPT, retryPrompt, ORACLE_RETRY_FR];
-
-      const retry = await requestJsonWithRetry(
-        traceId,
-        retryPrompts,
-        !jsonRetryUsed,
-        ORACLE_RETRY_JSON,
-        {
-          temperature: 0.7,
-          topP: 0.9,
-          maxOutputTokens: 1400,
-        },
-      );
-
-      if (!retry.data) {
-        logger.warn('Oracle retry failed; fallback. traceId=', traceId);
-        return fallbackOracle(ritual);
-      }
-
-      result = buildOracleResult(ritual, retry.data);
+      throw new Error('Oracle output rejected by language guard.');
     }
 
     return result;
   } catch (error) {
-    logger.warn('Oracle error:', error, 'traceId=', traceId);
-    return fallbackOracle(ritual);
+    logger.warn('Oracle error:', error);
+    throw error instanceof Error
+      ? error
+      : new Error('Oracle invocation failed.');
   }
 }

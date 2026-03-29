@@ -1,0 +1,22 @@
+# Default owner for the whole repository
+* @flobehejohn
+
+# GitHub / CI / platform
+.github/** @flobehejohn
+vercel.json @flobehejohn
+
+# Application source
+src/** @flobehejohn
+public/** @flobehejohn
+
+# Tooling / configuration
+scripts/** @flobehejohn
+package.json @flobehejohn
+package-lock.json @flobehejohn
+tsconfig*.json @flobehejohn
+vite.config.* @flobehejohn
+vitest.config.* @flobehejohn
+
+# Documentation
+*.md @flobehejohn
+docs/** @flobehejohn

@@ -1,0 +1,896 @@
+{
+  "work": "Ainsi parlait Zarathoustra",
+  "author": "Friedrich Nietzsche",
+  "sections": [
+    {
+      "type": "part",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": null,
+      "title": "PREMIÈRE PARTIE",
+      "line_index": 8,
+      "start": 111,
+      "end": 128
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 1,
+      "title": "LE PROLOGUE DE ZARATHOUSTRA",
+      "line_index": 10,
+      "start": 128,
+      "end": 28411
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 2,
+      "title": "LES DISCOURS DE ZARATHOUSTRA",
+      "line_index": 374,
+      "start": 28411,
+      "end": 32493
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 3,
+      "title": "DES CHAIRES DE LA VERTU",
+      "line_index": 434,
+      "start": 32493,
+      "end": 37543
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 4,
+      "title": "DES HALLUCINÉS DE L’ARRIÈRE-MONDE",
+      "line_index": 512,
+      "start": 37543,
+      "end": 43691
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 5,
+      "title": "DES CONTEMPTEURS DU CORPS",
+      "line_index": 586,
+      "start": 43691,
+      "end": 47036
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 6,
+      "title": "DES JOIES ET DES PASSIONS",
+      "line_index": 636,
+      "start": 47036,
+      "end": 50330
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 7,
+      "title": "DU PÂLE CRIMINEL",
+      "line_index": 690,
+      "start": 50330,
+      "end": 54436
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 8,
+      "title": "LIRE ET ÉCRIRE",
+      "line_index": 752,
+      "start": 54436,
+      "end": 57630
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 9,
+      "title": "DE L’ARBRE SUR LA MONTAGNE",
+      "line_index": 808,
+      "start": 57630,
+      "end": 63042
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 10,
+      "title": "DES PRÉDICATEURS DE LA MORT",
+      "line_index": 894,
+      "start": 63042,
+      "end": 66655
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 11,
+      "title": "DE LA GUERRE ET DES GUERRIERS",
+      "line_index": 946,
+      "start": 66655,
+      "end": 70176
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 12,
+      "title": "DE LA NOUVELLE IDOLE",
+      "line_index": 1004,
+      "start": 70176,
+      "end": 75152
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 13,
+      "title": "DES MOUCHES DE LA PLACE PUBLIQUE",
+      "line_index": 1082,
+      "start": 75152,
+      "end": 80943
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 14,
+      "title": "DE LA CHASTETÉ",
+      "line_index": 1170,
+      "start": 80943,
+      "end": 83358
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 15,
+      "title": "DE L’AMI",
+      "line_index": 1216,
+      "start": 83358,
+      "end": 87050
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 16,
+      "title": "MILLE ET UN BUTS",
+      "line_index": 1276,
+      "start": 87050,
+      "end": 91799
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 17,
+      "title": "DE L’AMOUR DU PROCHAIN",
+      "line_index": 1344,
+      "start": 91799,
+      "end": 94868
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 18,
+      "title": "DES VOIES DU CRÉATEUR",
+      "line_index": 1388,
+      "start": 94868,
+      "end": 99776
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 19,
+      "title": "LA VIEILLE ET LA JEUNE FEMME",
+      "line_index": 1468,
+      "start": 99776,
+      "end": 103868
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 20,
+      "title": "LA MORSURE ET LA VIPÈRE",
+      "line_index": 1550,
+      "start": 103868,
+      "end": 107009
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 21,
+      "title": "DE L’ENFANT ET DU MARIAGE",
+      "line_index": 1598,
+      "start": 107009,
+      "end": 110815
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 22,
+      "title": "DE LA MORT VOLONTAIRE",
+      "line_index": 1664,
+      "start": 110815,
+      "end": 116048
+    },
+    {
+      "type": "section",
+      "part_index": 1,
+      "part_title": "PREMIÈRE PARTIE",
+      "section_index": 23,
+      "title": "DE LA VERTU QUI DONNE",
+      "line_index": 1744,
+      "start": 116048,
+      "end": 125038
+    },
+    {
+      "type": "part",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": null,
+      "title": "DEUXIÈME PARTIE",
+      "line_index": 1868,
+      "start": 125038,
+      "end": 125296
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 1,
+      "title": "L’ENFANT AU MIROIR",
+      "line_index": 1878,
+      "start": 125296,
+      "end": 130456
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 2,
+      "title": "SUR LES ILES BIENHEUREUSES",
+      "line_index": 1958,
+      "start": 130456,
+      "end": 135617
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 3,
+      "title": "DES MISÉRICORDIEUX",
+      "line_index": 2034,
+      "start": 135617,
+      "end": 140919
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 4,
+      "title": "DES PRÊTRES",
+      "line_index": 2124,
+      "start": 140919,
+      "end": 145809
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 5,
+      "title": "DES VERTUEUX",
+      "line_index": 2198,
+      "start": 145809,
+      "end": 152057
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 6,
+      "title": "DE LA CANAILLE",
+      "line_index": 2282,
+      "start": 152057,
+      "end": 157085
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 7,
+      "title": "DES TARENTULES",
+      "line_index": 2358,
+      "start": 157085,
+      "end": 163712
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 8,
+      "title": "DES SAGES ILLUSTRES",
+      "line_index": 2450,
+      "start": 163712,
+      "end": 169219
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 9,
+      "title": "LE CHANT DE LA NUIT",
+      "line_index": 2530,
+      "start": 169219,
+      "end": 172968
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 10,
+      "title": "LE CHANT DE LA DANSE",
+      "line_index": 2594,
+      "start": 172968,
+      "end": 177891
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 11,
+      "title": "LE CHANT DU TOMBEAU",
+      "line_index": 2672,
+      "start": 177891,
+      "end": 184350
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 12,
+      "title": "DE LA VICTOIRE SUR SOI-MÊME",
+      "line_index": 2754,
+      "start": 184350,
+      "end": 191165
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 13,
+      "title": "DES HOMMES SUBLIMES",
+      "line_index": 2850,
+      "start": 191165,
+      "end": 195769
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 14,
+      "title": "DU PAYS DE LA CIVILISATION",
+      "line_index": 2924,
+      "start": 195769,
+      "end": 200768
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 15,
+      "title": "DE L’IMMACULÉE CONNAISSANCE",
+      "line_index": 2996,
+      "start": 200768,
+      "end": 206416
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 16,
+      "title": "DES SAVANTS",
+      "line_index": 3086,
+      "start": 206416,
+      "end": 210336
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 17,
+      "title": "DES POÈTES",
+      "line_index": 3148,
+      "start": 210336,
+      "end": 216124
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 18,
+      "title": "DES GRANDS ÉVÉNEMENTS",
+      "line_index": 3246,
+      "start": 216124,
+      "end": 223577
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 19,
+      "title": "LE DEVIN",
+      "line_index": 3344,
+      "start": 223577,
+      "end": 230911
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 20,
+      "title": "DE LA RÉDEMPTION",
+      "line_index": 3448,
+      "start": 230911,
+      "end": 240737
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 21,
+      "title": "DE LA SAGESSE DES HOMMES",
+      "line_index": 3566,
+      "start": 240737,
+      "end": 246431
+    },
+    {
+      "type": "section",
+      "part_index": 2,
+      "part_title": "DEUXIÈME PARTIE",
+      "section_index": 22,
+      "title": "L’HEURE LA PLUS SILENCIEUSE",
+      "line_index": 3658,
+      "start": 246431,
+      "end": 251932
+    },
+    {
+      "type": "part",
+      "part_index": 3,
+      "part_title": "TROISIÈME PARTIE",
+      "section_index": null,
+      "title": "TROISIÈME PARTIE",
+      "line_index": 3754,
+      "start": 251932,
+      "end": 252243
+    },
+    {
+      "type": "section",
+      "part_index": 3,
+      "part_title": "TROISIÈME PARTIE",
+      "section_index": 1,
+      "title": "LE VOYAGEUR",
+      "line_index": 3766,
+      "start": 252243,
+      "end": 258574
+    },
+    {
+      "type": "section",
+      "part_index": 3,
+      "part_title": "TROISIÈME PARTIE",
+      "section_index": 2,
+      "title": "DE LA VISION ET DE L’ÉNIGME",
+      "line_index": 3846,
+      "start": 258574,
+      "end": 268429
+    },
+    {
+      "type": "section",
+      "part_index": 3,
+      "part_title": "TROISIÈME PARTIE",
+      "section_index": 3,
+      "title": "DE LA BÉATITUDE INVOLONTAIRE",
+      "line_index": 3960,
+      "start": 268429,
+      "end": 275070
+    },
+    {
+      "type": "section",
+      "part_index": 3,
+      "part_title": "TROISIÈME PARTIE",
+      "section_index": 4,
+      "title": "AVANT LE LEVER DU SOLEIL",
+      "line_index": 4042,
+      "start": 275070,
+      "end": 280930
+    },
+    {
+      "type": "section",
+      "part_index": 3,
+      "part_title": "TROISIÈME PARTIE",
+      "section_index": 5,
+      "title": "DE LA VERTU QUI RAPETISSE",
+      "line_index": 4120,
+      "start": 280930,
+      "end": 291693
+    },
+    {
+      "type": "section",
+      "part_index": 3,
+      "part_title": "TROISIÈME PARTIE",
+      "section_index": 6,
+      "title": "SUR LE MONT DES OLIVIERS",
+      "line_index": 4268,
+      "start": 291693,
+      "end": 297618
+    },
+    {
+      "type": "section",
+      "part_index": 3,
+      "part_title": "TROISIÈME PARTIE",
+      "section_index": 7,
+      "title": "EN PASSANT",
+      "line_index": 4346,
+      "start": 297618,
+      "end": 303470
+    },
+    {
+      "type": "section",
+      "part_index": 3,
+      "part_title": "TROISIÈME PARTIE",
+      "section_index": 8,
+      "title": "DES TRANSFUGES",
+      "line_index": 4422,
+      "start": 303470,
+      "end": 311665
+    },
+    {
+      "type": "section",
+      "part_index": 3,
+      "part_title": "TROISIÈME PARTIE",
+      "section_index": 9,
+      "title": "LE RETOUR",
+      "line_index": 4524,
+      "start": 311665,
+      "end": 318764
+    },
+    {
+      "type": "section",
+      "part_index": 3,
+      "part_title": "TROISIÈME PARTIE",
+      "section_index": 10,
+      "title": "DES TROIS MAUX",
+      "line_index": 4610,
+      "start": 318764,
+      "end": 328252
+    },
+    {
+      "type": "section",
+      "part_index": 3,
+      "part_title": "TROISIÈME PARTIE",
+      "section_index": 11,
+      "title": "DE L’ESPRIT DE LOURDEUR",
+      "line_index": 4718,
+      "start": 328252,
+      "end": 336453
+    },
+    {
+      "type": "section",
+      "part_index": 3,
+      "part_title": "TROISIÈME PARTIE",
+      "section_index": 12,
+      "title": "DES VIEILLES ET DES NOUVELLES TABLES",
+      "line_index": 4816,
+      "start": 336453,
+      "end": 371896
+    },
+    {
+      "type": "section",
+      "part_index": 3,
+      "part_title": "TROISIÈME PARTIE",
+      "section_index": 13,
+      "title": "LE CONVALESCENT",
+      "line_index": 5310,
+      "start": 371896,
+      "end": 384970
+    },
+    {
+      "type": "section",
+      "part_index": 3,
+      "part_title": "TROISIÈME PARTIE",
+      "section_index": 14,
+      "title": "DU GRAND DÉSIR",
+      "line_index": 5456,
+      "start": 384970,
+      "end": 390250
+    },
+    {
+      "type": "section",
+      "part_index": 3,
+      "part_title": "TROISIÈME PARTIE",
+      "section_index": 15,
+      "title": "L’AUTRE CHANT DE LA DANSE",
+      "line_index": 5516,
+      "start": 390250,
+      "end": 396163
+    },
+    {
+      "type": "section",
+      "part_index": 3,
+      "part_title": "TROISIÈME PARTIE",
+      "section_index": 16,
+      "title": "LES SEPT SCEAUX",
+      "line_index": 5658,
+      "start": 396163,
+      "end": 402372
+    },
+    {
+      "type": "part",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": null,
+      "title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "line_index": 5754,
+      "start": 402372,
+      "end": 402884
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 1,
+      "title": "L’OFFRANDE DU MIEL",
+      "line_index": 5766,
+      "start": 402884,
+      "end": 410417
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 2,
+      "title": "LE CRI DE DÉTRESSE",
+      "line_index": 5826,
+      "start": 410417,
+      "end": 417278
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 3,
+      "title": "ENTRETIEN AVEC LES ROIS",
+      "line_index": 5900,
+      "start": 417278,
+      "end": 425383
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 4,
+      "title": "LA SANGSUE",
+      "line_index": 5994,
+      "start": 425383,
+      "end": 432194
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 5,
+      "title": "L’ENCHANTEUR",
+      "line_index": 6080,
+      "start": 432194,
+      "end": 442573
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 6,
+      "title": "HORS DE SERVICE",
+      "line_index": 6292,
+      "start": 442573,
+      "end": 451399
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 7,
+      "title": "LE PLUS LAID DES HOMMES",
+      "line_index": 6400,
+      "start": 451399,
+      "end": 461812
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 8,
+      "title": "LE MENDIANT VOLONTAIRE",
+      "line_index": 6514,
+      "start": 461812,
+      "end": 470461
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 9,
+      "title": "L’OMBRE",
+      "line_index": 6602,
+      "start": 470461,
+      "end": 477286
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 10,
+      "title": "EN PLEIN MIDI",
+      "line_index": 6694,
+      "start": 477286,
+      "end": 483307
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 11,
+      "title": "LA SALUTATION",
+      "line_index": 6756,
+      "start": 483307,
+      "end": 494582
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 12,
+      "title": "LA CÈNE",
+      "line_index": 6854,
+      "start": 494582,
+      "end": 498812
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 13,
+      "title": "DE L’HOMME SUPÉRIEUR",
+      "line_index": 6908,
+      "start": 498812,
+      "end": 517128
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 14,
+      "title": "LE CHANT DE LA MÉLANCOLIE",
+      "line_index": 7170,
+      "start": 517128,
+      "end": 523588
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 15,
+      "title": "DE LA SCIENCE",
+      "line_index": 7238,
+      "start": 523588,
+      "end": 529753
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 16,
+      "title": "PARMI LES FILLES DU DÉSERT",
+      "line_index": 7296,
+      "start": 529753,
+      "end": 536679
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 17,
+      "title": "LE RÉVEIL",
+      "line_index": 7406,
+      "start": 536679,
+      "end": 543098
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 18,
+      "title": "LA FÊTE DE L’ANE",
+      "line_index": 7486,
+      "start": 543098,
+      "end": 549756
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 19,
+      "title": "LE CHANT D’IVRESSE",
+      "line_index": 7580,
+      "start": 549756,
+      "end": 564017
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 20,
+      "title": "LE SIGNE",
+      "line_index": 7740,
+      "start": 564017,
+      "end": 570203
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 21,
+      "title": "APPENDICE",
+      "line_index": 7796,
+      "start": 570203,
+      "end": 577055
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 22,
+      "title": "DIFFÉRENTS INSTRUMENTS",
+      "line_index": 7908,
+      "start": 577055,
+      "end": 593005
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 23,
+      "title": "HOMMES SUPÉRIEURS QUI, DANS LEUR DÉTRESSE, VIENNENT À ZARATHOUSTRA.",
+      "line_index": 8204,
+      "start": 593005,
+      "end": 599170
+    },
+    {
+      "type": "section",
+      "part_index": 4,
+      "part_title": "QUATRIÈME ET DERNIÈRE PARTIE",
+      "section_index": 24,
+      "title": "NOTES",
+      "line_index": 8318,
+      "start": 599170,
+      "end": 606041
+    }
+  ]
+}

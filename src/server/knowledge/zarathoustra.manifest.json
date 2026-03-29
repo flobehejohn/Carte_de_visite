@@ -1,0 +1,31 @@
+{
+  "generatedAt": "2026-03-13T17:05:32.9819626+01:00",
+  "knowledgeDir": "src/server/knowledge",
+  "files": [
+    {
+      "name": "zarathoustra.sentences.tagged.json",
+      "sha256": "4d26a9ed218c384b7ade0cdbcc792915040326cc0f131ce0f7ecd38a562f99ff",
+      "bytes": 3010991
+    },
+    {
+      "name": "zarathoustra.structure.json",
+      "sha256": "a0b77787e5516dc0d36559c56b6f541fcbecbf68ba5191ffc8216b295db6f294",
+      "bytes": 21394
+    },
+    {
+      "name": "zarathoustra.txt",
+      "sha256": "e872eb80ceef11dafcfd3f9908268be0c2f6ca044f841f3214babd4d268d2121",
+      "bytes": 646029
+    },
+    {
+      "name": "zarathoustra.clean.txt",
+      "sha256": "d6d6d2c289e7d862bf93784c4e2dc60594bd98eeed2a5190a5ebb5fd93089ddb",
+      "bytes": 634840
+    },
+    {
+      "name": "zarathoustra.sentences.json",
+      "sha256": "5e9e7908bd3465f63b5657853907967d76eb5ef5217b972f9ae58d3fbbe36aec",
+      "bytes": 1666441
+    }
+  ]
+}

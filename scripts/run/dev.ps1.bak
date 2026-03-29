@@ -1,0 +1,102 @@
+[CmdletBinding()]
+param(
+  [ValidateSet('vite','vercel')]
+  [string]$Mode = 'vercel',
+
+  [int]$Port = 3000,
+  [string]$BindHost = '127.0.0.1',
+
+  [switch]$AutoPort,
+  [int]$PortStart = 3000,
+  [int]$PortEnd = 3999,
+
+  # ⚠️ NE PAS s'appeler Debug (PowerShell a déjà -Debug en paramètre commun)
+  [switch]$VercelCliDebug
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+function Fail([string]$msg, [int]$code = 1) { Write-Host $msg -ForegroundColor Red; exit $code }
+function InfoMsg([string]$msg) { Write-Host $msg -ForegroundColor Cyan }
+function OkMsg([string]$msg) { Write-Host $msg -ForegroundColor Green }
+
+function Ensure-Dir([string]$path) {
+  if (-not (Test-Path $path)) { New-Item -ItemType Directory -Force -Path $path | Out-Null }
+}
+
+function Get-Listening {
+  param([int]$p, [string]$h)
+
+  if (-not $IsWindows) { return @() }
+
+  @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.LocalPort -eq $p -and (
+        $_.LocalAddress -eq $h -or
+        $_.LocalAddress -eq '127.0.0.1' -or
+        $_.LocalAddress -eq '0.0.0.0' -or
+        $_.LocalAddress -eq '::'
+      )
+    })
+}
+
+function Ensure-PortFree([int]$p, [string]$h) {
+  $list = Get-Listening -p $p -h $h
+  if ($list.Length -gt 0) {
+    $pids = ($list | Select-Object -ExpandProperty OwningProcess -Unique) -join ','
+    throw ('Port {0}:{1} déjà occupé. PID(s): {2}' -f $h, $p, $pids)
+  }
+}
+
+function Find-FreePort([int]$from, [int]$to, [string]$h) {
+  for ($p = $from; $p -le $to; $p++) {
+    if ((Get-Listening -p $p -h $h).Length -eq 0) { return $p }
+  }
+  throw ('Aucun port libre trouvé dans [{0}..{1}] sur {2}' -f $from, $to, $h)
+}
+
+function Resolve-VercelLauncher {
+  $cmd = Get-Command 'vercel.cmd' -ErrorAction SilentlyContinue
+  if ($cmd -and $cmd.CommandType -eq 'Application') { return $cmd.Source }
+
+  $exe = Get-Command 'vercel.exe' -ErrorAction SilentlyContinue
+  if ($exe -and $exe.CommandType -eq 'Application') { return $exe.Source }
+
+  return 'vercel'
+}
+
+# Repo root = 2 niveaux au-dessus de scripts/run
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+Set-Location $repoRoot
+
+if ($AutoPort) { $Port = Find-FreePort -from $PortStart -to $PortEnd -h $BindHost }
+else { Ensure-PortFree -p $Port -h $BindHost }
+
+$baseUrl = ('http://{0}:{1}' -f $BindHost, $Port)
+InfoMsg ('[dev] mode={0} bindHost={1} port={2} repo={3}' -f $Mode, $BindHost, $Port, $repoRoot)
+OkMsg   ('[dev] url={0}' -f $baseUrl)
+
+# Vite lit process.env.PORT (via vite.config.ts)
+$env:PORT = "$Port"
+
+if ($Mode -eq 'vite') {
+  & npm run dev
+  exit $LASTEXITCODE
+}
+
+# Mode vercel = UI + /api/*
+$token = $env:VERCEL_TOKEN
+if (-not $token) { Fail '[dev] FAIL: VERCEL_TOKEN absent. Ex: $env:VERCEL_TOKEN = ''vcp_...''' 3 }
+
+$gc = Join-Path $repoRoot '.vercel-global'
+Ensure-Dir $gc
+
+$vercelPath = Resolve-VercelLauncher
+$listen = ('{0}:{1}' -f $BindHost, $Port)
+
+$args = @('dev','--listen',$listen,'--cwd',$repoRoot,'--token',$token,'--global-config',$gc)
+if ($VercelCliDebug) { $args = @('--debug') + $args }
+
+& $vercelPath @args
+exit $LASTEXITCODE

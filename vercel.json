@@ -1,7 +1,15 @@
 {
+  "framework": "vite",
+  "buildCommand": "node scripts/vercel-build.cjs",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/**/*.ts": {
+      "includeFiles": "src/server/knowledge/**"
+    }
+  },
   "routes": [
-    { "src": "^/api/(.*)$", "status": 404 },
     { "handle": "filesystem" },
+    { "src": "/api/(.*)", "dest": "/api/$1" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
 }

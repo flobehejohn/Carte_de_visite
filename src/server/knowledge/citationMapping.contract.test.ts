@@ -1,0 +1,290 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+
+import { handleGeminiRequest } from '../../../api/gemini.js';
+import { OracleRequestSchema } from '../contracts/oracle.schemas.js';
+import type { Citation } from '../contracts/oracle.types.js';
+import {
+  loadZaraSentences,
+  type ZaraSentence,
+} from './loadZarathoustra.js';
+import { retrieveZaraCitations } from './retriever.js';
+
+type HandlerDeps = NonNullable<Parameters<typeof handleGeminiRequest>[1]>;
+type StructuredImpl = NonNullable<HandlerDeps['callGeminiStructuredImpl']>;
+type RawImpl = NonNullable<HandlerDeps['callGeminiImpl']>;
+
+type CitationLike = Citation | Record<string, unknown>;
+
+const PROMPT = 'Rituel: je franchis le seuil et je cite Zarathoustra.';
+const NAME_OR_NICKNAME = 'mapping-proof';
+
+function buildOracleRetrievalQuery(prompt: string, nameOrNickname: string): string {
+  return JSON.stringify({
+    ritual: { nameOrNickname },
+    prompt,
+    climate: null,
+  });
+}
+
+function makeOracleHermeneuticPayload(citationIds: string[]) {
+  return {
+    quote: 'Test quote',
+    opening_image: 'Une lueur se tient dans la phrase.',
+    central_tension: 'Le passage cherche sa figure juste.',
+    reversal: 'La citation devient axe de transformation.',
+    imperative: 'Tiens le fil du texte sans te raidir.',
+    return_axis: 'Reviens aux images quand le sens se disperse.',
+    keywords: ['lueur', 'passage', 'axe', 'retour'],
+    anchors: [
+      {
+        citation_id: citationIds[0],
+        role: 'anchor',
+        motif: 'lueur',
+        claim: 'Le corpus fixe le premier point d appui.',
+      },
+      {
+        citation_id: citationIds[1],
+        role: 'tension',
+        motif: 'poids',
+        claim: 'La citation garde le passage sous une exigence plus haute.',
+      },
+      {
+        citation_id: citationIds[2],
+        role: 'turn',
+        motif: 'axe',
+        claim: 'La citation oriente le mouvement du rite.',
+      },
+    ],
+    confidence: 0.5,
+    visual_prescription: {
+      primary_color: '#88aaff',
+      chaos: 0.3,
+      fog_density: 0.2,
+      shape_archetype: 'torusKnot',
+    },
+  };
+}
+
+function getStringField(
+  value: Record<string, unknown>,
+  field: string,
+): string {
+  const raw = value[field];
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
+function getCitationId(citation: CitationLike): string {
+  const record = citation as Record<string, unknown>;
+  const fromRecord = getStringField(record, 'id');
+  if (fromRecord.length > 0) {
+    return fromRecord;
+  }
+  return String(citation.id ?? '').trim();
+}
+
+function getCitationSource(citation: CitationLike): string {
+  const record = citation as Record<string, unknown>;
+  const fromRecord = getStringField(record, 'source');
+  if (fromRecord.length > 0) {
+    return fromRecord;
+  }
+  return String(citation.source ?? '').trim();
+}
+
+function getCitationContent(citation: CitationLike): {
+  text: string;
+  quote: string;
+} {
+  const record = citation as Record<string, unknown>;
+  const text = getStringField(record, 'text');
+  const quote = getStringField(record, 'quote');
+  return { text, quote };
+}
+
+function indexCorpusById(sentences: ZaraSentence[]): Map<string, ZaraSentence> {
+  const byId = new Map<string, ZaraSentence>();
+  for (const sentence of sentences) {
+    byId.set(String(sentence.id), sentence);
+  }
+  return byId;
+}
+
+function assertCitationMatchesCorpus(
+  citation: CitationLike,
+  corpusById: Map<string, ZaraSentence>,
+): void {
+  const id = getCitationId(citation);
+  expect(id.length).toBeGreaterThan(0);
+
+  const source = getCitationSource(citation);
+  expect(source).toBe('zarathoustra');
+
+  const sentence = corpusById.get(id);
+  expect(sentence).toBeTruthy();
+  if (!sentence) return;
+
+  const { text, quote } = getCitationContent(citation);
+  expect(text.length > 0 || quote.length > 0).toBe(true);
+
+  const corpusText = String(sentence.text ?? '').trim();
+  expect(corpusText.length).toBeGreaterThan(0);
+
+  if (text.length > 0) {
+    expect(text).toBe(corpusText);
+    return;
+  }
+
+  expect(
+    corpusText.includes(quote) || quote.includes(corpusText),
+  ).toBe(true);
+}
+
+function makeStructuredStub(citationIds: string[]): StructuredImpl {
+  return async (args) => {
+    const payload = makeOracleHermeneuticPayload(citationIds);
+
+    return {
+      ok: true,
+      status: 200,
+      text: JSON.stringify(payload),
+      jsonCandidate: payload,
+      raw: {
+        traceId: args.traceId,
+        model: args.model,
+        structured: true,
+        fallback: false,
+        repairApplied: false,
+        reason: 'NATIVE_OK',
+        parseError: null,
+        rawJsonError: null,
+        retryCount: 0,
+        parseStage: 'direct',
+        preview: null,
+        parsedPreview: null,
+        error: null,
+      },
+      ms: 5,
+    };
+  };
+}
+
+const stubRawCall: RawImpl = async (args) => {
+  const payload = {
+    quote: 'Test quote',
+    interpretation: 'Test interpretation',
+    keywords: ['test'],
+    citation_ids: ['1', '2'],
+    delta: {},
+    confidence: 0.5,
+    visual_prescription: {
+      primary_color: '#88aaff',
+      chaos: 0.3,
+      fog_density: 0.2,
+      shape_archetype: 'torusKnot',
+    },
+  };
+
+  return {
+    ok: true,
+    status: 200,
+    text: JSON.stringify(payload),
+    raw: {
+      traceId: args.traceId,
+      model: args.model,
+      structured: false,
+    },
+    ms: 5,
+  };
+};
+
+describe('citation mapping contract', () => {
+  beforeEach(() => {
+    process.env.GEMINI_API_KEY = 'test-key';
+    process.env.GEMINI_STRUCTURED_OUTPUTS = '1';
+    process.env.GEMINI_FAIL_CLOSED_STRICT = '1';
+  });
+
+  it('server citations map to real corpus excerpts', async () => {
+    const corpus = loadZaraSentences();
+    const corpusById = indexCorpusById(corpus);
+
+    const expected = retrieveZaraCitations(
+      buildOracleRetrievalQuery(PROMPT, NAME_OR_NICKNAME),
+      { k: 6 },
+    );
+    const selectedIds = expected
+      .slice(0, 3)
+      .map((citation) => getCitationId(citation))
+      .filter((id) => id.length > 0);
+
+    expect(selectedIds.length).toBe(3);
+
+    const req = OracleRequestSchema.parse({
+      mode: 'oracle',
+      prompt: PROMPT,
+      ritual: { nameOrNickname: NAME_OR_NICKNAME },
+      expectJson: true,
+      wantCitations: true,
+      minCitations: 2,
+    });
+
+    const result = await handleGeminiRequest(req, {
+      callGeminiStructuredImpl: makeStructuredStub(selectedIds),
+      callGeminiImpl: stubRawCall,
+    });
+
+    const response = result.response;
+    expect(response.citationsUsed.length).toBeGreaterThanOrEqual(2);
+
+    for (const citation of response.citationsUsed) {
+      assertCitationMatchesCorpus(citation, corpusById);
+    }
+
+    expect(response.json).toBeTruthy();
+    expect(response.hermeneutic).toBeTruthy();
+    expect(response.composition).toBeTruthy();
+
+    const anchorIds = response.hermeneutic?.anchors.map((anchor) =>
+      String(anchor.citation_id),
+    );
+    expect(anchorIds).toEqual(selectedIds);
+
+    const compositionIds = response.composition?.motifs.map((motif) =>
+      String(motif.citation_id),
+    );
+    expect(compositionIds).toEqual(selectedIds);
+
+    const responseCitationIds = new Set(
+      response.citationsUsed.map((citation) => getCitationId(citation)),
+    );
+
+    for (const id of selectedIds) {
+      expect(responseCitationIds.has(id)).toBe(true);
+    }
+
+    for (const motif of response.composition?.motifs ?? []) {
+      expect(motif.role.length).toBeGreaterThan(0);
+      expect(motif.motif.length).toBeGreaterThan(0);
+      expect(motif.claim.length).toBeGreaterThan(0);
+
+      const citation = response.citationsUsed.find(
+        (entry) => getCitationId(entry) === motif.citation_id,
+      ) as CitationLike | undefined;
+
+      expect(citation).toBeTruthy();
+      if (!citation) continue;
+
+      const record = citation as Record<string, unknown>;
+      const partTitle = getStringField(record, 'part_title');
+      const sectionTitle = getStringField(record, 'section_title');
+
+      if (partTitle.length > 0) {
+        expect(motif.part_title).toBe(partTitle);
+      }
+
+      if (sectionTitle.length > 0) {
+        expect(motif.section_title).toBe(sectionTitle);
+      }
+    }
+  });
+});

@@ -1,0 +1,10 @@
+eacb58c docs: formalize governed oracle/guardian integration scope
+d1c9945 wip: stabilize governed oracle/guardian integration, contracts, tests and runtime tooling
+bd5f321 wip: stabilize governed oracle/guardian changes and dev observability
+5c80728 feat(oracle): compose deterministic server prose from hermeneutic structure
+f1f8b9b feat(oracle): validate structured hermeneutic output and anchor guards
+e585891 feat(guardian): add deterministic server guidance
+59a2c18 feat(contracts): add guardian guidance and oracle hermeneutic schemas
+1b4bf34 fix: harden guardian deterministic microcopy ضد generic validation stems
+c9d4d7f fix: normalize guardian guidance and separate step guidance from oracle speech
+4fcf8c1 fix: restore Zarathoustra runtime behavior in strict structured mode
