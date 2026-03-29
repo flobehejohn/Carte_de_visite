@@ -1,0 +1,54 @@
+{
+  "generatedAt": "2026-03-20T12:15:19.3820248+01:00",
+  "branch": "feat/governed-oracle-guardian-integration-20260319",
+  "headCommit": "eacb58c3cb25f53f40d35224062d068e14cf2f50",
+  "checkpointCommit": "d1c9945",
+  "scopeDocCommit": "eacb58c",
+  "validations": {
+    "typecheck": "OK",
+    "tests": "OK",
+    "runtime5173": "OK"
+  },
+  "runtime": {
+    "baseUrl": "http://127.0.0.1:5173",
+    "guardianStatus": 200,
+    "oracleStatus": 200,
+    "oracleRoles": [
+      "anchor",
+      "tension",
+      "turn"
+    ],
+    "oracleMotifRoles": [
+      "anchor",
+      "tension",
+      "turn"
+    ],
+    "oracleCitations": 6
+  },
+  "evidence": {
+    "root": "docs/audit/governed-oracle-guardian/20260319",
+    "logs": [
+      "evidence/typecheck.log",
+      "evidence/test.log",
+      "evidence/runtime-check-5173.log"
+    ],
+    "json": [
+      "evidence/guardian.5173.json",
+      "evidence/oracle.5173.json"
+    ],
+    "hashes": [
+      "meta/evidence.sha256.txt",
+      "meta/evidence.sha256.csv"
+    ],
+    "meta": [
+      "meta/git-status.txt",
+      "meta/git-log.txt",
+      "meta/git-head.txt",
+      "meta/git-branch.txt",
+      "meta/commit-refs.env",
+      "meta/artifact-index.txt",
+      "meta/typecheck.tail.txt",
+      "meta/test.tail.txt"
+    ]
+  }
+}

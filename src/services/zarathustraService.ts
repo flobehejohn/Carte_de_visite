@@ -1,4 +1,5 @@
 import { OracleResult, RitualInput } from '../domain/types';
+import { geminiGenerate } from '../lib/geminiClient';
 import {
   composeGuardianGuidanceFromPayload as composeDeterministicGuardianGuidance,
   getGuardianStepDefaults,
@@ -8,7 +9,6 @@ import {
   type GuardianSymbolicFocus,
   type GuardianTone,
 } from '../shared/guardian/composeGuidance';
-import { geminiGenerate } from '../lib/geminiClient';
 import { extractFirstJsonObject } from './jsonExtract';
 import { normalizeVisualParams, VisualParams } from './visualParams';
 import { ZaraLangGuard } from './zaraLangGuard';
@@ -96,6 +96,21 @@ function createThrottledLogger(prefix: string, throttleMs = LOG_THROTTLE_MS) {
 
 const logger = createThrottledLogger('Zarathoustra');
 
+function isDevRuntime(): boolean {
+  const meta = import.meta as ImportMeta & {
+    env?: { DEV?: boolean };
+  };
+  return Boolean(meta.env?.DEV);
+}
+
+function logDevRuntimeEvent(
+  kind: 'guardian_fallback_or_guardian_error',
+  details: Record<string, unknown>,
+) {
+  if (!isDevRuntime()) return;
+  logger.warn(`[dev:${kind}]`, details);
+}
+
 function toAscii(input: unknown): string {
   const raw = String(input ?? '');
   try {
@@ -113,6 +128,10 @@ function normalizeWhitespace(input: unknown): string {
   return String(input ?? '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function stripDiacritics(input: string): string {
@@ -139,6 +158,34 @@ function composeGuardianComment(echo: string, subcomment: string): string {
   return `${a}\n\n${b}`;
 }
 
+function readGuardianGuidanceBlock(
+  input: unknown,
+): GuardianGuidanceBlock | null {
+  if (!isRecord(input)) return null;
+
+  const echo = normalizeWhitespace(input.echo);
+  const subcomment = normalizeWhitespace(input.subcomment);
+  if (!echo || !subcomment) return null;
+
+  const unsafeHint = normalizeWhitespace(input.unsafeHint);
+  return {
+    echo,
+    subcomment,
+    unsafeHint: unsafeHint || null,
+  };
+}
+
+function composeGuardianCommentFromEnvelope(
+  guidance: unknown,
+  fallbackComment: unknown,
+): string {
+  const governed = readGuardianGuidanceBlock(guidance);
+  if (governed) {
+    return composeGuardianComment(governed.echo, governed.subcomment);
+  }
+  return normalizeWhitespace(fallbackComment);
+}
+
 export function extractGuidanceParts(input?: string | null): {
   echo: string;
   subcomment: string;
@@ -150,6 +197,7 @@ export function extractGuidanceParts(input?: string | null): {
     .split(/\n\s*\n/)
     .map((part) => part.trim())
     .filter(Boolean);
+
   if (parts.length <= 1) {
     return { echo: parts[0] ?? clean, subcomment: '' };
   }
@@ -158,6 +206,25 @@ export function extractGuidanceParts(input?: string | null): {
     echo: parts[0],
     subcomment: parts.slice(1).join(' '),
   };
+}
+
+export function getOraclePrimaryProse(
+  input?: Pick<OracleResult, 'composition' | 'interpretation' | 'quote'> | null,
+): string {
+  const prose = normalizeWhitespace(input?.composition?.prose);
+  if (prose) return prose;
+
+  const interpretation = normalizeWhitespace(input?.interpretation);
+  if (interpretation) return interpretation;
+
+  return normalizeWhitespace(input?.quote);
+}
+
+export function getOracleTextLength(
+  input?: Pick<OracleResult, 'composition' | 'interpretation' | 'quote'> | null,
+): number {
+  const finalText = getOraclePrimaryProse(input);
+  return finalText.length;
 }
 
 function normalizeConfidence(value: unknown, fallback = 0.86): number {
@@ -395,11 +462,25 @@ function buildVisualParams(raw: any): VisualParams {
   return visualParams;
 }
 
-function pickSentenceFromCitations(data: any) {
-  const citations = Array.isArray(data?.citations) ? data.citations : [];
-  const citationIds = Array.isArray(data?.citation_ids)
-    ? data.citation_ids.map((id: any) => String(id))
-    : [];
+function pickSentenceFromCitations(data: any, env?: any) {
+  const citations = Array.isArray(data?.citations)
+    ? data.citations
+    : Array.isArray(env?.citationsUsed)
+      ? env.citationsUsed
+      : [];
+
+  const compositionMotifs = Array.isArray(env?.composition?.motifs)
+    ? env.composition.motifs
+    : Array.isArray(data?.composition?.motifs)
+      ? data.composition.motifs
+      : [];
+
+  const citationIds =
+    compositionMotifs.length > 0
+      ? compositionMotifs.map((motif: any) => String(motif?.citation_id ?? ''))
+      : Array.isArray(data?.citation_ids)
+        ? data.citation_ids.map((id: any) => String(id))
+        : [];
 
   const firstMatching =
     citationIds.length > 0
@@ -409,35 +490,57 @@ function pickSentenceFromCitations(data: any) {
   return firstMatching || citations[0] || null;
 }
 
-function buildOracleResult(ritual: RitualInput, data: any): OracleResult {
-  const quote = String(
+function buildOracleResult(
+  ritual: RitualInput,
+  data: any,
+  env?: any,
+): OracleResult {
+  const resolvedHermeneutic = isRecord(env?.hermeneutic)
+    ? env.hermeneutic
+    : isRecord(data?.hermeneutic)
+      ? data.hermeneutic
+      : null;
+
+  const resolvedComposition = isRecord(env?.composition)
+    ? env.composition
+    : isRecord(data?.composition)
+      ? data.composition
+      : null;
+
+  const quote = normalizeWhitespace(
     data?.quote || 'Le silence ne ferme rien : il demande une autre entrée.',
   );
-  const interpretation = String(
-    data?.interpretation ||
+
+  const interpretation = normalizeWhitespace(
+    resolvedComposition?.prose ||
+      data?.interpretation ||
+      data?.quote ||
       'L’oracle demeure en attente, comme une porte encore à pousser.',
   );
+
   const keywords = Array.isArray(data?.keywords)
     ? data.keywords.map((k: any) => String(k))
-    : [];
+    : Array.isArray(resolvedHermeneutic?.keywords)
+      ? resolvedHermeneutic.keywords.map((k: any) => String(k))
+      : [];
 
   const vpRaw =
     data?.visual_prescription ||
+    resolvedHermeneutic?.visual_prescription ||
     data?.visualParams ||
     data?.visual_params ||
     {};
+
   const visualParams = buildVisualParams(vpRaw);
 
-  const first = pickSentenceFromCitations(data);
+  const first = pickSentenceFromCitations(data, env);
 
   const sentence = {
     id: String(first?.id ?? `z-${Date.now()}`),
-    text: String(first?.text ?? quote),
+    text: String(first?.text ?? first?.quote ?? quote),
     part_title: String(first?.part_title ?? 'Zarathoustra'),
     section_title: String(first?.section_title ?? 'Source'),
   };
-
-  const textLength = `${quote}${interpretation}`.length;
 
   return {
     sentence,
@@ -445,10 +548,16 @@ function buildOracleResult(ritual: RitualInput, data: any): OracleResult {
     interpretation,
     keywords,
     ritual,
+    hermeneutic: resolvedHermeneutic,
+    composition: resolvedComposition,
     tone: { sentiment: 0.5, intensity: 1.0, mysticism: 0.7 },
     themeScores: [],
     visualParams,
-    textLength,
+    textLength: getOracleTextLength({
+      quote,
+      interpretation,
+      composition: resolvedComposition,
+    }),
     seed: visualParams.seed,
     mainTheme: { themeId: 'will', score: 1, label: 'Volonte' },
   };
@@ -498,6 +607,12 @@ export async function getStepGuidance(
     const { env, payload, mode } = unwrapGeminiPayload(r);
 
     if (!payload) {
+      logDevRuntimeEvent('guardian_fallback_or_guardian_error', {
+        reason: 'payload_missing',
+        step: stepA,
+        value: valueDisplay,
+        traceId: r?.traceId ?? null,
+      });
       return buildGuardianGuidanceFromPayload(stepA, valueDisplay, {
         isSafe: true,
       });
@@ -505,7 +620,10 @@ export async function getStepGuidance(
 
     const rawComment =
       mode === 'guardian'
-        ? String(payload?.comment ?? env?.text ?? '')
+        ? composeGuardianCommentFromEnvelope(
+            env?.guidance,
+            payload?.comment ?? env?.text ?? '',
+          )
         : mode === 'oracle'
           ? String(payload?.interpretation ?? payload?.quote ?? env?.text ?? '')
           : String(payload?.comment ?? env?.text ?? '');
@@ -516,15 +634,45 @@ export async function getStepGuidance(
       isSafe: payload?.isSafe ?? payload?.is_safe ?? true,
     });
 
+    const governedGuidance = readGuardianGuidanceBlock(env?.guidance);
+    const fallbackComment = normalizeWhitespace(rawComment);
+
+    const finalGuidance = governedGuidance
+      ? {
+          ...guidance,
+          ...governedGuidance,
+          comment: composeGuardianComment(
+            governedGuidance.echo,
+            governedGuidance.subcomment,
+          ),
+        }
+      : fallbackComment && !looksGuardianGeneric(fallbackComment)
+        ? {
+            ...guidance,
+            comment: fallbackComment,
+          }
+        : guidance;
+
     if (guard.shouldRetry(rawComment)) {
+      logDevRuntimeEvent('guardian_fallback_or_guardian_error', {
+        reason: 'language_guard_retry',
+        step: stepA,
+        value: valueDisplay,
+        traceId: r?.traceId ?? null,
+      });
       return buildGuardianGuidanceFromPayload(stepA, valueDisplay, {
-        ...guidance,
+        ...finalGuidance,
         comment: '',
       });
     }
 
-    return guidance;
+    return finalGuidance;
   } catch (e) {
+    logDevRuntimeEvent('guardian_fallback_or_guardian_error', {
+      reason: e instanceof Error ? e.message : 'guardian_error',
+      step,
+      value: normalizeWhitespace(value),
+    });
     logger.warn('Guardian error:', e);
     return buildGuardianGuidanceFromPayload(step, value, { isSafe: true });
   }
@@ -566,7 +714,7 @@ export async function consultOracle(
       throw new Error('Oracle payload missing in API response.');
     }
 
-    const result = buildOracleResult(ritual, payload);
+    const result = buildOracleResult(ritual, payload, r);
     const combined = `${result.quote} ${result.interpretation}`;
 
     if (guard.shouldRetry(combined)) {

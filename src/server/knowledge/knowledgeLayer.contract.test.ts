@@ -29,6 +29,12 @@ function makeOracleHermeneuticPayload(citationIds: string[]) {
       },
       {
         citation_id: citationIds[1],
+        role: 'tension',
+        motif: 'poids',
+        claim: 'Le seuil demande deja une forme plus haute.',
+      },
+      {
+        citation_id: citationIds[2],
         role: 'turn',
         motif: 'passage',
         claim: 'Le rite incline deja vers la transformation.',
@@ -120,7 +126,7 @@ describe('knowledge layer contract', () => {
       buildOracleRetrievalQuery(prompt, nameOrNickname),
       { k: 6 },
     )
-      .slice(0, 2)
+      .slice(0, 3)
       .map((citation) => String(citation.id));
 
     const res = await handleGeminiRequest(req, {
@@ -162,7 +168,7 @@ describe('knowledge layer contract', () => {
       buildOracleRetrievalQuery(prompt, nameOrNickname),
       { k: 6 },
     )
-      .slice(0, 2)
+      .slice(0, 3)
       .map((citation) => String(citation.id));
 
     const a = await handleGeminiRequest(req, {

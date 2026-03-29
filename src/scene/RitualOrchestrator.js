@@ -89,6 +89,28 @@ function damp(current, target, lambda, dt) {
   return current + (target - current) * (1 - Math.exp(-lambda * dt));
 }
 
+function normalizeClampValue(candidate, fallback = null) {
+  if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
+  if (!candidate || typeof candidate !== 'object') return fallback;
+
+  const min =
+    typeof candidate.min === 'number' && Number.isFinite(candidate.min)
+      ? candidate.min
+      : null;
+
+  const max =
+    typeof candidate.max === 'number' && Number.isFinite(candidate.max)
+      ? candidate.max
+      : null;
+
+  if (min !== null && max !== null) return Math.min(min, max);
+  if (max !== null) return max;
+  if (min !== null) return min;
+
+  return fallback;
+}
+
+
 function hashToUnit(input) {
   if (!input || typeof input !== 'string') return 0.5;
   const seed = input.trim();
@@ -732,8 +754,7 @@ export class RitualOrchestrator {
     this._climateForegroundOpacity = foregroundOpacity;
 
     ctx.appliedOpacityWireMul = wireOpacityMul;
-    const particlesMul = this._climateParticlesOpacityMul;
-    ctx.appliedOpacityParticlesMul = particlesMul;
+    ctx.appliedOpacityParticlesMul = this._climateParticlesOpacityMul;
     ctx.appliedOpacityForeground = foregroundOpacity;
     ctx.appliedSafetyFactor = safeFactor;
 
@@ -764,29 +785,38 @@ export class RitualOrchestrator {
         ctx.appliedFogDensity = null;
       }
     }
-    // Bloom (idempotent, single-writer). Clamp safety intégré ici.
+
     const clamp = bloomClamp && typeof bloomClamp === 'object' ? bloomClamp : null;
 
     if (ctx.bloomPass) {
       const b = targets?.bloom;
 
-      // strength (targets * safeFactor, puis override clamp si fourni)
       let nextStrength = null;
-      if (typeof b?.strength === 'number') nextStrength = b.strength * safeFactor;
-      if (clamp?.strength != null) nextStrength = clamp.strength;
-      if (typeof nextStrength === 'number') ctx.bloomPass.strength = nextStrength;
+      if (typeof b?.strength === 'number') {
+        nextStrength = b.strength * safeFactor;
+      }
+      nextStrength = normalizeClampValue(clamp?.strength, nextStrength);
+      if (typeof nextStrength === 'number') {
+        ctx.bloomPass.strength = nextStrength;
+      }
 
-      // radius
       let nextRadius = null;
-      if (typeof b?.radius === 'number') nextRadius = b.radius;
-      if (clamp?.radius != null) nextRadius = clamp.radius;
-      if (typeof nextRadius === 'number') ctx.bloomPass.radius = nextRadius;
+      if (typeof b?.radius === 'number') {
+        nextRadius = b.radius;
+      }
+      nextRadius = normalizeClampValue(clamp?.radius, nextRadius);
+      if (typeof nextRadius === 'number') {
+        ctx.bloomPass.radius = nextRadius;
+      }
 
-      // threshold
       let nextThreshold = null;
-      if (typeof b?.threshold === 'number') nextThreshold = b.threshold;
-      if (clamp?.threshold != null) nextThreshold = clamp.threshold;
-      if (typeof nextThreshold === 'number') ctx.bloomPass.threshold = nextThreshold;
+      if (typeof b?.threshold === 'number') {
+        nextThreshold = b.threshold;
+      }
+      nextThreshold = normalizeClampValue(clamp?.threshold, nextThreshold);
+      if (typeof nextThreshold === 'number') {
+        ctx.bloomPass.threshold = nextThreshold;
+      }
 
       ctx.appliedBloomStrength = ctx.bloomPass.strength ?? null;
     } else {
@@ -814,6 +844,7 @@ export class RitualOrchestrator {
         else if (vp?.uniforms?.strength) vp.uniforms.strength.value = vignette;
         else if (vp?.material?.uniforms?.uVignette) vp.material.uniforms.uVignette.value = vignette;
       }
+
       ctx.appliedVignette = typeof vignette === 'number' ? vignette : null;
     } else {
       ctx.appliedVignette = null;
@@ -1048,5 +1079,3 @@ export class RitualOrchestrator {
     orbGround?.updateGroundDeformation?.(this.ctx, time);
   }
 }
-
-

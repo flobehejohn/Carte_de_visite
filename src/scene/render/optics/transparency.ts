@@ -36,7 +36,7 @@ function computeTargetAlpha(
   baseAlpha: number,
   climateMul: number,
   influenceMul: number,
-  opts: TransparencyOptions
+  opts: TransparencyOptions,
 ): number {
   const minAlpha = isFiniteNumber(opts.minAlpha) ? opts.minAlpha : 0;
   const maxAlpha = isFiniteNumber(opts.maxAlpha) ? opts.maxAlpha : 1;
@@ -52,7 +52,7 @@ export function applyHysteresis(
   prevStable: number,
   nextCandidate: number,
   upEps: number,
-  downEps: number
+  downEps: number,
 ): number {
   const up = isFiniteNumber(upEps) ? Math.max(0, upEps) : 0;
   const down = isFiniteNumber(downEps) ? Math.max(0, downEps) : 0;
@@ -68,7 +68,7 @@ export function computeAlphaInPlace(
   influenceMul: number,
   state: TransparencyState,
   dtMs: number,
-  opts: TransparencyOptions
+  opts: TransparencyOptions,
 ): number {
   const minAlpha = isFiniteNumber(opts.minAlpha) ? opts.minAlpha : 0;
   const maxAlpha = isFiniteNumber(opts.maxAlpha) ? opts.maxAlpha : 1;
@@ -79,11 +79,24 @@ export function computeAlphaInPlace(
   const dt = isFiniteNumber(dtMs) ? Math.max(0, dtMs) : 0;
   const smoothingAlpha = alphaFromTau(dt, opts.tauMs);
 
-  const prevSmooth = isFiniteNumber(state.smoothedAlpha) ? state.smoothedAlpha : target;
-  const smoothed = clamp(prevSmooth + (target - prevSmooth) * smoothingAlpha, rangeMin, rangeMax);
+  const prevSmooth = isFiniteNumber(state.smoothedAlpha)
+    ? state.smoothedAlpha
+    : target;
+  const smoothed = clamp(
+    prevSmooth + (target - prevSmooth) * smoothingAlpha,
+    rangeMin,
+    rangeMax,
+  );
 
-  const prevStable = isFiniteNumber(state.stableAlpha) ? state.stableAlpha : smoothed;
-  const stable = applyHysteresis(prevStable, smoothed, opts.hysteresisUp, opts.hysteresisDown);
+  const prevStable = isFiniteNumber(state.stableAlpha)
+    ? state.stableAlpha
+    : smoothed;
+  const stable = applyHysteresis(
+    prevStable,
+    smoothed,
+    opts.hysteresisUp,
+    opts.hysteresisDown,
+  );
 
   const finalAlpha = clamp(stable, rangeMin, rangeMax);
 
@@ -99,17 +112,29 @@ export function computeAlpha(
   influenceMul: number,
   prevState: TransparencyState | null | undefined,
   dtMs: number,
-  opts: TransparencyOptions
+  opts: TransparencyOptions,
 ): { alpha: number; nextState: TransparencyState } {
   const target = computeTargetAlpha(baseAlpha, climateMul, influenceMul, opts);
 
-  const nextState = prevState ?? { stableAlpha: target, smoothedAlpha: target };
+  const nextState = prevState ?? {
+    stableAlpha: target,
+    smoothedAlpha: target,
+  };
+
   if (!prevState) {
     nextState.stableAlpha = target;
     nextState.smoothedAlpha = target;
   }
 
-  const alpha = computeAlphaInPlace(baseAlpha, climateMul, influenceMul, nextState, dtMs, opts);
+  const alpha = computeAlphaInPlace(
+    baseAlpha,
+    climateMul,
+    influenceMul,
+    nextState,
+    dtMs,
+    opts,
+  );
+
   return { alpha, nextState };
 }
 
@@ -124,22 +149,30 @@ type TransparencyPolicyConfig = {
 
 export function computeTransparencyPolicy(
   alpha: number,
-  policyConfig: TransparencyPolicyConfig
+  policyConfig: TransparencyPolicyConfig,
 ): MaterialTransparencyPolicy {
   const safeAlpha = isFiniteNumber(alpha) ? alpha : 1;
   const isOpaque = safeAlpha >= 0.999;
 
   const out =
-    policyConfig.out ?? { depthWrite: true, depthTest: true, renderOrder: 0, dithering: false, alphaTest: 0 };
+    policyConfig.out ?? {
+      depthWrite: true,
+      depthTest: true,
+      renderOrder: 0,
+      dithering: false,
+      alphaTest: 0,
+    };
 
   out.depthWrite = isOpaque ? true : policyConfig.depthWriteTransparent;
   out.depthTest = isOpaque ? true : policyConfig.depthTestTransparent;
-  out.renderOrder = isOpaque ? policyConfig.opaqueOrder : policyConfig.transparentOrder;
+  out.renderOrder = isOpaque
+    ? policyConfig.opaqueOrder
+    : policyConfig.transparentOrder;
 
-  // Important: do not enable dithering when treated as opaque (alpha threshold)
   out.dithering = !isOpaque && safeAlpha < 1;
-
-  out.alphaTest = isFiniteNumber(policyConfig.alphaTest) ? Math.max(0, policyConfig.alphaTest) : 0;
+  out.alphaTest = isFiniteNumber(policyConfig.alphaTest)
+    ? Math.max(0, policyConfig.alphaTest)
+    : 0;
 
   return out;
 }

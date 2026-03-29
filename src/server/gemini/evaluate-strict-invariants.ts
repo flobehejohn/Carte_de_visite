@@ -2,6 +2,27 @@ import type {
   NormalizedContractState,
   StrictViolation,
 } from './contract-types.js';
+import { listMissingOracleAnchorRoles } from './oracle-hermeneutic.js';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getTrimmedString(
+  value: Record<string, unknown>,
+  field: string,
+): string {
+  const raw = value[field];
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
+function pushViolation(
+  violations: StrictViolation[],
+  code: StrictViolation['code'],
+  message: string,
+): void {
+  violations.push({ code, message });
+}
 
 export function evaluateStrictInvariants(
   state: NormalizedContractState,
@@ -18,32 +39,37 @@ export function evaluateStrictInvariants(
   }
 
   if (options.structuredOutputsOn === false) {
-    violations.push({
-      code: 'STRUCTURED_OUTPUTS_DISABLED',
-      message: 'GEMINI_STRUCTURED_OUTPUTS=0 (structured outputs disabled)',
-    });
+    pushViolation(
+      violations,
+      'STRUCTURED_OUTPUTS_DISABLED',
+      'GEMINI_STRUCTURED_OUTPUTS=0 (structured outputs disabled)',
+    );
   }
 
   if (!state.knowledge?.corpusLoaded) {
-    violations.push({
-      code: 'CORPUS_NOT_LOADED',
-      message: 'knowledge.corpusLoaded !== true',
-    });
+    pushViolation(
+      violations,
+      'CORPUS_NOT_LOADED',
+      'knowledge.corpusLoaded !== true',
+    );
   }
 
   const citations = state.citationsUsed ?? [];
+
   if (citations.length < options.minCitations) {
-    violations.push({
-      code: 'CITATIONS_TOO_LOW',
-      message: `citationsUsed.length=${citations.length} < ${options.minCitations}`,
-    });
+    pushViolation(
+      violations,
+      'CITATIONS_TOO_LOW',
+      `citationsUsed.length=${citations.length} < ${options.minCitations}`,
+    );
   }
 
   if (citations.some((c) => String(c?.id ?? '').trim().length === 0)) {
-    violations.push({
-      code: 'CITATION_ID_EMPTY',
-      message: 'one or more citationsUsed entries have empty id',
-    });
+    pushViolation(
+      violations,
+      'CITATION_ID_EMPTY',
+      'one or more citationsUsed entries have empty id',
+    );
   }
 
   const sources = Array.from(
@@ -58,31 +84,85 @@ export function evaluateStrictInvariants(
     sources.length === 0 ||
     sources.some((source) => source !== options.lockedSource.toLowerCase())
   ) {
-    violations.push({
-      code: 'SOURCE_LEAK',
-      message: `sources=${sources.join(',') || '(empty)'} expected=${options.lockedSource}`,
-    });
+    pushViolation(
+      violations,
+      'SOURCE_LEAK',
+      `sources=${sources.join(',') || '(empty)'} expected=${options.lockedSource}`,
+    );
   }
 
   if (state.finalJson == null) {
-    violations.push({
-      code: 'JSON_EMPTY',
-      message: 'finalJson is null',
-    });
+    pushViolation(violations, 'JSON_EMPTY', 'finalJson is null');
   }
 
   if (state.finalJsonError !== null) {
-    violations.push({
-      code: 'JSON_ERROR',
-      message: `finalJsonError=${state.finalJsonError}`,
-    });
+    pushViolation(
+      violations,
+      'JSON_ERROR',
+      `finalJsonError=${state.finalJsonError}`,
+    );
   }
 
   if (!state.structuredUsed) {
-    violations.push({
-      code: 'STRUCTURED_NOT_USED',
-      message: 'final structured contract not retained',
-    });
+    pushViolation(
+      violations,
+      'STRUCTURED_NOT_USED',
+      'final structured contract not retained',
+    );
+  }
+
+  const hasValidGovernedState =
+    state.finalJson !== null && state.finalJsonError === null;
+
+  if (state.mode === 'guardian' && hasValidGovernedState) {
+    if (!isRecord(state.guidance)) {
+      pushViolation(
+        violations,
+        'GUIDANCE_MISSING',
+        'guardian guidance is missing from the final response',
+      );
+    } else {
+      if (getTrimmedString(state.guidance, 'echo').length === 0) {
+        pushViolation(
+          violations,
+          'GUIDANCE_EMPTY_ECHO',
+          'guardian guidance echo is empty',
+        );
+      }
+
+      if (getTrimmedString(state.guidance, 'subcomment').length === 0) {
+        pushViolation(
+          violations,
+          'GUIDANCE_EMPTY_SUBCOMMENT',
+          'guardian guidance subcomment is empty',
+        );
+      }
+    }
+  }
+
+  if (state.mode === 'oracle' && hasValidGovernedState) {
+    const missingRoles = isRecord(state.finalJson)
+      ? listMissingOracleAnchorRoles(state.finalJson as any)
+      : [];
+
+    if (missingRoles.length > 0) {
+      pushViolation(
+        violations,
+        'ANCHOR_ROLE_COVERAGE_MISSING',
+        `oracle anchor roles missing=${missingRoles.join(',')}`,
+      );
+    }
+
+    if (
+      !isRecord(state.composition) ||
+      getTrimmedString(state.composition, 'prose').length === 0
+    ) {
+      pushViolation(
+        violations,
+        'COMPOSITION_EMPTY',
+        'oracle composition prose is missing or empty',
+      );
+    }
   }
 
   return violations;

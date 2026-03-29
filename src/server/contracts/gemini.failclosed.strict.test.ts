@@ -77,6 +77,12 @@ function makeOraclePayload() {
       },
       {
         citation_id: '2',
+        role: 'tension',
+        motif: 'poids',
+        claim: 'Le passage demande une forme plus haute que sa premiere apparence.',
+      },
+      {
+        citation_id: '3',
         role: 'turn',
         motif: 'traversee',
         claim: 'Le passage transforme le nom en geste.',
@@ -164,6 +170,31 @@ const stubRawOk = async () => {
   };
 };
 
+const stubGuardianStructuredOk = async () => {
+  const payload = {
+    comment: 'Le prenom "Jeanne" est acceptable.',
+    isSafe: true,
+    confidence: 0.88,
+  };
+
+  return {
+    ok: true,
+    status: 200,
+    text: JSON.stringify(payload),
+    jsonCandidate: payload,
+    raw: {
+      structured: true,
+      fallback: false,
+      repairApplied: false,
+      reason: 'NATIVE_OK',
+      parseError: null,
+      rawJsonError: null,
+      retryCount: 0,
+    },
+    ms: 5,
+  };
+};
+
 const stubStructuredUnknownAnchor = async () => {
   const payload = {
     ...makeOraclePayload(),
@@ -175,10 +206,102 @@ const stubStructuredUnknownAnchor = async () => {
         claim: 'Le rite commence par une apparition simple.',
       },
       {
+        citation_id: '2',
+        role: 'tension',
+        motif: 'poids',
+        claim: 'Le passage demande une forme plus haute que sa premiere apparence.',
+      },
+      {
         citation_id: '9999',
         role: 'turn',
         motif: 'traversee',
         claim: 'Le passage transforme le nom en geste.',
+      },
+    ],
+  };
+
+  return {
+    ok: true,
+    status: 200,
+    text: JSON.stringify(payload),
+    jsonCandidate: payload,
+    raw: {
+      structured: true,
+      fallback: false,
+      repairApplied: false,
+      reason: 'NATIVE_OK',
+      parseError: null,
+      rawJsonError: null,
+      retryCount: 0,
+    },
+    ms: 5,
+  };
+};
+
+const stubStructuredObservedLiveAnchorRoles = async () => {
+  const payload = {
+    ...makeOraclePayload(),
+    anchors: [
+      {
+        citation_id: '1',
+        role: 'fondateur',
+        motif: 'lueur',
+        claim: 'Le rite commence par une apparition simple.',
+      },
+      {
+        citation_id: '2',
+        role: 'observateur',
+        motif: 'poids',
+        claim: 'Le passage demande une forme plus haute que sa premiere apparence.',
+      },
+      {
+        citation_id: '3',
+        role: 'guide',
+        motif: 'traversee',
+        claim: 'Le passage transforme le nom en geste.',
+      },
+    ],
+  };
+
+  return {
+    ok: true,
+    status: 200,
+    text: JSON.stringify(payload),
+    jsonCandidate: payload,
+    raw: {
+      structured: true,
+      fallback: false,
+      repairApplied: false,
+      reason: 'NATIVE_OK',
+      parseError: null,
+      rawJsonError: null,
+      retryCount: 0,
+    },
+    ms: 5,
+  };
+};
+
+const stubStructuredUnknownRole = async () => {
+  const payload = {
+    ...makeOraclePayload(),
+    anchors: [
+      {
+        citation_id: '1',
+        role: 'anchor',
+        motif: 'lueur',
+        claim: 'Le rite commence par une apparition simple.',
+      },
+      {
+        citation_id: '2',
+        role: 'turn',
+        motif: 'traversee',
+        claim: 'Le passage transforme le nom en geste.',
+      },
+      {
+        citation_id: '3',
+        role: 'presage',
+        motif: 'poids',
+        claim: 'Le passage demande une forme plus haute que sa premiere apparence.',
       },
     ],
   };
@@ -257,6 +380,22 @@ function makeOracleReq(minCitations = 2) {
       wantCitations: true,
       minCitations,
       ritual: { nameOrNickname: 'test' },
+    },
+  } as any;
+}
+
+function makeGuardianReq() {
+  return {
+    method: 'POST',
+    headers: {},
+    body: {
+      mode: 'guardian',
+      prompt: 'Gardien: test',
+      expectJson: true,
+      wantCitations: true,
+      minCitations: 2,
+      step: 'identity',
+      value: 'Jeanne',
     },
   } as any;
 }
@@ -357,6 +496,44 @@ describe('fail-closed strict invariants (handler)', () => {
     expect(readFinalJsonError(res.body)).toBe(null);
     expect(res.body.violations).toEqual([]);
     expect(res.body.hermeneutic?.anchors?.length).toBeGreaterThanOrEqual(2);
+    expect(res.body.composition?.prose.length).toBeGreaterThan(40);
+  });
+
+  it('returns HTTP 200 when the structured oracle uses the observed live anchor role synonyms', async () => {
+    process.env.GEMINI_STRUCTURED_OUTPUTS = '1';
+
+    retrieveMock.mockReturnValue([
+      citation('1'),
+      citation('2'),
+      citation('3'),
+      citation('4'),
+      citation('5'),
+      citation('6'),
+    ]);
+
+    const handler = createHandler({
+      callGeminiStructuredImpl: stubStructuredObservedLiveAnchorRoles as any,
+      callGeminiImpl: stubRawOk as any,
+    });
+
+    const req = makeOracleReq(2);
+    const res = makeRes();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.jsonError).toBe(null);
+    expect(readFinalJsonError(res.body)).toBe(null);
+    expect(res.body.violations).toEqual([]);
+    expect(res.body.hermeneutic?.anchors.map((anchor: any) => anchor.role)).toEqual(
+      ['anchor', 'tension', 'turn'],
+    );
+    expect(res.body.composition?.motifs.map((motif: any) => motif.role)).toEqual([
+      'anchor',
+      'tension',
+      'turn',
+    ]);
   });
 
   it('returns HTTP 200 for raw KO / final OK and keeps the raw error only in audit fields (Option B)', async () => {
@@ -429,7 +606,132 @@ describe('fail-closed strict invariants (handler)', () => {
     expect(readRawJsonError(res.body)).toBe('SCHEMA_VALIDATION_FAILED');
     expect(readFinalJsonError(res.body)).toBe('SCHEMA_VALIDATION_FAILED');
     expect(Array.isArray(res.body.violations)).toBe(true);
-    expect(res.body.violations.map((v: any) => v.code)).toContain('JSON_ERROR');
+    const codes = res.body.violations.map((v: any) => v.code);
+    expect(codes).toContain('JSON_ERROR');
+    expect(codes).not.toContain('ANCHOR_ROLE_COVERAGE_MISSING');
+  });
+
+  it('returns HTTP 422 when a structured oracle anchor role is truly unknown', async () => {
+    process.env.GEMINI_STRUCTURED_OUTPUTS = '1';
+
+    retrieveMock.mockReturnValue([
+      citation('1'),
+      citation('2'),
+      citation('3'),
+      citation('4'),
+      citation('5'),
+      citation('6'),
+    ]);
+
+    const handler = createHandler({
+      callGeminiStructuredImpl: stubStructuredUnknownRole as any,
+      callGeminiImpl: stubRawOk as any,
+    });
+
+    const req = makeOracleReq(2);
+    const res = makeRes();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(422);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error.code).toBe('STRICT_INVARIANT_VIOLATION');
+    expect(readRawJsonError(res.body)).toBe('SCHEMA_VALIDATION_FAILED');
+    expect(readFinalJsonError(res.body)).toBe('SCHEMA_VALIDATION_FAILED');
+    const codes = res.body.violations.map((v: any) => v.code);
+    expect(codes).toContain('JSON_ERROR');
+    expect(codes).toContain('JSON_EMPTY');
+    expect(codes).toContain('STRUCTURED_NOT_USED');
+  });
+
+  it('returns HTTP 422 when oracle anchors do not cover anchor, tension and turn in the final governed state', async () => {
+    process.env.GEMINI_STRUCTURED_OUTPUTS = '1';
+
+    retrieveMock.mockReturnValue([
+      citation('1'),
+      citation('2'),
+      citation('3'),
+      citation('4'),
+      citation('5'),
+      citation('6'),
+    ]);
+
+    const handler = createHandler({
+      callGeminiStructuredImpl: (async () => {
+        const payload = {
+          ...makeOraclePayload(),
+          anchors: [
+            {
+              citation_id: '1',
+              role: 'anchor',
+              motif: 'lueur',
+              claim: 'Le rite commence par une apparition simple.',
+            },
+            {
+              citation_id: '2',
+              role: 'turn',
+              motif: 'traversee',
+              claim: 'Le passage transforme le nom en geste.',
+            },
+          ],
+        };
+
+        return {
+          ok: true,
+          status: 200,
+          text: JSON.stringify(payload),
+          jsonCandidate: payload,
+          raw: {
+            structured: true,
+            fallback: false,
+            repairApplied: false,
+            reason: 'NATIVE_OK',
+            parseError: null,
+            rawJsonError: null,
+            retryCount: 0,
+          },
+          ms: 5,
+        };
+      }) as any,
+      callGeminiImpl: stubRawOk as any,
+    });
+
+    const req = makeOracleReq(2);
+    const res = makeRes();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(422);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error.code).toBe('STRICT_INVARIANT_VIOLATION');
+    expect(Array.isArray(res.body.violations)).toBe(true);
+    expect(res.body.violations.map((v: any) => v.code)).toContain(
+      'ANCHOR_ROLE_COVERAGE_MISSING',
+    );
+  });
+
+  it('returns HTTP 200 for guardian when final governed guidance is present', async () => {
+    process.env.GEMINI_STRUCTURED_OUTPUTS = '1';
+
+    retrieveMock.mockReturnValue([citation('1'), citation('2'), citation('3')]);
+
+    const handler = createHandler({
+      callGeminiStructuredImpl: stubGuardianStructuredOk as any,
+      callGeminiImpl: stubRawOk as any,
+    });
+
+    const req = makeGuardianReq();
+    const res = makeRes();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.mode).toBe('guardian');
+    expect(res.body.guidance?.echo.length).toBeGreaterThan(0);
+    expect(res.body.guidance?.subcomment.length).toBeGreaterThan(0);
+    expect(res.body.json?.comment).toBe('Le prenom "Jeanne" est acceptable.');
+    expect(res.body.violations).toEqual([]);
   });
 
   it('returns HTTP 422 when oracle JSON is invalid instead of accepting a synthetic fallback as final state', async () => {

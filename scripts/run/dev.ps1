@@ -1,11 +1,14 @@
 # scripts/run/dev.ps1
 [CmdletBinding()]
 param(
-  [ValidateSet('vite', 'vercel')]
+  [ValidateSet('vite', 'vercel', 'unified')]
   [string]$Mode = 'vercel',
 
   [int]$Port = 3000,
   [string]$BindHost = '127.0.0.1',
+
+  [int]$WebPort = 5173,
+  [string]$WebHost = '127.0.0.1',
 
   [switch]$AutoPort,
   [int]$PortStart = 3000,
@@ -67,6 +70,20 @@ function Resolve-VercelLauncher {
   $exe = Get-Command 'vercel.exe' -ErrorAction SilentlyContinue
   if ($exe -and $exe.CommandType -eq 'Application') { return $exe.Source }
   return 'vercel'
+}
+
+function Resolve-PwshLauncher {
+  $pwsh = Get-Command 'pwsh.exe' -ErrorAction SilentlyContinue
+  if ($pwsh -and $pwsh.CommandType -eq 'Application') { return $pwsh.Source }
+  $pwshCmd = Get-Command 'pwsh' -ErrorAction SilentlyContinue
+  if ($pwshCmd -and $pwshCmd.CommandType -eq 'Application') {
+    return $pwshCmd.Source
+  }
+  $powershell = Get-Command 'powershell.exe' -ErrorAction SilentlyContinue
+  if ($powershell -and $powershell.CommandType -eq 'Application') {
+    return $powershell.Source
+  }
+  return 'pwsh'
 }
 
 function Try-BootstrapLocalSecrets([string]$rootPath) {
@@ -222,6 +239,42 @@ function Resolve-ApiKeyContext([string]$rootPath) {
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 Set-Location $repoRoot
 
+if ($Mode -eq 'unified') {
+  $pwshPath = Resolve-PwshLauncher
+  $selfPath = $PSCommandPath
+  $apiArgs = @(
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    $selfPath,
+    '-Mode',
+    'vercel',
+    '-BindHost',
+    $BindHost,
+    '-Port',
+    "$Port"
+  )
+
+  if ($AutoPort) {
+    $apiArgs += @('-AutoPort', '-PortStart', "$PortStart", '-PortEnd', "$PortEnd")
+  }
+
+  InfoMsg ('[dev] unified starting api=http://{0}:{1} web=http://{2}:{3}' -f $BindHost, $Port, $WebHost, $WebPort)
+  $apiProc = Start-Process -FilePath $pwshPath -ArgumentList $apiArgs -WorkingDirectory $repoRoot -PassThru
+  Start-Sleep -Seconds 2
+
+  if ($apiProc.HasExited) {
+    Fail ('[dev] FAIL: backend process exited immediately (pid={0}, code={1}). Run "npm run dev:vercel" for details.' -f $apiProc.Id, $apiProc.ExitCode)
+  }
+
+  InfoMsg ('[dev] backend pid={0} launched in a separate shell' -f $apiProc.Id)
+  InfoMsg ('[dev] starting vite on http://{0}:{1}' -f $WebHost, $WebPort)
+
+  & npx vite --host $WebHost --port $WebPort --strictPort
+  exit $LASTEXITCODE
+}
+
 if ($AutoPort) { $Port = Find-FreePort -from $PortStart -to $PortEnd -h $BindHost }
 else { Ensure-PortFree -p $Port -h $BindHost }
 
@@ -239,6 +292,10 @@ if ($Mode -eq 'vite') {
 $apiKey = Resolve-ApiKeyContext -rootPath $repoRoot
 if ($null -ne $apiKey.value -and -not [string]::IsNullOrWhiteSpace([string]$apiKey.value)) {
   InfoMsg ("[dev] apiKey={0} source={1} value={2}" -f $apiKey.name, $apiKey.source, (MaskSecret ([string]$apiKey.value)))
+  if ($apiKey.name -eq 'GEMINI_API_KEY' -and -not [string]::IsNullOrWhiteSpace((Get-EnvVarValue -name 'GOOGLE_API_KEY'))) {
+    Remove-Item Env:GOOGLE_API_KEY -ErrorAction SilentlyContinue
+    InfoMsg '[dev] cleared GOOGLE_API_KEY for this local process; GEMINI_API_KEY remains authoritative'
+  }
 } else {
   WarnMsg "[dev] WARN: no GEMINI_API_KEY/GOOGLE_API_KEY found in process env or local files (.vercel/.env.development.local, .env.local, .env.development.local). /api/gemini may return MISSING_API_KEY."
 }
