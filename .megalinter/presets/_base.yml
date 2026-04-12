@@ -1,5 +1,6 @@
 # .megalinter/presets/_base.yml
 # Base commune (Phase 0 = report-only): stable, observable, reproductible
+
 APPLY_FIXES: none
 
 # Phase 0: ne casse jamais ton existant (exit code 0 même s'il y a des erreurs)

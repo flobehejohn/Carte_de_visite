@@ -1,0 +1,18 @@
+# .megalinter/presets/00-smoke.yml
+# Smoke = rapide + peu de bruit (Phase 0), sans casser le repo
+
+EXTENDS:
+  - '.megalinter/presets/_base.yml'
+
+# Smoke: évite de relinter tout le repo (réduit fortement le temps)
+VALIDATE_ALL_CODEBASE: false
+
+# Ne garder que les zones “riches” (adapter si besoin)
+FILTER_REGEX_INCLUDE: "^(src/|scripts/|\\.mega-linter\\.yml$|\\.megalinter/|package\\.json$|pnpm-lock\\.yaml$|yarn\\.lock$|package-lock\\.json$|tsconfig.*\\.json$)"
+
+# Désactivations minimales demandées (bruit / lourd / project-level)
+DISABLE_LINTERS:
+  - SPELL_CSPELL
+  - COPYPASTE_JSCPD
+  - REPOSITORY_DEVSKIM
+  - REPOSITORY_GIT_DIFF
