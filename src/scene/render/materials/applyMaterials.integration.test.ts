@@ -7,6 +7,7 @@ type FsModule = {
 type PathModule = {
   join(...parts: string[]): string;
   extname(path: string): string;
+  normalize(path: string): string;
 };
 declare function require(name: 'fs'): FsModule;
 declare function require(name: 'path'): PathModule;
@@ -79,7 +80,8 @@ describe('applyMaterials integration', () => {
       for (let i = 0; i < lines.length; i += 1) {
         const line = lines[i];
         if (assignPattern.test(line)) {
-          violations.push({ file, line: i + 1, text: line.trim() });
+          const normalized = path.normalize(file);
+          violations.push({ file: normalized, line: i + 1, text: line.trim() });
         }
       }
     }
