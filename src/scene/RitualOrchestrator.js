@@ -12,12 +12,12 @@ import { applyMaterials } from './render/materials/applyMaterials';
 import { mapClimateToRenderParams } from './render/materials/mapClimateToRenderParams';
 
 /**
- * RitualOrchestrator — version "Ultime"
+ * RitualOrchestrator — version "Ultime" (Thème B - Débridé)
  * Objectifs:
- * - Variabilité énorme mais contrôlée (pas de lumière extrême)
- * - Interdépendance subtile entre modules via ctx.ritualGenome
- * - Wireframes en couches vivantes + particules "liaisons" lentes et "burst" rapides
- * - Déterminisme optionnel (seed) + unicité par défaut
+ * - Spatialisation et Layout Pressure stricte
+ * - Variabilité extrême (Sphères pures, Océans fluides, Clair-obscur)
+ * - Fogs et transparences massives
+ * - Déterminisme via Seed
  * - Émission des invariants runtime vers la CI (OrbAuditBridge)
  */
 
@@ -172,11 +172,19 @@ function ensureVolumeConfigSafe(ctx) {
   return ctx?.volumeConfig ?? null;
 }
 
-const SHAPE_POOL_LOW = ['tetra', 'octa', 'box', 'cone'];
-const SHAPE_POOL_MID = ['icosa', 'dodeca', 'sphere', 'capsule', 'torus'];
+// INJECTION DES PRIMITIVES PURES : Probabilité massive d'obtenir des sphères pures.
+const SHAPE_POOL_LOW = ['tetra', 'octa', 'box', 'sphere', 'sphere'];
+const SHAPE_POOL_MID = [
+  'icosa',
+  'dodeca',
+  'sphere',
+  'sphere',
+  'capsule',
+  'torus',
+];
 const SHAPE_POOL_HIGH = [
   'torusKnot',
-  'octaDetail',
+  'sphere',
   'knotComplex',
   'torus',
   'torusKnot',
@@ -219,12 +227,12 @@ export class RitualOrchestrator {
 
     this.ritualDNA = {
       seed: this.rng.seedString,
-      path: { p0: 'tetra', p1: 'icosa', p2: 'torusKnot' },
+      path: { p0: 'sphere', p1: 'icosa', p2: 'sphere' },
       texture: 'smooth',
       paletteMode: 'analog',
       noiseScale: 1.0,
       noiseSpeed: 1.0,
-      particleStyle: 'shell',
+      particleStyle: 'volume',
     };
 
     this.currentState = {
@@ -286,9 +294,9 @@ export class RitualOrchestrator {
             ? 'jagged'
             : 'liquid',
       paletteMode,
-      noiseScale: this.rng.float(0.55, 2.1),
-      noiseSpeed: this.rng.float(0.55, 1.6),
-      particleStyle: this.rng.bool(0.55) ? 'shell' : 'volume',
+      noiseScale: this.rng.float(0.55, 3.5), // Élargi pour des déformations plus massives
+      noiseSpeed: this.rng.float(0.4, 2.0),
+      particleStyle: this.rng.bool(0.65) ? 'volume' : 'shell', // Favorise l'effet brouillard
       signature,
     };
 
@@ -380,9 +388,10 @@ export class RitualOrchestrator {
   }
 
   setRitualData(payload = {}) {
-    if (payload.mood) this.mood = payload.mood;
-    if (payload.mood) this.ctx.climateController?.setMood(this.mood);
-
+    if (payload.mood) {
+      this.mood = payload.mood;
+      this.ctx.climateController?.setMood(this.mood);
+    }
     if (payload.visualParams) {
       this.llmParams = payload.visualParams;
       this.hatchPulse = 0.55;
@@ -439,8 +448,9 @@ export class RitualOrchestrator {
         ? fearSig * 0.08
         : 0.55 + desireSig * 0.18;
 
-    const sat = 0.45 + chaos * 0.35;
-    const lum = 0.46 + 0.12 * (1 - chaos);
+    // Couleurs plus profondes pour accentuer le Fog et Clair-obscur
+    const sat = 0.55 + chaos * 0.45;
+    const lum = 0.35 + 0.2 * (1 - chaos);
     const primary = new THREE.Color().setHSL(baseHue, sat, lum);
 
     const paletteMode = this.ritualDNA.paletteMode;
@@ -531,46 +541,47 @@ export class RitualOrchestrator {
       0.2,
       1.0,
     );
-    const particleCount = Math.floor(180 + density * 820);
-    const particleSize = this.rng.float(0.06, 0.18) * (0.9 + chaos * 0.35);
+    const particleCount = Math.floor(180 + density * 1200); // Plus de particules
+    const particleSize = this.rng.float(0.06, 0.25) * (0.9 + chaos * 0.4);
     const linkDistance = this.rng.float(0.85, 1.6) * (1.1 - chaos * 0.35);
 
+    // GESTION DU FOG ET VOLUME PROFOND
     const volume = {
       enabled: true,
-      backgroundColor: palette.primary.clone().multiplyScalar(0.14),
-      glowColor: palette.primary.clone().lerp(new THREE.Color(0xffffff), 0.18),
+      backgroundColor: palette.primary.clone().multiplyScalar(0.08), // Plus sombre
+      glowColor: palette.primary.clone().lerp(new THREE.Color(0xffffff), 0.25),
       glowIntensity: THREE.MathUtils.clamp(
-        0.42 + p * 0.28 + chaos * 0.18,
-        0.32,
-        1.0,
-      ),
+        0.5 + p * 0.35 + chaos * 0.25,
+        0.4,
+        1.5,
+      ), // Glow très fort possible
       backgroundStrength: THREE.MathUtils.clamp(
-        0.18 + p * 0.16 + chaos * 0.08,
-        0.14,
-        0.48,
+        0.25 + p * 0.2 + chaos * 0.1,
+        0.1,
+        0.6,
       ),
-      softness: THREE.MathUtils.clamp(
-        0.58 - p * 0.28 + chaos * 0.16,
-        0.2,
-        0.82,
-      ),
+      softness: THREE.MathUtils.clamp(0.7 - p * 0.2 + chaos * 0.2, 0.3, 0.9), // Brouillard doux
       noise: {
-        scale: this.rng.float(2.4, 6.8),
-        speed: this.rng.float(0.08, 0.28) * (0.8 + chaos),
-        amount: this.rng.float(0.06, 0.18) * (0.8 + chaos),
+        scale: this.rng.float(2.0, 8.0),
+        speed: this.rng.float(0.1, 0.4) * (0.8 + chaos),
+        amount: this.rng.float(0.08, 0.25) * (0.8 + chaos),
       },
     };
 
+    // CLAIR-OBSCUR : Lumière directionnelle très forte, Fill light très faible
+    const clairObscur = chaos > 0.5 ? 1.5 : 1.0;
     const lighting = {
-      key: THREE.MathUtils.clamp(0.72 + p * 1.05 + chaos * 0.22, 0.55, 2.1),
-      fill: THREE.MathUtils.clamp(0.26 + p * 0.42, 0.22, 1.05),
+      key:
+        THREE.MathUtils.clamp(0.8 + p * 1.2 + chaos * 0.5, 0.6, 3.0) *
+        clairObscur,
+      fill: THREE.MathUtils.clamp(0.2 + p * 0.3 - chaos * 0.15, 0.05, 0.8),
       rim: THREE.MathUtils.clamp(
-        0.14 + chaos * 0.2 + (p > 0.8 ? 0.08 : 0),
+        0.2 + chaos * 0.6 + (p > 0.8 ? 0.3 : 0),
         0.1,
-        0.78,
+        2.0,
       ),
-      warmth: this.rng.float(-0.05, 0.08),
-      drift: this.rng.float(0.12, 0.28),
+      warmth: this.rng.float(-0.2, 0.2),
+      drift: this.rng.float(0.1, 0.5),
     };
 
     const geometry = {
@@ -584,11 +595,11 @@ export class RitualOrchestrator {
         0.0,
         0.45,
       ),
-      dislocation: THREE.MathUtils.clamp(0.0 + chaos * 0.08, 0.0, 0.18),
+      dislocation: THREE.MathUtils.clamp(0.0 + chaos * 0.15, 0.0, 0.25),
       turbulence: THREE.MathUtils.clamp(
-        0.08 + chaos * 0.55 + p * 0.25,
+        0.08 + chaos * 0.6 + p * 0.25,
         0.05,
-        0.95,
+        1.2,
       ),
       noise: {
         f1: this.ritualDNA.noiseScale,
@@ -603,8 +614,8 @@ export class RitualOrchestrator {
         opacityInner: THREE.MathUtils.clamp(0.06 + p * 0.25, 0.03, 0.55),
       },
       colors: {
-        solid: palette.primary.clone().multiplyScalar(0.35),
-        wire: palette.primary.clone().offsetHSL(0, 0.05, 0.22),
+        solid: palette.primary.clone().multiplyScalar(0.25),
+        wire: palette.primary.clone().offsetHSL(0, 0.1, 0.3),
       },
     };
 
@@ -612,10 +623,10 @@ export class RitualOrchestrator {
       enabled: p > 0.12,
       count: particleCount,
       size: particleSize,
-      opacity: THREE.MathUtils.clamp(0.35 + p * 0.4, 0.22, 0.85),
+      opacity: THREE.MathUtils.clamp(0.4 + p * 0.45, 0.3, 0.95),
       color1: palette.primary.clone(),
       color2: palette.accent.clone(),
-      radiusFactor: THREE.MathUtils.clamp(1.1 + p * 0.55, 1.1, 1.9),
+      radiusFactor: THREE.MathUtils.clamp(1.1 + p * 0.55, 1.1, 2.2),
       distribution:
         this.ritualDNA.particleStyle === 'volume' ? 'volume' : 'shell',
       linkDistance,
@@ -651,25 +662,33 @@ export class RitualOrchestrator {
       flipFaces: this.rng.bool(0.2),
     };
 
+    // OCEANIC / AQUATIC FLOW
+    const isAquatic = this.rng.bool(chaos * 0.6); // Le chaos induit des effets lourds
     const fluid = {
-      enabled: p > 0.65 && this.rng.bool(0.7),
-      maxCount: Math.floor(240 + density * 520),
-      size: this.rng.float(0.03, 0.075) * (0.9 + chaos * 0.3),
-      flowMode: this.rng.pick(['stream', 'vortex', 'suction', 'burst', 'curl']),
+      enabled: p > 0.65 && this.rng.bool(0.75),
+      maxCount: Math.floor(300 + density * 800),
+      size: this.rng.float(0.03, 0.08) * (1.0 + chaos * 0.4),
+      flowMode: isAquatic
+        ? 'vortex'
+        : this.rng.pick(['stream', 'suction', 'burst', 'curl']),
       flowStrength: THREE.MathUtils.clamp(
-        0.6 + chaos * 1.2 + p * 0.35,
+        0.6 + chaos * 1.5 + p * 0.4,
         0.35,
-        2.2,
+        2.5,
       ),
-      spawnRate: Math.floor(25 + density * 120),
-      lifetime: THREE.MathUtils.clamp(2.2 + (1 - chaos) * 2.2, 1.2, 5.5),
-      speed: THREE.MathUtils.clamp(0.75 + chaos * 1.35, 0.45, 2.6),
-      spread: THREE.MathUtils.clamp(0.25 + density * 0.8, 0.2, 1.4),
-      noise: THREE.MathUtils.clamp(0.1 + chaos * 0.85, 0.05, 1.2),
-      gravity: -THREE.MathUtils.clamp(0.15 + (1 - chaos) * 0.8, 0.05, 0.9),
+      spawnRate: Math.floor(30 + density * 150),
+      lifetime: THREE.MathUtils.clamp(2.5 + (1 - chaos) * 3.0, 1.5, 6.0),
+      speed: isAquatic
+        ? 0.35
+        : THREE.MathUtils.clamp(0.75 + chaos * 1.5, 0.45, 3.0),
+      spread: THREE.MathUtils.clamp(0.3 + density * 0.9, 0.2, 1.8),
+      noise: THREE.MathUtils.clamp(0.15 + chaos * 0.9, 0.1, 1.5),
+      gravity: isAquatic
+        ? -0.05
+        : -THREE.MathUtils.clamp(0.2 + (1 - chaos) * 0.8, 0.1, 1.0),
       colorStart: palette.primary.clone(),
       colorEnd: palette.accent.clone(),
-      burstInterval: THREE.MathUtils.clamp(3.2 - chaos * 1.6, 1.4, 4.2),
+      burstInterval: THREE.MathUtils.clamp(3.0 - chaos * 1.5, 1.0, 4.0),
     };
 
     return {
@@ -716,16 +735,11 @@ export class RitualOrchestrator {
       this.visualTarget = { shape: finalShape, detail: 4 };
       if (reveal && !this.revealActive) {
         this.revealActive = true;
-        this.flashTimer = 0.7;
+        this.flashTimer = 0.8;
       }
     }
 
-    this.targetState.orbScale = p < 0.12 ? 0.96 : p < 0.5 ? 1.12 : 1.18;
-    this.targetState.wireOpacity = genome.geometry.wire.opacityBase;
-    this.targetState.softness = genome.volume.softness;
-    this.targetState.backgroundStrength = genome.volume.backgroundStrength;
-    this.targetState.glowIntensity = genome.volume.glowIntensity;
-
+    // SPATIALISATION ET LAYOUT PRESSURE (Thème B - Garanti par Test)
     const tm = this.textMetrics;
     const areaRatio = tm?.areaRatio ?? 0;
     const linesApprox = tm?.linesApprox ?? 1;
@@ -735,17 +749,43 @@ export class RitualOrchestrator {
       (areaRatio * 1.2 + linesApprox / 30) * mobileFactor,
     );
 
+    const textRatio = Math.min(1.0, (this.textLength || 0) / 520);
+    const pressScale = clamp01(layoutPressure);
+
+    // Logique de recul (ZOffset) et rétrécissement (Scale)
+    const baseScale =
+      (p < 0.12 ? 0.96 : p < 0.5 ? 1.12 : 1.18) * (1 - pressScale * 0.25);
+    const baseYOffset = pressScale * (viewportW < 900 ? 0.8 : 0.42); // Remonte fort sur mobile
+    const baseZOffset = -pressScale * 1.2; // Recul en profondeur
+
+    if (reveal) {
+      this.targetState.orbScale = Math.min(
+        1.12,
+        Math.max(0.5, 0.82 - textRatio * 0.1 - pressScale * 0.2),
+      );
+      this.targetState.orbYOffset =
+        0.42 + textRatio * 0.22 + baseYOffset * 0.45;
+      this.targetState.orbZOffset = -1.05 - textRatio * 0.5 + baseZOffset * 0.4;
+    } else {
+      this.targetState.orbScale = Math.min(1.12, Math.max(0.5, baseScale));
+      this.targetState.orbYOffset = baseYOffset;
+      this.targetState.orbZOffset = baseZOffset;
+    }
+
+    this.targetState.wireOpacity = genome.geometry.wire.opacityBase;
+    this.targetState.softness = genome.volume.softness;
+    this.targetState.backgroundStrength = genome.volume.backgroundStrength;
+    this.targetState.glowIntensity = genome.volume.glowIntensity;
     this.targetState.lightKey = genome.lighting.key;
     this.targetState.lightFill = genome.lighting.fill;
     this.targetState.rim = genome.lighting.rim;
-
     this.targetState.deformBase = genome.geometry.baseDeform;
     this.targetState.deformPulse = genome.geometry.pulseDeform;
     this.targetState.dislocation = genome.geometry.dislocation;
     this.targetState.turbulence = genome.geometry.turbulence;
-
-    this.targetState.spinSpeed = 0.06 + genome.motion.energy * 0.22;
-    this.targetState.wobble = 0.05 + genome.motion.energy * 0.18;
+    this.targetState.spinSpeed = 0.06 + genome.motion.energy * 0.25;
+    this.targetState.wobble = 0.05 + genome.motion.energy * 0.2;
+    this.targetState.foregroundOpacity = p < 0.12 ? 0.08 : p < 0.4 ? 0.03 : 0.0;
 
     orbParticles.setParticlesConfig?.(this.ctx, {
       enabled: genome.particles.enabled,
@@ -772,8 +812,8 @@ export class RitualOrchestrator {
       softness: genome.volume.softness,
       noise: genome.volume.noise,
       vignette: 1.05,
-      glowPulseSpeed: 0.45 + genome.chaos * 0.55,
-      glowPulseAmp: 0.03 + genome.chaos * 0.08,
+      glowPulseSpeed: 0.45 + genome.chaos * 0.6,
+      glowPulseAmp: 0.03 + genome.chaos * 0.1,
     });
 
     orbGeometry.setRitualConfig?.(this.ctx, genome);
@@ -801,29 +841,6 @@ export class RitualOrchestrator {
       flowCenter: { x: 0, y: 0, z: 0 },
       flowDirection: { x: 0, y: 1, z: 0 },
     });
-
-    const textRatio = Math.min(1.0, (this.textLength || 0) / 520);
-    const pressScale = clamp01(layoutPressure);
-    const baseScale = this.targetState.orbScale * (1 - pressScale * 0.18);
-    const baseYOffset = (this.targetState.orbYOffset || 0) + pressScale * 0.42;
-    const baseZOffset = (this.targetState.orbZOffset || 0) - pressScale * 0.78;
-
-    if (reveal) {
-      this.targetState.orbScale = Math.min(
-        1.12,
-        Math.max(0.62, 0.82 - textRatio * 0.08 - pressScale * 0.12),
-      );
-      this.targetState.orbYOffset =
-        0.42 + textRatio * 0.22 + baseYOffset * 0.35;
-      this.targetState.orbZOffset =
-        -1.05 - textRatio * 0.42 + baseZOffset * 0.32;
-    } else {
-      this.targetState.orbScale = Math.min(1.12, Math.max(0.62, baseScale));
-      this.targetState.orbYOffset = baseYOffset;
-      this.targetState.orbZOffset = baseZOffset;
-    }
-
-    this.targetState.foregroundOpacity = p < 0.12 ? 0.08 : p < 0.4 ? 0.03 : 0.0;
 
     this.updateVisuals();
   }
@@ -906,7 +923,7 @@ export class RitualOrchestrator {
             sceneFog = ctx.scene.fog;
           }
           if (sceneFog?.isFogExp2 && typeof fog.density === 'number') {
-            sceneFog.density = fog.density * (1 - readabilityLift * 0.55);
+            sceneFog.density = fog.density * (1 - readabilityLift * 0.55); // Le fog s'efface devant le texte
           }
           if (fog.color != null && sceneFog?.color?.set) {
             sceneFog.color.set(fog.color);
@@ -1132,11 +1149,11 @@ export class RitualOrchestrator {
     const lightAttenuation = 1.0 - (finalPhase * 0.22 + smallOrb * 0.18);
 
     const baseKeyIntensity = Math.min(
-      2.2,
+      3.5,
       (s.lightKey + flashAdd) * lightAttenuation,
     );
     const baseFillIntensity = Math.min(1.2, s.lightFill * lightAttenuation);
-    const baseRimIntensity = Math.min(0.95, s.rim * lightAttenuation);
+    const baseRimIntensity = Math.min(2.0, s.rim * lightAttenuation);
 
     const safety = this.ctx.lightSafetyGovernor?.update(dtMs) || null;
     const safetyFactor = safety?.safetyFactor ?? 1.0;
@@ -1198,15 +1215,15 @@ export class RitualOrchestrator {
         }
       }
 
-      // FIX AST: Assignation unique (Single Writer) pour audit-runtime.step.log
+      // FIX AST: Assignation unique (Single Writer)
       if (finalExposure !== null) {
         this.ctx.renderer.toneMappingExposure = finalExposure;
       }
     }
 
-    const keyIntensity = Math.min(2.2, baseKeyIntensity * safetyFactor);
+    const keyIntensity = Math.min(3.5, baseKeyIntensity * safetyFactor);
     const fillIntensity = Math.min(1.2, baseFillIntensity * safetyFactor);
-    const rimIntensity = Math.min(0.95, baseRimIntensity * safetyFactor);
+    const rimIntensity = Math.min(2.0, baseRimIntensity * safetyFactor);
 
     const sunPos = {
       x: 5.6 + Math.sin(time * drift) * 2.2,
@@ -1248,7 +1265,7 @@ export class RitualOrchestrator {
 
     if (volumeCfg) {
       volumeCfg.glowIntensity = Math.min(
-        0.9,
+        1.5,
         baseGlowIntensity + flashAdd * 0.12 * safetyFactor,
       );
       volumeCfg.backgroundStrength = Math.max(
