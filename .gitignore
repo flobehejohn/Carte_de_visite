@@ -1,7 +1,7 @@
 # deps
 node_modules/
 
-# audit / artefacts générés (locaux + CI upload)
+# audit / artefacts generes (locaux + CI upload)
 audit/
 megalinter-reports/
 tmp/
@@ -61,4 +61,7 @@ vitest.config.d.ts
 .cache/
 
 # vercel local files (do not commit)
-.vercel
+.vercel/
+.vercel/*.local
+.vercel/project.json
+.vercel/*.json

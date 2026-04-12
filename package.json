@@ -19,6 +19,7 @@
     "test:watch": "vitest --watch",
     "gate": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\gate.ps1",
     "diag:exports": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/diag-exports.ps1",
+    "diag:envfix": "node -r ./scripts/diag/hook-spawn.cjs scripts/diag/envfix-selftest.cjs",
     "test:seq:scene": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/vitest-seq.ps1",
     "ph3:lock": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/ph3-lock.ps1",
     "audit:cleanup": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/cleanup-audit.ps1 -KeepLast 10",

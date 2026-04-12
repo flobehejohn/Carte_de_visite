@@ -5,6 +5,8 @@ param(
     [string]$LocalConfig = "",
     [string]$AuditLogPath = "",
     [string]$Stamp = "",
+    [switch]$EnableSpawnTrace,
+    [switch]$NoEnvFile,
     [switch]$Yes
 )
 
@@ -45,23 +47,45 @@ $stamp = $audit.Stamp
 $envFile = Join-Path $RepoRoot ".vercel\.env.production.local"
 $bakFile = ""
 $renamed = $false
+$hookPath = Join-Path $RepoRoot "scripts\\diag\\hook-spawn.cjs"
+$spawnTrace = Join-Path $RepoRoot ("audit\\_latest\\vercel_spawn_trace_{0}.log" -f $stamp)
+$oldNodeOptions = $env:NODE_OPTIONS
 
 Add-Content -Path $log -Value ("[vercel-build-debug] start stamp={0}" -f $stamp)
 Add-Content -Path $log -Value ("[vercel-build-debug] repo={0}" -f $RepoRoot)
 Add-Content -Path $log -Value ("[vercel-build-debug] envFile={0}" -f $envFile)
+Add-Content -Path $log -Value ("[vercel-build-debug] enableSpawnTrace={0}" -f $EnableSpawnTrace)
+Add-Content -Path $log -Value ("[vercel-build-debug] noEnvFile={0}" -f $NoEnvFile)
 
-if (Test-Path -LiteralPath $envFile) {
-    $bakFile = "$envFile.bak_$stamp"
-    Move-Item -LiteralPath $envFile -Destination $bakFile -Force
-    $renamed = $true
-    Add-Content -Path $log -Value ("[vercel-build-debug] env renamed => {0}" -f $bakFile)
+if ($NoEnvFile) {
+    if (Test-Path -LiteralPath $envFile) {
+        $bakFile = "$envFile.bak_$stamp"
+        Move-Item -LiteralPath $envFile -Destination $bakFile -Force
+        $renamed = $true
+        Add-Content -Path $log -Value ("[vercel-build-debug] env renamed => {0}" -f $bakFile)
+    }
+    else {
+        Add-Content -Path $log -Value "[vercel-build-debug] env file not found, no rename"
+    }
 }
 else {
-    Add-Content -Path $log -Value "[vercel-build-debug] env file not found, no rename"
+    Add-Content -Path $log -Value "[vercel-build-debug] no env rename (NoEnvFile=false)"
 }
 
 Push-Location $RepoRoot
 try {
+    if ($EnableSpawnTrace) {
+        if (-not (Test-Path -LiteralPath $hookPath)) {
+            throw "hook-spawn.cjs not found: $hookPath"
+        }
+        $hookPathForNode = $hookPath.Replace("\", "/")
+        $traceOpt = "--require $hookPathForNode --trace-warnings --trace-uncaught"
+        $env:NODE_OPTIONS = ($oldNodeOptions ? ($oldNodeOptions + " " + $traceOpt) : $traceOpt)
+        $env:CODEX_SPAWN_TRACE_LOG = $spawnTrace
+        $env:CODEX_SPAWN_ENVFIX = "1"
+        Add-Content -Path $log -Value ("[vercel-build-debug] spawnTraceLog={0}" -f $spawnTrace)
+    }
+
     $vercel = Get-VercelCmd
     $yesArgs = @()
     if ($Yes) { $yesArgs = @("--yes") }
@@ -83,6 +107,11 @@ try {
 }
 finally {
     Pop-Location
+    if ($EnableSpawnTrace) {
+        if ($oldNodeOptions) { $env:NODE_OPTIONS = $oldNodeOptions } else { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
+        Remove-Item Env:CODEX_SPAWN_TRACE_LOG -ErrorAction SilentlyContinue
+        Remove-Item Env:CODEX_SPAWN_ENVFIX -ErrorAction SilentlyContinue
+    }
     if ($renamed -and (Test-Path -LiteralPath $bakFile)) {
         Move-Item -LiteralPath $bakFile -Destination $envFile -Force
         Add-Content -Path $log -Value ("[vercel-build-debug] env restored from {0}" -f $bakFile)

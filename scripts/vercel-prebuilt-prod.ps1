@@ -7,6 +7,8 @@ param(
     [string]$Stamp = "",
     [switch]$Yes,
     [switch]$PostDeploySmoke,
+    [switch]$AutoDiag,
+    [switch]$EnableSpawnTrace,
     [int]$SmokeTimeoutSec = 60
 )
 
@@ -108,6 +110,85 @@ function Log-VercelEnvOverrides([string]$RepoRoot) {
     Write-Log ("[vercel-prebuilt][ENV] overrides detected: " + ($keys -join ", "))
 }
 
+function Write-EnvSnapshot {
+    Write-Log "[vercel-prebuilt][ENV] snapshot (metadata only)"
+    $keys = @("ComSpec","COMSPEC","SystemRoot","windir","Path","PATH","PATHEXT","npm_config_prefix","NODE_OPTIONS","npm_execpath")
+    foreach ($k in $keys) {
+        $v = [System.Environment]::GetEnvironmentVariable($k)
+        $present = $false
+        $len = 0
+        if ($null -ne $v) { $present = $true; $len = $v.Length }
+        Write-Log ("[vercel-prebuilt][ENV] {0} present={1} length={2}" -f $k, $present, $len)
+        if ($k -in @("Path","PATH")) {
+            $low = if ($v) { $v.ToLowerInvariant() } else { "" }
+            $hasSystem32 = $low.Contains("\\system32")
+            $hasWinSystem32 = $low.Contains("\\windows\\system32")
+            Write-Log ("[vercel-prebuilt][ENV] {0} has_system32={1} has_windows_system32={2}" -f $k, $hasSystem32, $hasWinSystem32)
+        }
+    }
+}
+
+function Get-VercelEntry {
+    try {
+        $binJson = & node -p "JSON.stringify(require('vercel/package.json').bin)" 2>$null
+        if ($binJson) {
+            $bin = $binJson | ConvertFrom-Json
+            if ($bin.vercel) {
+                $p = Resolve-Path -LiteralPath $bin.vercel -ErrorAction SilentlyContinue
+                if ($p) { return $p.Path }
+            }
+        }
+    }
+    catch { }
+    return ""
+}
+
+function Invoke-NodeVercel {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Args,
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [switch]$EnableSpawnTrace
+    )
+    $entry = Get-VercelEntry
+    if ([string]::IsNullOrWhiteSpace($entry)) {
+        Write-Log "[vercel-prebuilt][WARN] vercel CLI entry not found (node fallback skipped)"
+        $global:LASTEXITCODE = 1
+        return @()
+    }
+
+    $hookPath = Join-Path $RepoRoot "scripts\\diag\\hook-spawn.cjs"
+    $traceLog = Join-Path $RepoRoot ("audit\\_latest\\vercel_spawn_trace_{0}.log" -f $script:AuditStamp)
+    $oldNodeOptions = $env:NODE_OPTIONS
+
+    if ($EnableSpawnTrace) {
+        if (-not (Test-Path -LiteralPath $hookPath)) {
+            Write-Log "[vercel-prebuilt][WARN] hook-spawn.cjs not found (spawn trace skipped)"
+        }
+        else {
+            $hookPathForNode = $hookPath.Replace("\", "/")
+            $traceOpt = "--require $hookPathForNode --trace-warnings --trace-uncaught"
+            $env:NODE_OPTIONS = ($oldNodeOptions ? ($oldNodeOptions + " " + $traceOpt) : $traceOpt)
+            $env:CODEX_SPAWN_TRACE_LOG = $traceLog
+            Write-Log ("[vercel-prebuilt] spawnTraceLog={0}" -f $traceLog)
+        }
+    }
+
+    try {
+        Write-Log ("[vercel-prebuilt][CMD] node {0} {1}" -f $entry, ($Args -join " "))
+        $output = @(& node $entry @Args 2>&1)
+        $exit = $LASTEXITCODE
+        Write-LogLines $output
+        $global:LASTEXITCODE = $exit
+        return $output
+    }
+    finally {
+        if ($EnableSpawnTrace) {
+            if ($oldNodeOptions) { $env:NODE_OPTIONS = $oldNodeOptions } else { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
+            Remove-Item Env:CODEX_SPAWN_TRACE_LOG -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Invoke-Step {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
@@ -172,6 +253,27 @@ function Invoke-VercelCapture {
     return $output
 }
 
+function Invoke-VercelNpxCapture {
+    param([Parameter(Mandatory = $true)][string[]]$VercelArgs)
+
+    if (-not (Get-Command npx -ErrorAction SilentlyContinue)) {
+        Write-Log "[vercel-prebuilt][WARN] npx not found (npx fallback skipped)"
+        $global:LASTEXITCODE = 1
+        return @()
+    }
+
+    $cmdLine = "npx vercel " + ($VercelArgs -join " ")
+    Write-Log "[vercel-prebuilt][CMD] $cmdLine"
+
+    $output = @()
+    if ($Yes) { $output = @(& npx --yes vercel @VercelArgs 2>&1) }
+    else { $output = @(& npx vercel @VercelArgs 2>&1) }
+    $exit = $LASTEXITCODE
+    Write-LogLines $output
+    $global:LASTEXITCODE = $exit
+    return $output
+}
+
 function Extract-DeployUrl([string[]]$Lines) {
     if ($null -eq $Lines) { return "" }
     $matches = $Lines | Select-String -Pattern 'https?://[^\s]+' -AllMatches |
@@ -230,16 +332,46 @@ try {
     }
     Invoke-Step -Name "vercel-version" -Action { Invoke-Vercel @("--version") }
 
-    # pull env + settings (production)
-    Invoke-Step -Name "vercel-pull-prod-env" -Action {
-        $vArgs = @("pull") + $vercelYes + @("--environment", "production") + $localConfigArgs
-        Invoke-Vercel $vArgs
+    if ($AutoDiag) {
+        Write-EnvSnapshot
     }
+    Write-Log "[vercel-prebuilt][WARN] vercel pull skipped (no .vercel/*.local writes)"
 
     # build prebuilt prod (LOCAL)
     Invoke-Step -Name "vercel-build-prod" -Action {
         $vArgs = @("build", "--prod") + $vercelYes + $localConfigArgs
-        Invoke-Vercel $vArgs
+        if ($AutoDiag) {
+            $lines = Invoke-VercelCapture $vArgs
+            $exit = $LASTEXITCODE
+
+            if ($exit -ne 0) {
+                $joined = ($lines -join "`n")
+                $cmdEnoent = $joined -match '(?i)spawn cmd\.exe ENOENT'
+                if ($cmdEnoent) {
+                    Write-Log "[vercel-prebuilt][AUTO] detected spawn cmd.exe ENOENT"
+                    if (-not $script:UseNpx) {
+                        Write-Log "[vercel-prebuilt][AUTO] retry build via npx vercel"
+                        $lines = Invoke-VercelNpxCapture $vArgs
+                        $exit = $LASTEXITCODE
+                    }
+                    if ($exit -ne 0 -and $EnableSpawnTrace) {
+                        Write-Log "[vercel-prebuilt][AUTO] retry build via node entry with spawn trace"
+                        $lines = Invoke-NodeVercel -Args $vArgs -RepoRoot $RepoRoot -EnableSpawnTrace
+                        $exit = $LASTEXITCODE
+                    }
+                    elseif ($exit -ne 0 -and -not $EnableSpawnTrace) {
+                        Write-Log "[vercel-prebuilt][AUTO] spawn trace disabled (EnableSpawnTrace=false)"
+                    }
+                }
+                else {
+                    Write-Log "[vercel-prebuilt][AUTO] build failed (not cmd.exe ENOENT)"
+                }
+            }
+            $global:LASTEXITCODE = $exit
+        }
+        else {
+            Invoke-Vercel $vArgs
+        }
     }
 
     # deploy prebuilt prod
