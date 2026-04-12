@@ -101,3 +101,5 @@ docs/audit/*
 vite.config.d.ts
 vitest.config.d.ts
 .vercel
+
+test-results/
