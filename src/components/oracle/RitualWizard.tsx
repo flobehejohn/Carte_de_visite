@@ -394,6 +394,7 @@ export default function RitualWizard() {
           stage={stage}
           loading={loading}
           result={lastResult}
+          progress={lastResult ? 1.0 : loading ? 0.85 : (stage / 10) * 0.8}
         />
       </div>
 

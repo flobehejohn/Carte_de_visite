@@ -1,3 +1,4 @@
+import gsap from 'gsap';
 import * as THREE from 'three';
 import { OrbAuditBridge } from './audit/OrbAuditBridge.ts';
 import * as orbFluidParticles from './modules/orbFluidParticles.js';
@@ -6,6 +7,8 @@ import * as orbGround from './modules/orbGround.js';
 import * as orbLighting from './modules/orbLighting.js';
 import * as orbParticles from './modules/orbParticles.js';
 import * as orbPoly from './modules/orbPoly.js';
+import * as orbText from './modules/orbText.js';
+import { OrbTextManager } from './modules/orbTextManager.js';
 import * as orbVolumes from './modules/orbVolumes.js';
 import { ClimateController } from './params/ClimateController';
 import { applyMaterials } from './render/materials/applyMaterials';
@@ -17,13 +20,14 @@ import { mapClimateToRenderParams } from './render/materials/mapClimateToRenderP
  * - Volumetric Fake Lighting (Orbital Lights + FBM Shader coloré)
  * - Cheminement (Journey Z-Axis)
  * - VRT Compatible
+ * - Révélation Cinématique Typographique (OrbTextManager)
  */
 
 function cyrb128(str) {
-  let h1 = 1779033703;
-  let h2 = 3144134277;
-  let h3 = 1013904242;
-  let h4 = 2773480762;
+  let h1 = 1779033703,
+    h2 = 3144134277,
+    h3 = 1013904242,
+    h4 = 2773480762;
   for (let i = 0, k; i < str.length; i++) {
     k = str.charCodeAt(i);
     h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
@@ -165,7 +169,6 @@ export class RitualOrchestrator {
     this.progress = 0;
     this.lastTime = 0;
 
-    // Base de la Caméra pour le Shake
     this.baseCameraPos = new THREE.Vector3(0, 0, 0);
     if (this.ctx.camera) {
       this.baseCameraPos.copy(this.ctx.camera.position);
@@ -249,6 +252,52 @@ export class RitualOrchestrator {
     this.targetState = { ...this.currentState };
     this.visualState = { shape: 'tetra', detail: 0 };
     this.visualTarget = { shape: 'tetra', detail: 0 };
+
+    // --- Moteur Typographique (Citation 3D) ---
+    this.textManager = new OrbTextManager(ctx.scene);
+    this.textManager.loadFont();
+    this.isRevealing = false;
+    this.targetCameraZ = this.baseCameraPos.z;
+
+    this.ctx.climateController = new ClimateController({
+      seed: this.ritualDNA.seed,
+      debug: isDev(),
+    });
+
+    this.ctx.lightSafetyGovernor = {
+      update: (params) => {
+        let active = false;
+        if (params?.bloom?.strength > 0.8) active = true;
+        return {
+          active,
+          reason: active ? 'bloom overflow' : 'none',
+          safetyFactor: active ? 0.5 : 1.0,
+          bloomClamp: active ? 0.8 : undefined,
+        };
+      },
+    };
+
+    // --- SECURITÉ ABSOLUE DE L'AUDIT BRIDGE ---
+    if (typeof OrbAuditBridge !== 'undefined') {
+      try {
+        this.ctx.orbAuditBridge = new OrbAuditBridge(this);
+        if (!this.isVRT && typeof window !== 'undefined') {
+          if (
+            this.ctx.orbAuditBridge &&
+            typeof this.ctx.orbAuditBridge.hookIntoRenderer === 'function'
+          ) {
+            this.ctx.orbAuditBridge.hookIntoRenderer();
+          } else if (typeof OrbAuditBridge.hookIntoRenderer === 'function') {
+            OrbAuditBridge.hookIntoRenderer(this.ctx);
+          }
+        }
+      } catch (e) {
+        console.warn(
+          '[RitualOrchestrator] OrbAuditBridge init bypassé en Live.',
+          e,
+        );
+      }
+    }
   }
 
   initRitual(userName = '', options = {}) {
@@ -262,7 +311,6 @@ export class RitualOrchestrator {
       explicitSeed ??
       `${String(userName || 'Anonyme')}-${Date.now()}-${Math.random()}`;
     this.rng = makeRng(seedString);
-
     const chaosBase = this.rng.random();
 
     this.ritualDNA = {
@@ -290,14 +338,9 @@ export class RitualOrchestrator {
     this.hatchPulse = 0;
     this.lastLayoutLog = 0;
 
-    this.ctx.climateController = new ClimateController({
-      seed: this.ritualDNA.seed,
-      debug: import.meta.env?.DEV,
-    });
     this.ctx.climateController.setMood(this.mood);
     this.ctx.climateController.setVisualParams(this.llmParams);
     this.ctx.climateTargets = null;
-
     this.ctx.ritualGenome = this._buildGenome({ progress: 0, payload: null });
 
     this.ctx.orbShellConfig = this.ctx.orbShellConfig || {};
@@ -316,6 +359,7 @@ export class RitualOrchestrator {
 
     orbPoly.setPolyConfig?.(this.ctx, { enabled: false });
     orbFluidParticles.setFluidParticlesConfig?.(this.ctx, { enabled: false });
+    orbText.buildOrbText?.(this.ctx);
 
     if (!this.foregroundMesh) {
       const fgGeo = new THREE.PlaneGeometry(30, 30);
@@ -332,48 +376,30 @@ export class RitualOrchestrator {
         shader.uniforms.uTime = { value: 0 };
         shader.uniforms.uChaos = { value: 0 };
         shader.uniforms.uColor = { value: new THREE.Color() };
-
         fgMat.userData.shader = shader;
-
-        shader.vertexShader = `
-          varying vec2 vUvVeil;
-          ${shader.vertexShader}
-        `.replace(
-          `#include <uv_vertex>`,
-          `#include <uv_vertex>\n vUvVeil = uv;`,
-        );
-
+        shader.vertexShader =
+          `varying vec2 vUvVeil;\n${shader.vertexShader}`.replace(
+            `#include <uv_vertex>`,
+            `#include <uv_vertex>\n vUvVeil = uv;`,
+          );
         shader.fragmentShader = `
-          uniform float uTime;
-          uniform float uChaos;
-          uniform vec3 uColor;
-          varying vec2 vUvVeil;
-          
+          uniform float uTime; uniform float uChaos; uniform vec3 uColor; varying vec2 vUvVeil;
           float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
           float noise(vec2 st) {
               vec2 i = floor(st); vec2 f = fract(st);
-              float a = random(i); float b = random(i + vec2(1.0, 0.0));
-              float c = random(i + vec2(0.0, 1.0)); float d = random(i + vec2(1.0, 1.0));
-              vec2 u = f * f * (3.0 - 2.0 * f);
-              return mix(a, b, u.x) + (c - a)* u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+              float a = random(i); float b = random(i + vec2(1.0, 0.0)); float c = random(i + vec2(0.0, 1.0)); float d = random(i + vec2(1.0, 1.0));
+              vec2 u = f * f * (3.0 - 2.0 * f); return mix(a, b, u.x) + (c - a)* u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
           }
-          float fbm(vec2 st) {
-              float v = 0.0; float a = 0.5;
-              for(int i=0; i<3; i++) { v += a * noise(st); st *= 2.0; a *= 0.5; }
-              return v;
-          }
+          float fbm(vec2 st) { float v = 0.0; float a = 0.5; for(int i=0; i<3; i++) { v += a * noise(st); st *= 2.0; a *= 0.5; } return v; }
           ${shader.fragmentShader}
         `.replace(
           `vec4 diffuseColor = vec4( diffuse, opacity );`,
           `
-          vec2 uv1 = vUvVeil + vec2(uTime * 0.03, -uTime * 0.01);
-          vec2 uv2 = vUvVeil + vec2(-uTime * 0.02, uTime * 0.03);
-          
-          float n = fbm(uv1 * 4.0 + fbm(uv2 * 2.5));
-          float intensity = smoothstep(0.1, 0.9, n);
+          vec2 uv1 = vUvVeil + vec2(uTime * 0.03, -uTime * 0.01); vec2 uv2 = vUvVeil + vec2(-uTime * 0.02, uTime * 0.03);
+          float n = fbm(uv1 * 4.0 + fbm(uv2 * 2.5)); float intensity = smoothstep(0.1, 0.9, n);
           vec3 atmosphereColor = mix(diffuse, uColor * 2.5, intensity * uChaos);
           vec4 diffuseColor = vec4( atmosphereColor, opacity * intensity );
-          `,
+        `,
         );
       };
 
@@ -391,6 +417,7 @@ export class RitualOrchestrator {
     }
 
     orbParticles.setParticlesConfig?.(this.ctx, { enabled: false });
+    orbFluidParticles.initFluidParticles?.(this.ctx);
 
     Object.assign(this.currentState, {
       orbScale: 0.42,
@@ -413,6 +440,62 @@ export class RitualOrchestrator {
     this.currentState.wireColor.setHex(0xf0f5ff);
 
     this.updateState(0, {});
+  }
+
+  // --- MÉTHODE CINÉMATIQUE DE RÉVÉLATION DÉTERMINISTE ---
+  triggerFinalRevelation(oracleData) {
+    if (this.isRevealing) return;
+    this.isRevealing = true;
+
+    // GOUVERNANCE : Extraction sécurisée
+    const quote =
+      oracleData?.hermeneutic?.quote ||
+      oracleData?.json?.quote ||
+      oracleData?.quote ||
+      'Le silence parle.';
+    const chapter =
+      oracleData?.hermeneutic?.chapter ||
+      oracleData?.json?.chapter ||
+      oracleData?.chapter ||
+      'ORACLE';
+
+    const cam = this.ctx.camera;
+    if (cam) {
+      this.targetCameraZ = cam.position.z + 5.0;
+
+      if (this.isVRT) {
+        cam.position.z = this.targetCameraZ;
+        cam.position.y = 2.0;
+      } else {
+        if (typeof gsap !== 'undefined') {
+          gsap.to(cam.position, {
+            z: this.targetCameraZ,
+            y: 2.0,
+            duration: 3,
+            ease: 'power2.inOut',
+          });
+        }
+      }
+    }
+
+    if (
+      this.textManager &&
+      typeof this.textManager.spawnOracle === 'function'
+    ) {
+      try {
+        this.textManager.spawnOracle({ quote, chapter });
+      } catch (e) {
+        console.warn('RT_ORCHESTRATOR: spawnOracle bypassed', e);
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.__ORACLE_3D_STATE__ = {
+        isRevealing: true,
+        progress: 0,
+        lastQuoteReceived: quote,
+      };
+    }
   }
 
   setMood(moodName) {
@@ -440,9 +523,8 @@ export class RitualOrchestrator {
         typeof performance !== 'undefined' && performance.now
           ? performance.now()
           : Date.now();
-      if (isDev() && (!this.lastLayoutLog || now - this.lastLayoutLog > 1500)) {
+      if (isDev() && (!this.lastLayoutLog || now - this.lastLayoutLog > 1500))
         this.lastLayoutLog = now;
-      }
     }
     if (payload.seed && typeof payload.seed === 'string') {
       this.rng = makeRng(payload.seed);
@@ -466,7 +548,6 @@ export class RitualOrchestrator {
   _buildGenome({ progress, payload }) {
     const p = clamp01(progress);
     const data = payload || {};
-
     const fearSig = hashToUnit(data.fear);
     const desireSig = hashToUnit(data.desire);
     const chaosLLM = clamp01(this.llmParams?.chaos ?? 0.35);
@@ -484,9 +565,8 @@ export class RitualOrchestrator {
     const isElementalOrb = this.rng.bool(0.3) || isStorm;
 
     let weatherMode = 'void';
-    if (!isVoid) {
+    if (!isVoid)
       weatherMode = this.rng.pick(['rain', 'ash', 'abyss', 'embers']);
-    }
 
     const baseHue = this.llmParams?.primary_color
       ? new THREE.Color(this.llmParams.primary_color).getHSL({
@@ -497,7 +577,6 @@ export class RitualOrchestrator {
       : data.fear
         ? fearSig * 0.08
         : 0.55 + desireSig * 0.18;
-
     const sat = 0.55 + chaos * 0.45;
     const lum = 0.25 + chaos * 0.25;
     const primary = new THREE.Color().setHSL(baseHue, sat, lum);
@@ -568,7 +647,6 @@ export class RitualOrchestrator {
     const wireLayers = this.rng.int(2, 6);
     const wireSpacing = this.rng.float(0.035, 0.085);
     const wireBreath = this.rng.float(0.15, 0.35);
-
     const signature = this.ritualDNA.signature;
 
     const motion = {
@@ -777,14 +855,29 @@ export class RitualOrchestrator {
     };
   }
 
+  applyLayoutPressure() {
+    const data = this.ctx.ritualData;
+    if (!data) return;
+    const len = data.textLength || 0;
+    let targetScale = 1.0,
+      targetZ = 0;
+    if (len > 300) {
+      targetScale = 0.85;
+      targetZ = -1.5;
+    } else if (len > 150) {
+      targetScale = 0.95;
+      targetZ = -0.5;
+    }
+    this.targetState = { orbScale: targetScale, orbZOffset: targetZ };
+  }
+
   updateState(progress, payload = this.lastInputs) {
     this.progress = clamp01(progress);
 
     if (this.isVRT && typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      if (params.has('vrtProgress')) {
+      if (params.has('vrtProgress'))
         this.progress = parseFloat(params.get('vrtProgress'));
-      }
     }
 
     const p = this.progress;
@@ -794,13 +887,10 @@ export class RitualOrchestrator {
     const genome = this._buildGenome({ progress: p, payload: data });
     this.ctx.ritualGenome = genome;
 
-    const baseColor = genome.palette.primary;
-    this.targetState.lightColor.copy(baseColor);
+    this.targetState.lightColor.copy(genome.palette.primary);
     this.targetState.bgColor.copy(genome.volume.backgroundColor);
     this.targetState.wireColor.copy(genome.geometry.colors.wire);
-
     this.targetState.veilChaos = genome.chaos;
-
     this.targetState.chromaticAberration = Math.max(
       0,
       (genome.chaos - 0.5) * 0.4,
@@ -817,7 +907,6 @@ export class RitualOrchestrator {
       const finalShape =
         this.llmParams?.shape_archetype || this.ritualDNA.path.p2;
       this.visualTarget = { shape: finalShape, detail: 4 };
-
       if (reveal && !this.revealActive) {
         this.revealActive = true;
         this.flashTimer = 0.8;
@@ -829,7 +918,6 @@ export class RitualOrchestrator {
     const linesApprox = tm?.linesApprox ?? 1;
     const viewportW = tm?.viewportW ?? 1200;
     const mobileFactor = viewportW < 900 ? 1.15 : 1.0;
-
     const layoutPressure = clamp01(
       (areaRatio * 1.2 + linesApprox / 30) * mobileFactor,
     );
@@ -837,11 +925,9 @@ export class RitualOrchestrator {
     const pressScale = clamp01(layoutPressure);
 
     this.targetState.cameraFov = 45 + pressScale * 20;
-
     const baseScale =
       (p < 0.12 ? 0.96 : p < 0.5 ? 1.12 : 1.18) * (1 - pressScale * 0.25);
     const baseYOffset = pressScale * (viewportW < 900 ? 0.8 : 0.42);
-
     const journeyProgressionZ = -30 * (1.0 - p);
     const baseZOffset = journeyProgressionZ - pressScale * 1.2;
 
@@ -872,7 +958,6 @@ export class RitualOrchestrator {
     this.targetState.turbulence = genome.geometry.turbulence;
     this.targetState.spinSpeed = 0.06 + genome.motion.energy * 0.25;
     this.targetState.wobble = 0.05 + genome.motion.energy * 0.2;
-
     this.targetState.foregroundOpacity =
       p < 0.12 ? 0.08 : p < 0.4 ? 0.15 : 0.25 + genome.chaos * 0.2;
 
@@ -906,12 +991,10 @@ export class RitualOrchestrator {
     });
 
     orbGeometry.setRitualConfig?.(this.ctx, genome);
-
     orbPoly.setPolyConfig?.(this.ctx, {
       ...genome.poly,
       enabled: genome.poly.enabled,
     });
-
     orbFluidParticles.setFluidParticlesConfig?.(this.ctx, {
       enabled: genome.fluid.enabled,
       maxCount: genome.fluid.maxCount,
@@ -950,12 +1033,10 @@ export class RitualOrchestrator {
 
   applyTargetsToRuntime(ctx, targets, safetyFactor = 1, bloomClamp = null) {
     if (!ctx) return;
-
     const emergency = !!ctx?.runtimeFlags?.emergencyMode;
     const safeFactor = Number.isFinite(safetyFactor)
       ? clamp01(safetyFactor)
       : 1.0;
-
     const opacity = targets?.opacity;
     const wireOpacityMul =
       typeof opacity?.wireOpacityMul === 'number'
@@ -976,7 +1057,6 @@ export class RitualOrchestrator {
     );
     const finalPhase = smoothstep01(0.86, 1.0, this.progress || 0);
     const readabilityLift = clamp01(layoutPressure * 0.8 + finalPhase * 0.5);
-
     const foregroundOpacity =
       rawForegroundOpacity == null
         ? null
@@ -1031,7 +1111,6 @@ export class RitualOrchestrator {
 
     if (ctx.bloomPass) {
       const b = targets?.bloom;
-
       let nextStrength = null;
       if (typeof b?.strength === 'number')
         nextStrength = b.strength * safeFactor;
@@ -1083,20 +1162,16 @@ export class RitualOrchestrator {
       const vignette = volumeCfg.vignette;
       if (typeof vignette === 'number') {
         const vp = ctx.vignettePass;
-        if (vp?.uniforms?.vignette) {
-          vp.uniforms.vignette.value = vignette;
-        } else if (vp?.uniforms?.strength) {
-          vp.uniforms.strength.value = vignette;
-        } else if (vp?.material?.uniforms?.uVignette) {
+        if (vp?.uniforms?.vignette) vp.uniforms.vignette.value = vignette;
+        else if (vp?.uniforms?.strength) vp.uniforms.strength.value = vignette;
+        else if (vp?.material?.uniforms?.uVignette)
           vp.material.uniforms.uVignette.value = vignette;
-        }
 
         if (vp?.material?.uniforms?.uChromaticAberration) {
           vp.material.uniforms.uChromaticAberration.value =
             s.chromaticAberration;
         }
       }
-
       ctx.appliedVignette = typeof vignette === 'number' ? vignette : null;
     } else {
       ctx.appliedVignette = null;
@@ -1136,10 +1211,7 @@ export class RitualOrchestrator {
           );
       const burst = lfo > 0.85 && prog > 0.75;
       orbParticles.setParticlesConfig?.(this.ctx, {
-        dynamics: {
-          ...g.particles.dynamics,
-          burst,
-        },
+        dynamics: { ...g.particles.dynamics, burst },
         linkDistance:
           (g.particles.linkDistance || 1.0) * (1 + (lfo - 0.5) * 0.15),
         opacity: (g.particles.opacity || 0.6) * (1 + (lfo - 0.5) * 0.1),
@@ -1149,12 +1221,10 @@ export class RitualOrchestrator {
 
   update(time = 0) {
     let dt = Math.min(0.05, Math.max(0.001, time - (this.lastTime || time)));
-
     if (this.isVRT && this.vrtTime !== null) {
       time = this.vrtTime;
       dt = 0.0;
     }
-
     this.lastTime = time;
     const dtMs = dt * 1000;
 
@@ -1186,9 +1256,8 @@ export class RitualOrchestrator {
 
     const smooth = 1.8;
     for (const k in s) {
-      if (typeof s[k] === 'number') {
+      if (typeof s[k] === 'number')
         s[k] = this.isVRT ? t[k] : damp(s[k], t[k], smooth, dt);
-      }
     }
 
     if (this.isVRT) {
@@ -1214,19 +1283,28 @@ export class RitualOrchestrator {
         const sy = this.isVRT
           ? 0
           : (this.rng.random() - 0.5) * s.cameraShake * 0.1;
+
+        const currentZ = this.isRevealing
+          ? this.ctx.camera.position.z
+          : this.baseCameraPos.z;
+        const currentY = this.isRevealing
+          ? this.ctx.camera.position.y
+          : this.baseCameraPos.y;
+
         this.ctx.camera.position.set(
           this.baseCameraPos.x + sx,
-          this.baseCameraPos.y + sy,
-          this.baseCameraPos.z,
+          currentY + sy,
+          currentZ,
         );
       } else {
-        this.ctx.camera.position.copy(this.baseCameraPos);
+        if (!this.isRevealing) {
+          this.ctx.camera.position.copy(this.baseCameraPos);
+        }
       }
     }
 
     const volumeCfg = ensureVolumeConfigSafe(this.ctx);
     this.applyTargetsToRuntime(this.ctx, this.ctx.climateTargets);
-
     this._updateMotionMode(time, dt);
 
     if (this.ctx.orbGroup && g) {
@@ -1235,14 +1313,12 @@ export class RitualOrchestrator {
         Math.sin(time * (1.6 + g.motion.energy * 1.8)) *
         (0.02 + s.turbulence * 0.06);
       const scalePulse = 1 + this.hatchPulse * 0.18 + heart * 0.18;
-
       this.ctx.orbGroup.scale.setScalar(s.orbScale * scalePulse);
 
       const jitter = this.isVRT
         ? 0
         : (this.rng.random() - 0.5) *
           (0.01 + s.turbulence * 0.02 + this.hatchPulse * 0.04);
-
       this.ctx.orbGroup.position.y =
         this.baseYOffset + s.orbYOffset + breath + jitter;
       this.ctx.orbGroup.position.z = s.orbZOffset;
@@ -1254,7 +1330,6 @@ export class RitualOrchestrator {
         this.ctx.orbGroup.rotation.y +=
           (s.spinSpeed + s.turbulence * 0.15) * dt;
       }
-
       this.ctx.orbGroup.rotation.x =
         Math.sin(time * 0.45) * (s.wobble + s.turbulence * 0.35);
     }
@@ -1269,8 +1344,6 @@ export class RitualOrchestrator {
     const wireOpacity = s.wireOpacity;
     this.ctx._wireVisibilityMul = this._climateWireOpacityMul ?? 1.0;
 
-    // THÈME E : L'opacité solide est pilotée par la nature Élémentaire de l'Orbe
-    // [FIX] Utilisation de setValues() pour respecter le linter applyMaterials
     const solidOpacity = g?.geometry?.colors?.solidOpacity ?? 1.0;
     if (this.ctx.orbGroup) {
       this.ctx.orbGroup.children.forEach((child) => {
@@ -1368,7 +1441,6 @@ export class RitualOrchestrator {
           finalExposure = nextExposure;
         }
       }
-
       if (finalExposure !== null) {
         this.ctx.renderer.toneMappingExposure = finalExposure;
       }
@@ -1464,12 +1536,51 @@ export class RitualOrchestrator {
     }
 
     orbGround?.updateGroundDeformation?.(this.ctx, time);
+    orbText.updateOrbTextForFrame?.(this.ctx, this.progress, s.veilChaos);
 
+    // --- ANIMATION TEXTE 3D ---
+    if (this.isRevealing && this.textManager) {
+      try {
+        if (typeof this.textManager.animateReveal === 'function') {
+          this.textManager.animateReveal(dt);
+        }
+      } catch (e) {
+        // GOUVERNANCE : Silence intercepté pour ne pas briser la boucle de rendu 60fps
+      }
+
+      // GOUVERNANCE : Extraction hyper-sécurisée du progress pour éviter un crash de la boucle render
+      if (typeof window !== 'undefined' && window.__ORACLE_3D_STATE__) {
+        let currentP = window.__ORACLE_3D_STATE__.progress || 0;
+        let extP = null;
+        try {
+          extP =
+            this.textManager.revealProgress?.value ?? this.textManager.progress;
+        } catch (e) {}
+
+        // GOUVERNANCE : On force l'avancement minimal (dt * 0.25) pour empêcher le blocage
+        let fallbackP = currentP + dt * 0.25;
+        let finalP =
+          typeof extP === 'number' && !isNaN(extP) && extP > fallbackP
+            ? extP
+            : fallbackP;
+
+        window.__ORACLE_3D_STATE__.progress = Math.min(1.0, finalP);
+      }
+    }
+
+    // --- MISE À JOUR DE L'AUDIT BRIDGE ---
     if (
       typeof window !== 'undefined' &&
       typeof OrbAuditBridge !== 'undefined'
     ) {
-      OrbAuditBridge.captureRuntimeState(this.ctx);
+      if (
+        this.ctx.orbAuditBridge &&
+        typeof this.ctx.orbAuditBridge.captureRuntimeState === 'function'
+      ) {
+        this.ctx.orbAuditBridge.captureRuntimeState();
+      } else if (typeof OrbAuditBridge.captureRuntimeState === 'function') {
+        OrbAuditBridge.captureRuntimeState(this.ctx);
+      }
     }
   }
 }

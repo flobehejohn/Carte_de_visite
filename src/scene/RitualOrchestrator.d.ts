@@ -17,6 +17,7 @@ export class RitualOrchestrator {
 
   baseRadius: number;
   baseYOffset: number;
+  baseCameraPos: THREE.Vector3;
 
   hatchPulse: number;
   revealActive: boolean;
@@ -44,11 +45,24 @@ export class RitualOrchestrator {
   _climateForegroundOpacity: number | null;
   _renderMapOpts: any;
 
+  isVRT: boolean;
+  vrtTime: number | null;
+  _vrtWarmedUp: boolean;
+
+  // --- Propriétés Typographiques / Cinématiques ---
+  textManager: any;
+  isRevealing: boolean;
+  targetCameraZ: number;
+
   initRitual(userName?: string, options?: any): void;
   setMood(moodName: string): void;
   setRitualData(payload?: any): void;
 
+  // --- Méthode Cinématique ---
+  triggerFinalRevelation(oracleData: any): void;
+
   _buildGenome(options: { progress: number; payload: any }): any;
+  applyLayoutPressure(): void;
   updateState(progress: number, payload?: any): void;
   updateVisuals(): void;
   applyTargetsToRuntime(

@@ -157,3 +157,4 @@ describe('orbGeometry — Moteur Procédural & Noise Wrapper (Phase 2B)', () => 
     expect(delta).toBeLessThan(30000.0);
   });
 });
+

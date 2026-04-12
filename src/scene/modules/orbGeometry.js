@@ -492,3 +492,4 @@ export function deformPolyhedron(ctx, time = 0) {
   posAttr.needsUpdate = true;
   mesh.geometry.computeVertexNormals();
 }
+

@@ -19,6 +19,7 @@ interface Oracle3DSceneProps {
   stage: number;
   loading: boolean;
   result: any;
+  progress?: number; // GOUVERNANCE: Synchronisation de la progression de Révélation
 }
 
 type RenderMode = 'composer-bloom' | 'composer-no-bloom' | 'direct';
@@ -758,6 +759,7 @@ export function Oracle3DScene({
   stage,
   loading,
   result,
+  progress, // GOUVERNANCE: Synchronisation de la progression de Révélation
 }: Oracle3DSceneProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -2005,7 +2007,6 @@ export function Oracle3DScene({
           orchestratorRef.current.update(t);
         }
 
-        // PHASE 3 : FORCER LE PLANCHER DE VISIBILITÉ EN URGENCE APRES L'ORCHESTRATEUR
         if (emergencyVisualStateRef.current.active) {
           const localCtx = (orchestratorRef.current as any)?.ctx;
           if (localCtx) {
@@ -2198,6 +2199,29 @@ export function Oracle3DScene({
     }
   }, [formData?.seed, result?.seed, result?.visualParams?.seed]);
 
+  // --- LE PONT DIÉGÉTIQUE REACT -> WEBGL ---
+  useEffect(() => {
+    const orch = orchestratorRef.current;
+    if (!orch || !result) return;
+
+    const prose = result.composition?.prose || result.interpretation;
+    const rawQuote = result.hermeneutic?.quote || result.quote;
+    const chapter = result.hermeneutic?.chapter || result.chapter;
+
+    // PHASE 6 : Si on est sur mobile, la citation va au HTML. On ne l'envoie donc pas en 3D !
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+
+    if (prose && rawQuote) {
+      const oracleData3D = {
+        quote: isMobile ? '' : rawQuote, // Effacement holographique sur mobile
+        interpretation: prose,
+        chapter: chapter || 'RÉVÉLATION',
+        author: result.author || 'Zarathoustra',
+      };
+      orch.triggerFinalRevelation(oracleData3D);
+    }
+  }, [result]);
+
   return (
     <div
       ref={rootRef}
@@ -2210,6 +2234,15 @@ export function Oracle3DScene({
       >
         WebGL context lost
       </div>
+      <div
+        ref={(el) => {
+          if (el && typeof window !== 'undefined') {
+            (window as any).__DEV_VISIBLE_PROBE__ = el;
+          }
+        }}
+        className="hidden"
+        data-testid="sceneStats"
+      />
     </div>
   );
 }

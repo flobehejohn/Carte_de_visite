@@ -10,10 +10,20 @@ export function OracleProvider({ children }: PropsWithChildren<{}>) {
   return <OracleContext.Provider value={value}>{children}</OracleContext.Provider>;
 }
 
-export function useOracleContext(): OracleContextValue {
+function useOracleContext(): OracleContextValue {
   const ctx = useContext(OracleContext);
   if (!ctx) {
     throw new Error('useOracleContext doit être utilisé à l’intérieur de <OracleProvider>');
   }
   return ctx;
 }
+
+
+
+
+
+
+
+
+export { useOracleContext };
+
