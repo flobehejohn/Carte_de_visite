@@ -1,9 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { buildPresetVariants, SAFE_RANGES } from './presetLibrary';
-import { ClimatePresetDef } from './presetLibrary'; // Utilise le type local
+import { buildPresetVariants, SAFE_RANGES, type PresetDefAny } from './presetLibrary';
 
 // Mock de presets de base pour le test
-const MOCK_BASE: Record<string, ClimatePresetDef> = {
+const MOCK_BASE: Record<string, PresetDefAny> = {
   'Aurore': {
     fog: { density: 0.02, color: '#ff0000' },
     bloom: { strength: 0.5, radius: 0.5, threshold: 0.8 },
@@ -18,6 +17,14 @@ const MOCK_BASE: Record<string, ClimatePresetDef> = {
   }
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getNumber(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
 describe('Climate preset library — Unit Test', () => {
   
   it('DIVERSITÉ: Génère des variantes distinctes (Distance L1)', () => {
@@ -26,11 +33,16 @@ describe('Climate preset library — Unit Test', () => {
     // Extrait les valeurs clés pour Cendre__Vxx
     const vectors = Object.entries(variants)
       .filter(([k]) => k.startsWith('Cendre__V'))
-      .map(([_, v]) => [
-        v.fog?.density ?? 0,
-        v.bloom?.strength ?? 0,
-        v.opacity?.foregroundOpacity ?? 0
-      ]);
+      .map(([, v]) => {
+        const fog = isRecord(v.fog) ? v.fog : null;
+        const bloom = isRecord(v.bloom) ? v.bloom : null;
+        const opacity = isRecord(v.opacity) ? v.opacity : null;
+        return [
+          getNumber(fog?.density),
+          getNumber(bloom?.strength),
+          getNumber(opacity?.foregroundOpacity),
+        ];
+      });
 
     // Vérifie qu'on a bien généré 50 variantes
     expect(vectors.length).toBe(50);
@@ -43,14 +55,16 @@ describe('Climate preset library — Unit Test', () => {
   it('SAFE: Toutes les variantes respectent les SAFE_RANGES', () => {
     const variants = buildPresetVariants(MOCK_BASE, { perBase: 20, seed: 'safety-check' });
     
-    Object.values(variants).forEach(v => {
-      if (v.fog) {
-        expect(v.fog.density).toBeGreaterThanOrEqual(SAFE_RANGES.fogDensity.min);
-        expect(v.fog.density).toBeLessThanOrEqual(SAFE_RANGES.fogDensity.max);
+    Object.values(variants).forEach((v) => {
+      const fog = isRecord(v.fog) ? v.fog : null;
+      if (fog && typeof fog.density === 'number') {
+        expect(fog.density).toBeGreaterThanOrEqual(SAFE_RANGES.fogDensity.min);
+        expect(fog.density).toBeLessThanOrEqual(SAFE_RANGES.fogDensity.max);
       }
-      if (v.opacity?.foregroundOpacity !== undefined) {
-        expect(v.opacity.foregroundOpacity).toBeGreaterThanOrEqual(SAFE_RANGES.foregroundOpacityMul.min);
-        expect(v.opacity.foregroundOpacity).toBeLessThanOrEqual(SAFE_RANGES.foregroundOpacityMul.max);
+      const opacity = isRecord(v.opacity) ? v.opacity : null;
+      if (opacity && typeof opacity.foregroundOpacity === 'number') {
+        expect(opacity.foregroundOpacity).toBeGreaterThanOrEqual(SAFE_RANGES.foregroundOpacityMul.min);
+        expect(opacity.foregroundOpacity).toBeLessThanOrEqual(SAFE_RANGES.foregroundOpacityMul.max);
       }
     });
   });
@@ -63,7 +77,8 @@ describe('Climate preset library — Unit Test', () => {
     let sumCendre = 0, countCendre = 0;
 
     Object.entries(variants).forEach(([k, v]) => {
-      const fg = v.opacity?.foregroundOpacity ?? 0;
+      const opacity = isRecord(v.opacity) ? v.opacity : null;
+      const fg = getNumber(opacity?.foregroundOpacity);
       if (k.startsWith('Aurore')) { sumAurore += fg; countAurore++; }
       if (k.startsWith('Cendre')) { sumCendre += fg; countCendre++; }
     });
