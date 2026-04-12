@@ -32,6 +32,8 @@ vi.mock('three', async () => {
     render = vi.fn();
     clearDepth = vi.fn();
     dispose = vi.fn();
+    setClearColor = vi.fn();
+    clear = vi.fn();
   }
 
   return {
@@ -231,7 +233,8 @@ describe('Oracle3DScene ritual cycle contract', () => {
       result: { seed: 'alpha', visualParams: { seed: 'alpha' } },
     });
 
-    const initAfterFirstStableSeed = orchestratorSpies.initRitual.mock.calls.length;
+    const initAfterFirstStableSeed =
+      orchestratorSpies.initRitual.mock.calls.length;
 
     renderScene({
       formData: { seed: 'alpha' },

@@ -1,6 +1,5 @@
 /* @vitest-environment jsdom */
 import { act } from 'react';
-import * as THREE from 'three';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -30,6 +29,8 @@ vi.mock('three', async () => {
     render = vi.fn();
     clearDepth = vi.fn();
     dispose = vi.fn();
+    setClearColor = vi.fn();
+    clear = vi.fn();
   }
 
   return {
@@ -216,7 +217,10 @@ describe('Oracle3DScene audit snapshot contract', () => {
     document.body.appendChild(container);
     root = createRoot(container);
 
-    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+    vi.stubGlobal(
+      'requestAnimationFrame',
+      vi.fn(() => 1),
+    );
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
   });
 
@@ -234,12 +238,14 @@ describe('Oracle3DScene audit snapshot contract', () => {
     delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  function renderScene(props?: Partial<{
-    formData: any;
-    stage: number;
-    loading: boolean;
-    result: any;
-  }>) {
+  function renderScene(
+    props?: Partial<{
+      formData: any;
+      stage: number;
+      loading: boolean;
+      result: any;
+    }>,
+  ) {
     const resolvedProps = {
       formData: { seed: 'alpha' },
       stage: 2,
