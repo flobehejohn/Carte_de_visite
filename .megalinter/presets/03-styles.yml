@@ -1,0 +1,14 @@
+# .megalinter/presets/03-styles.yml
+# Styles (Tailwind-friendly)
+EXTENDS:
+  - '.megalinter/presets/_base.yml'
+
+# Cible CSS uniquement (et co) dans les dossiers usuels
+FILTER_REGEX_INCLUDE: '^(src/|styles/|public/|assets/).*(\.(css|scss|sass))$'
+
+ENABLE_LINTERS:
+  - CSS_STYLELINT
+
+# Tu peux forcer la config stylelint si besoin (sinon MegaLinter utilisera workspace puis defaults)
+CSS_STYLELINT_CONFIG_FILE: '.stylelintrc.json'
+CSS_STYLELINT_RULES_PATH: 'LINTER_DEFAULT'

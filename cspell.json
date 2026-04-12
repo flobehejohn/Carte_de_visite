@@ -1,0 +1,20 @@
+{
+  "version": "0.2",
+  "language": "en,fr",
+  "ignorePaths": [
+    "node_modules/**",
+    "dist/**",
+    "build/**",
+    "coverage/**",
+    "audit/**",
+    "megalinter-reports/**",
+    ".megalinter-reports/**",
+    "**/*.lock"
+  ],
+  "words": [
+    "llmed",
+    "Zarathoustra",
+    "Morillon",
+    "Ruffins"
+  ]
+}

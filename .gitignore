@@ -4,10 +4,18 @@
 node_modules/
 
 ############################
-# Artefacts CI / Audit
+# Artefacts CI / Audit / Reports
 ############################
-# Tous les artefacts générés localement ou par la CI
 audit/
+megalinter-reports/
+.megalinter-reports/
+sarif/
+reports/
+out/
+tmp/
+temp/
+.cache/
+.eslintcache
 
 ############################
 # Builds / Outputs
@@ -15,6 +23,11 @@ audit/
 dist/
 build/
 coverage/
+.storybook-static/
+.vite/
+.turbo/
+.next/
+.vercel/
 
 ############################
 # Logs
@@ -44,11 +57,22 @@ Thumbs.db
 # TypeScript
 ############################
 tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+############################
+# D.TS générés / suspects (IMPORTANT)
+############################
+# On ignore uniquement les d.ts qui "traînent" et sont probablement générés
+vite.config.d.ts
+vitest.config.d.ts
+**/*.generated.d.ts
+**/*.d.ts.map
+
+# (On NE met PAS **/*.d.ts globalement, sinon tu casses src/vite-env.d.ts)
 
 ############################
 # Backups / fichiers temporaires
 ############################
-# Backups manuels ou automatiques
 *.bak
 *.bak.*
 *_bak_*
@@ -56,5 +80,6 @@ tsconfig.tsbuildinfo
 *.tmp
 *.swp
 
-# Backups spécifiques scripts (sécurité supplémentaire)
+# Backups spécifiques scripts
 scripts/_bak/
+_bak_config/

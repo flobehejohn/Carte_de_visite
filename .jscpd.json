@@ -1,0 +1,15 @@
+{
+  "reporters": ["json"],
+  "path": ["src", "scripts"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/coverage/**",
+    "**/audit/**",
+    "**/megalinter-reports/**",
+    "**/.megalinter-reports/**"
+  ],
+  "minLines": 10,
+  "minTokens": 100
+}

@@ -1,0 +1,15 @@
+# .megalinter/presets/06-scripts-powershell.yml
+# Scripts PowerShell (avec règles adaptées au projet)
+EXTENDS:
+  - '.megalinter/presets/_base.yml'
+
+FILTER_REGEX_INCLUDE: '^scripts/.*\.(ps1|psm1|psd1)$'
+
+ENABLE_LINTERS:
+  - POWERSHELL_POWERSHELL
+  - POWERSHELL_POWERSHELL_FORMATTER
+
+# Pour calmer le bruit et garder l'utile :
+# - crée .megalinter/powershell/PSScriptAnalyzerSettings.psd1 (voir plus bas)
+POWERSHELL_POWERSHELL_CONFIG_FILE: 'PSScriptAnalyzerSettings.psd1'
+POWERSHELL_POWERSHELL_RULES_PATH: '.megalinter/powershell'

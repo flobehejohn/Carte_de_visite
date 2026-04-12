@@ -62,7 +62,7 @@ export class ZaraLangGuard {
     const now = Date.now();
     if (now - this.lastLogMs < 1200) return;
     this.lastLogMs = now;
-    // eslint-disable-next-line no-console
+
     console.info(msg);
   }
 }

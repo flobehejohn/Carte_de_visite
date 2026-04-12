@@ -1,0 +1,7 @@
+---
+EXTENDS:
+  - '.megalinter/presets/_base.yml'
+
+# Default = audit non-bloquant (la CI choisira un preset via MEGALINTER_CONFIG)
+DISABLE_ERRORS: true
+VALIDATE_ALL_CODEBASE: true

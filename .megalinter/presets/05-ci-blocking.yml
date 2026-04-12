@@ -1,0 +1,7 @@
+# .megalinter/presets/05-ci-blocking.yml
+# CI blocking (Phase 1+) : même set que 04, mais exit code != 0 si erreurs
+EXTENDS:
+  - '.megalinter/presets/04-full.yml'
+
+# On rend le run bloquant
+DISABLE_ERRORS: false
