@@ -38,6 +38,23 @@ const SAFE_FALLBACK_VISUAL: Required<
 
 const LOG_THROTTLE_MS = 1200;
 
+const GENERIC_GUARDIAN_PATTERNS = [
+  /\best acceptable\b/i,
+  /\bacceptable\b/i,
+  /\bsans signal de danger\b/i,
+  /\baucun signal de danger\b/i,
+  /\bn apporte pas de sens\b/i,
+  /\bmanque de sens\b/i,
+  /\bvalide\b/i,
+  /\bok\b/i,
+  /\bpeut etre accepte\b/i,
+  /\best recevable\b/i,
+  /\ble texte est acceptable\b/i,
+  /\ble prenom\b.*\best acceptable\b/i,
+  /\ble nom\b.*\best acceptable\b/i,
+  /\bnom ou prenom simple\b/i,
+];
+
 function createThrottledLogger(prefix: string, throttleMs = LOG_THROTTLE_MS) {
   let lastLogMs = 0;
   const canLog = () => {
@@ -75,11 +92,108 @@ function toAscii(input: unknown): string {
   }
 }
 
+function normalizeWhitespace(input: unknown): string {
+  return String(input ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function stripDiacritics(input: string): string {
+  try {
+    return input.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  } catch {
+    return input;
+  }
+}
+
+function clip(input: string, max = 84): string {
+  const clean = normalizeWhitespace(input);
+  if (clean.length <= max) return clean;
+  return `${clean.slice(0, max - 1).trimEnd()}…`;
+}
+
 function sanitizeRitualForPrompt(ritual: RitualInput): Record<string, string> {
   const out: Record<string, string> = {};
   if (!ritual) return out;
   for (const [k, v] of Object.entries(ritual)) out[k] = toAscii(v);
   return out;
+}
+
+function quoted(value: string, fallback = 'cette parole'): string {
+  const clean = clip(value, 72);
+  return clean ? `« ${clean} »` : fallback;
+}
+
+function looksGuardianGeneric(comment: string): boolean {
+  const clean = normalizeWhitespace(comment);
+  if (!clean) return true;
+
+  const ascii = stripDiacritics(clean.toLowerCase());
+  if (clean.length < 28) return true;
+
+  return GENERIC_GUARDIAN_PATTERNS.some((pattern) => pattern.test(ascii));
+}
+
+function buildGuardianComment(
+  step: string,
+  value: string,
+  isSafe: boolean,
+): string {
+  const clean = normalizeWhitespace(value);
+
+  if (!isSafe) {
+    switch (step) {
+      case 'name':
+        return 'Le seuil ne refuse pas ce nom, mais il demande une présence un peu plus incarnée.';
+      case 'question':
+        return 'La question touche quelque chose, mais elle demande encore une tension plus nette pour porter le rite.';
+      default:
+        return 'Cette étape peut encore être reformulée pour gagner en justesse avant de poursuivre.';
+    }
+  }
+
+  switch (step) {
+    case 'name':
+      return `${quoted(clean, 'ce nom')} suffit pour franchir le premier seuil : ici, un nom ouvre une présence, pas un simple formulaire.`;
+    case 'mood':
+      return `Sous le signe de ${quoted(clean, 'cette humeur')}, le rite reçoit déjà une météo intérieure ; garde cette couleur pour la suite.`;
+    case 'format':
+      return `${quoted(clean, 'cette forme')} donnera sa manière de frapper juste ; le réceptacle peut déjà porter la vérité.`;
+    case 'question':
+      return `Dans ${quoted(clean, 'cette question')}, on entend déjà une tension vivante entre manque et appel ; elle peut porter l’invocation.`;
+    case 'weight':
+      return `En nommant ${quoted(clean, 'ce fardeau')}, tu donnes au rite un poids réel ; quelque chose peut désormais être traversé.`;
+    case 'fear':
+      return `La peur nommée, ${quoted(clean, 'cette peur')}, cesse d’être pure brume ; elle devient un seuil que l’on peut regarder sans détour.`;
+    case 'desire':
+      return `Ton désir, ${quoted(clean, 'ce désir')}, trace déjà une direction ; il donne au tirage une orientation plus haute que le simple manque.`;
+    case 'sacrifice':
+      return `Ce que tu consens à quitter, ${quoted(clean, 'ce sacrifice')}, ouvre un passage ; le rite possède désormais une perte à honorer.`;
+    case 'social':
+      return `La place que tu te donnes parmi les autres est assez nette pour nourrir l’interprétation ; le cercle peut poursuivre.`;
+    case 'eternity':
+      return `Cette parole ouvre bien l’horizon du retour : elle donne au rite une durée intérieure, et non un simple instant isolé.`;
+    default:
+      return 'Le seuil peut recevoir cette parole ; tu peux poursuivre.';
+  }
+}
+
+function normalizeGuardianComment(
+  step: string,
+  value: string,
+  comment: string,
+  isSafe: boolean,
+): string {
+  const raw = normalizeWhitespace(comment);
+  if (!raw) return buildGuardianComment(step, value, isSafe);
+
+  if (!isSafe) return raw;
+
+  if (looksGuardianGeneric(raw)) {
+    return buildGuardianComment(step, value, isSafe);
+  }
+
+  return raw;
 }
 
 /**
@@ -100,7 +214,6 @@ function unwrapGeminiPayload(r: any): {
 
   if (env && typeof env === 'object' && 'json' in env) payload = env.json;
 
-  // déjà payload ?
   if (
     !payload &&
     env &&
@@ -110,7 +223,6 @@ function unwrapGeminiPayload(r: any): {
     payload = env;
   }
 
-  // JSON dans text ?
   if (!payload && typeof env?.text === 'string') {
     payload = extractFirstJsonObject(env.text);
   }
@@ -142,10 +254,27 @@ function buildVisualParams(raw: any): VisualParams {
   return visualParams;
 }
 
+function pickSentenceFromCitations(data: any) {
+  const citations = Array.isArray(data?.citations) ? data.citations : [];
+  const citationIds = Array.isArray(data?.citation_ids)
+    ? data.citation_ids.map((id: any) => String(id))
+    : [];
+
+  const firstMatching =
+    citationIds.length > 0
+      ? citations.find((c: any) => citationIds.includes(String(c?.id)))
+      : null;
+
+  return firstMatching || citations[0] || null;
+}
+
 function buildOracleResult(ritual: RitualInput, data: any): OracleResult {
-  const quote = String(data?.quote || 'Le silence repond...');
+  const quote = String(
+    data?.quote || 'Le silence ne ferme rien : il demande une autre entrée.',
+  );
   const interpretation = String(
-    data?.interpretation || 'L oracle demeure en attente.',
+    data?.interpretation ||
+      'L’oracle demeure en attente, comme une porte encore à pousser.',
   );
   const keywords = Array.isArray(data?.keywords)
     ? data.keywords.map((k: any) => String(k))
@@ -158,8 +287,7 @@ function buildOracleResult(ritual: RitualInput, data: any): OracleResult {
     {};
   const visualParams = buildVisualParams(vpRaw);
 
-  const citations = Array.isArray(data?.citations) ? data.citations : [];
-  const first = citations.length > 0 ? citations[0] : null;
+  const first = pickSentenceFromCitations(data);
 
   const sentence = {
     id: String(first?.id ?? `z-${Date.now()}`),
@@ -195,14 +323,16 @@ export async function getStepGuidance(
   try {
     const stepA = toAscii(step);
     const valueA = toAscii(value);
+    const valueDisplay = normalizeWhitespace(value);
 
-    // ✅ IMPORTANT: inclure step + value dans le PROMPT lui-même
-    // pour ne plus dépendre du fait que le serveur réinjecte `value`.
     const prompt = [
       'Tu es le Gardien du Seuil.',
-      'Analyse le texte utilisateur et dis si c est acceptable dans le rituel.',
-      'Réponds court, utile, sans moraliser.',
-      'Un prenom ou nom isole n est pas un motif de rejet par defaut.',
+      'Tu verifies une etape du rituel et tu aides l utilisateur a poursuivre.',
+      'Reponds en JSON strict.',
+      'comment = une seule phrase courte, specifique a l etape, legerement rituelle, attentive aux mots fournis, jamais administrative.',
+      'Si isSafe=true, le commentaire doit ouvrir la suite en interpretant legerement le texte.',
+      'INTERDIT: "acceptable", "sans signal de danger", "valide", "ok", "n apporte pas de sens", "simple".',
+      'Pour un prenom simple, transforme-le en seuil symbolique sobre.',
       'FORMAT JSON STRICT OBLIGATOIRE:',
       '{"comment": string, "isSafe": boolean, "confidence": number}',
       '',
@@ -212,7 +342,6 @@ export async function getStepGuidance(
 
     const r = await geminiGenerate(prompt, {
       mode: 'guardian',
-      // on garde aussi step/value pour le retriever côté serveur (si utilisé)
       step: stepA,
       value: valueA,
       expectJson: true,
@@ -221,9 +350,13 @@ export async function getStepGuidance(
     });
 
     const { env, payload, mode } = unwrapGeminiPayload(r);
-    if (!payload) return { comment: 'Le seuil reste ouvert.', isSafe: true };
+    if (!payload) {
+      return {
+        comment: buildGuardianComment(stepA, valueDisplay, true),
+        isSafe: true,
+      };
+    }
 
-    // comment robuste
     let comment = '';
     if (mode === 'guardian') {
       comment = String(payload?.comment ?? env?.text ?? '');
@@ -235,20 +368,30 @@ export async function getStepGuidance(
       comment = String(payload?.comment ?? env?.text ?? '');
     }
 
-    comment = comment.trim();
-
-    // isSafe: si absent, on garde UX permissif
     const isSafe = Boolean(payload?.isSafe ?? payload?.is_safe ?? true);
 
-    // retry NON destructeur
     if (guard.shouldRetry(comment)) {
-      comment = comment.replace(/\s+/g, ' ').trim();
+      comment = normalizeWhitespace(comment);
     }
 
-    return { comment: comment || 'Le seuil reste ouvert.', isSafe };
+    const normalizedComment = normalizeGuardianComment(
+      stepA,
+      valueDisplay,
+      comment,
+      isSafe,
+    );
+
+    return {
+      comment:
+        normalizedComment || buildGuardianComment(stepA, valueDisplay, isSafe),
+      isSafe,
+    };
   } catch (e) {
     logger.warn('Guardian error:', e);
-    return { comment: 'Le seuil reste ouvert.', isSafe: true };
+    return {
+      comment: buildGuardianComment(step, value, true),
+      isSafe: true,
+    };
   }
 }
 
@@ -266,6 +409,9 @@ export async function consultOracle(
       'Tu es Zarathoustra.',
       'Donne une reponse-oracle breve mais vivante.',
       'Tu dois t appuyer sur les citations fournies par le serveur.',
+      'Lis les mots du rituel comme des signes en tension : peur, desir, sacrifice, poids, lien aux autres, retour.',
+      'Integre les formulations de l utilisateur au lieu de les survoler.',
+      'Produis une lecture symbolique, dynamique et philosophique, pas une simple validation.',
       'Si l entree est minimale, transforme-la en symbole vivant au lieu de la juger vide.',
       'Format JSON strict attendu.',
     ].join('\n');

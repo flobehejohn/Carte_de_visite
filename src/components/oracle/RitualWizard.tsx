@@ -1,12 +1,10 @@
-// src/components/oracle/RitualWizard.tsx
 import { AnimatePresence, motion } from 'framer-motion';
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useOracle } from '../../hooks/useOracle';
 import { Oracle3DScene } from './Oracle3DScene';
 
 const Oracle3DSceneMemo = memo(Oracle3DScene);
 
-// --- TYPEWRITER COMPONENT ---
 const Typewriter = ({
   text,
   speed = 20,
@@ -44,7 +42,6 @@ const Typewriter = ({
   );
 };
 
-// --- DATA CONSTANTS ---
 const STEPS = [
   {
     id: 'name',
@@ -168,6 +165,12 @@ const INITIAL_FORM = {
   question: '',
 };
 
+function renderQuotedPreview(value: string) {
+  const clean = String(value ?? '').trim();
+  if (!clean) return null;
+  return `« ${clean} »`;
+}
+
 export default function RitualWizard() {
   const {
     checkStep,
@@ -191,21 +194,22 @@ export default function RitualWizard() {
 
   const currentStep = STEPS[stage - 1];
   const currentValue = currentStep ? formData[currentStep.id] || '' : '';
-  const canValidate = Boolean(currentValue.trim().length > 0);
+  const currentValuePreview = useMemo(
+    () => renderQuotedPreview(currentValue),
+    [currentValue],
+  );
+  const canValidate = Boolean(String(currentValue ?? '').trim().length > 0);
 
   const updateField = (fieldKey: string, value: string) => {
     setFormData((prev: any) => ({ ...prev, [fieldKey]: value }));
   };
 
-  // --- HANDLERS ---
   const handleValidate = async () => {
     if (!currentStep || !canValidate) return;
     clearGuidance();
     setViewState('GUIDANCE');
     setCanProceed(false);
     setSceneData((prev: any) => ({ ...prev, [currentStep.id]: currentValue }));
-
-    // ✅ FIX: step stable (id), pas le label
     await checkStep(currentStep.id, currentValue);
   };
 
@@ -221,8 +225,11 @@ export default function RitualWizard() {
   };
 
   const handleFinalDraw = () => {
+    clearGuidance();
     setStage(11);
+    setViewState('INPUT');
     setSceneData((prev: any) => ({ ...prev, ...formData }));
+
     const fallbackProgress = Math.max(0, Math.min(1, (stage - 1) / 9));
     const climateSnapshot = (() => {
       const fallback = {
@@ -274,7 +281,12 @@ export default function RitualWizard() {
     clearGuidance();
   };
 
-  // Observe texte final pour adapter la scène 3D (layoutPressure)
+  useEffect(() => {
+    if (viewState === 'GUIDANCE' && !guidanceLoading && !lastGuidance) {
+      setCanProceed(true);
+    }
+  }, [viewState, guidanceLoading, lastGuidance]);
+
   useEffect(() => {
     if (!textRef.current) return;
     if (resizeObserverRef.current) resizeObserverRef.current.disconnect();
@@ -327,7 +339,6 @@ export default function RitualWizard() {
     }));
   }, [lastResult]);
 
-  // --- RENDERERS ---
   const renderCards = (items: string[], fieldKey: string) => (
     <div className="grid grid-cols-2 md:grid-cols-3 gap-2 w-full">
       {items.map((item) => (
@@ -373,13 +384,20 @@ export default function RitualWizard() {
                 className="flex flex-col items-center gap-4"
               >
                 <button
+                  type="button"
                   onClick={handleReset}
                   className="px-6 py-2 border border-amber-500/50 text-amber-500 hover:bg-amber-500 hover:text-black uppercase tracking-widest text-xs transition-all pointer-events-auto"
                 >
                   Fermer le Cercle
                 </button>
-                <div className="text-2xl md:text-3xl font-oracle italic text-white mt-4 drop-shadow-lg px-4">
-                  “<Typewriter text={lastResult.quote} />”
+
+                <div className="max-w-4xl text-center">
+                  <p className="text-[11px] font-mono uppercase tracking-[0.35em] text-amber-400/70 mb-3">
+                    Parole oracle
+                  </p>
+                  <div className="text-2xl md:text-3xl font-oracle italic text-white drop-shadow-lg px-4">
+                    “<Typewriter text={lastResult.quote} />”
+                  </div>
                 </div>
               </motion.div>
             ) : error ? (
@@ -402,31 +420,49 @@ export default function RitualWizard() {
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
+                className="w-full"
               >
                 {viewState === 'INPUT' && currentStep && (
-                  <>
+                  <div className="max-w-3xl mx-auto text-center">
                     <p className="text-amber-500/60 text-xs font-mono uppercase tracking-[0.3em] mb-2">
                       {currentStep.label}
                     </p>
                     <h1 className="text-3xl md:text-4xl font-oracle text-white leading-tight drop-shadow-md">
                       {currentStep.q}
                     </h1>
-                  </>
+                  </div>
                 )}
 
-                {viewState === 'GUIDANCE' && (
-                  <div className="glass-clear inline-block">
+                {viewState === 'GUIDANCE' && currentStep && (
+                  <div className="glass-clear inline-block max-w-3xl text-left">
+                    <p className="text-[11px] font-mono uppercase tracking-[0.35em] text-amber-300/70 mb-3">
+                      Écho du seuil · {currentStep.label}
+                    </p>
+
+                    <h2 className="text-xl md:text-2xl font-oracle text-white leading-snug mb-4">
+                      {currentStep.q}
+                    </h2>
+
+                    {currentValuePreview && (
+                      <p className="text-sm md:text-base text-white/70 italic mb-4 font-oracle">
+                        {currentValuePreview}
+                      </p>
+                    )}
+
                     {guidanceLoading ? (
-                      <p className="text-amber-400 animate-pulse italic">
-                        L'Oracle écoute...
+                      <p className="text-amber-300 animate-pulse italic font-oracle">
+                        Le seuil écoute...
                       </p>
                     ) : (
-                      <p className="text-lg md:text-xl text-amber-100 italic font-oracle leading-relaxed max-w-lg mx-auto">
-                        {lastGuidance && (
+                      <p className="text-lg md:text-xl text-amber-100 font-oracle leading-relaxed max-w-2xl">
+                        {lastGuidance ? (
                           <Typewriter
                             text={lastGuidance}
+                            speed={14}
                             onComplete={() => setCanProceed(true)}
                           />
+                        ) : (
+                          'Le seuil reste ouvert.'
                         )}
                       </p>
                     )}
@@ -446,13 +482,35 @@ export default function RitualWizard() {
                 key="result-bottom"
                 initial={{ opacity: 0, y: 50 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="glass-clear w-full max-h-[40vh] overflow-y-auto custom-scrollbar text-left shadow-2xl"
+                className="glass-clear w-full max-h-[45vh] overflow-y-auto custom-scrollbar text-left shadow-2xl"
                 ref={textRef}
               >
-                <div className="prose prose-invert prose-p:text-slate-200 prose-p:font-hud prose-p:leading-relaxed">
+                <div className="prose prose-invert max-w-none prose-p:text-slate-200 prose-p:font-hud prose-p:leading-relaxed">
                   <p>
                     <Typewriter text={lastResult.interpretation} speed={5} />
                   </p>
+                </div>
+
+                {Array.isArray(lastResult.keywords) &&
+                  lastResult.keywords.length > 0 && (
+                    <div className="mt-5 flex flex-wrap gap-2">
+                      {lastResult.keywords.map((keyword) => (
+                        <span
+                          key={keyword}
+                          className="px-2.5 py-1 rounded-full border border-amber-500/30 text-[11px] uppercase tracking-[0.18em] text-amber-200/90 bg-amber-500/10"
+                        >
+                          {keyword}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                <div className="mt-5 pt-4 border-t border-white/10 text-[11px] uppercase tracking-[0.22em] text-white/45 font-mono">
+                  <div>
+                    Ancrage : {lastResult.sentence.part_title} ·{' '}
+                    {lastResult.sentence.section_title}
+                  </div>
+                  <div className="mt-1">Citation #{lastResult.sentence.id}</div>
                 </div>
               </motion.div>
             )}
@@ -469,7 +527,7 @@ export default function RitualWizard() {
                   onClick={handleFinalDraw}
                   className="mt-2 px-8 py-2 bg-white/10 hover:bg-white hover:text-black border border-white/20 text-white transition-all uppercase text-xs tracking-widest rounded shadow-lg pointer-events-auto"
                 >
-                  Reessayer l invocation
+                  Réessayer l’invocation
                 </button>
                 <button
                   type="button"
