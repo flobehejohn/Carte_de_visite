@@ -7,7 +7,15 @@ import { Oracle3DScene } from './Oracle3DScene';
 const Oracle3DSceneMemo = memo(Oracle3DScene);
 
 // --- TYPEWRITER COMPONENT ---
-const Typewriter = ({ text, speed = 20, onComplete }: { text: string; speed?: number; onComplete?: () => void }) => {
+const Typewriter = ({
+  text,
+  speed = 20,
+  onComplete,
+}: {
+  text: string;
+  speed?: number;
+  onComplete?: () => void;
+}) => {
   const [charIndex, setCharIndex] = useState(0);
   const completionRef = useRef(false);
 
@@ -38,29 +46,113 @@ const Typewriter = ({ text, speed = 20, onComplete }: { text: string; speed?: nu
 
 // --- DATA CONSTANTS ---
 const STEPS = [
-  { id: 'name', label: 'I. Identité', q: "Qui ose éveiller Zarathoustra ?", placeholder: "Ton nom..." },
-  { id: 'mood', label: 'II. Atmosphère', q: "Quel ciel pèse sur ton âme ?", type: 'cards' },
-  { id: 'weight', label: 'III. Le Fardeau', q: "Quelle pierre est la plus lourde ?", type: 'cards' },
-  { id: 'fear', label: 'IV. L\'Entrave', q: "Qu'est-ce qui te fait trembler ?", placeholder: "Ma peur est..." },
-  { id: 'desire', label: 'V. Le Désir', q: "Vers quelle étoile tends-tu ?", type: 'cards' },
-  { id: 'sacrifice', label: 'VI. Le Combat', q: "Que dois-tu sacrifier ?", type: 'cards' },
-  { id: 'social', label: 'VII. Le Troupeau', q: "Où te tiens-tu parmi les autres ?", type: 'cards' },
-  { id: 'eternity', label: 'VIII. L\'Éternité', q: "Si cet instant se répétait...", type: 'cards' },
-  { id: 'format', label: 'IX. Le Réceptacle', q: "Quelle forme pour la vérité ?", type: 'formats' },
-  { id: 'question', label: 'X. Invocation', q: "Parle maintenant à l'Abîme.", placeholder: "Ta question..." }
+  {
+    id: 'name',
+    label: 'I. Identité',
+    q: 'Qui ose éveiller Zarathoustra ?',
+    placeholder: 'Ton nom...',
+  },
+  {
+    id: 'mood',
+    label: 'II. Atmosphère',
+    q: 'Quel ciel pèse sur ton âme ?',
+    type: 'cards',
+  },
+  {
+    id: 'weight',
+    label: 'III. Le Fardeau',
+    q: 'Quelle pierre est la plus lourde ?',
+    type: 'cards',
+  },
+  {
+    id: 'fear',
+    label: "IV. L'Entrave",
+    q: "Qu'est-ce qui te fait trembler ?",
+    placeholder: 'Ma peur est...',
+  },
+  {
+    id: 'desire',
+    label: 'V. Le Désir',
+    q: 'Vers quelle étoile tends-tu ?',
+    type: 'cards',
+  },
+  {
+    id: 'sacrifice',
+    label: 'VI. Le Combat',
+    q: 'Que dois-tu sacrifier ?',
+    type: 'cards',
+  },
+  {
+    id: 'social',
+    label: 'VII. Le Troupeau',
+    q: 'Où te tiens-tu parmi les autres ?',
+    type: 'cards',
+  },
+  {
+    id: 'eternity',
+    label: "VIII. L'Éternité",
+    q: 'Si cet instant se répétait...',
+    type: 'cards',
+  },
+  {
+    id: 'format',
+    label: 'IX. Le Réceptacle',
+    q: 'Quelle forme pour la vérité ?',
+    type: 'formats',
+  },
+  {
+    id: 'question',
+    label: 'X. Invocation',
+    q: "Parle maintenant à l'Abîme.",
+    placeholder: 'Ta question...',
+  },
 ];
 
-const MOODS = ['Orageux', 'Brumeux', 'Zénith', 'Crépuscule', 'Aurore', 'Nuit Noire'];
-const WEIGHTS = ['Le Regret', 'Le Devoir', 'La Solitude', 'La Culpabilité', 'L\'Ignorance', 'L\'Ennui'];
-const DESIRES = ['La Puissance', 'La Création', 'La Paix', 'La Vérité', 'L\'Amour', 'La Gloire'];
-const SACRIFICES = ['Ma Paresse', 'Mon Orgueil', 'Ma Naïveté', 'Ma Colère', 'Ma Peur', 'Mon Confort'];
-const SOCIALS = ['Le Guide', 'L\'Ermite', 'Le Guerrier', 'Le Compagnon', 'L\'Observateur'];
-const ETERNITIES = ['La Joie', 'L\'Effroi', 'L\'Indifférence', 'L\'Acceptation'];
+const MOODS = [
+  'Orageux',
+  'Brumeux',
+  'Zénith',
+  'Crépuscule',
+  'Aurore',
+  'Nuit Noire',
+];
+const WEIGHTS = [
+  'Le Regret',
+  'Le Devoir',
+  'La Solitude',
+  'La Culpabilité',
+  "L'Ignorance",
+  "L'Ennui",
+];
+const DESIRES = [
+  'La Puissance',
+  'La Création',
+  'La Paix',
+  'La Vérité',
+  "L'Amour",
+  'La Gloire',
+];
+const SACRIFICES = [
+  'Ma Paresse',
+  'Mon Orgueil',
+  'Ma Naïveté',
+  'Ma Colère',
+  'Ma Peur',
+  'Mon Confort',
+];
+const SOCIALS = [
+  'Le Guide',
+  "L'Ermite",
+  'Le Guerrier',
+  'Le Compagnon',
+  "L'Observateur",
+];
+const ETERNITIES = ['La Joie', "L'Effroi", "L'Indifférence", "L'Acceptation"];
 const FORMATS = [
-  { id: 'Le Marteau', label: 'Le Marteau', desc: "Brutal" },
-  { id: 'Le Miel', label: 'Le Miel', desc: "Doux" },
-  { id: 'L\'Aigle', label: 'L\'Aigle', desc: "Haut" },
-  { id: 'L\'Énigme', label: 'L\'Énigme', desc: "Mystique" }
+  { id: 'Le Marteau', label: 'Le Marteau', desc: 'Brutal' },
+  { id: 'Le Miel', label: 'Le Miel', desc: 'Doux' },
+  { id: "L'Aigle", label: "L'Aigle", desc: 'Haut' },
+  { id: "L'Énigme", label: "L'Énigme", desc: 'Mystique' },
 ];
 
 const INITIAL_FORM = {
@@ -73,12 +165,21 @@ const INITIAL_FORM = {
   social: '',
   eternity: '',
   format: '',
-  question: ''
+  question: '',
 };
 
 export default function RitualWizard() {
-  const { checkStep, guidanceLoading, lastGuidance, clearGuidance, drawFromRitual, loading, lastResult, reset } = useOracle();
-  
+  const {
+    checkStep,
+    guidanceLoading,
+    lastGuidance,
+    clearGuidance,
+    drawFromRitual,
+    loading,
+    lastResult,
+    reset,
+  } = useOracle();
+
   const [stage, setStage] = useState<number>(1);
   const [formData, setFormData] = useState<any>(INITIAL_FORM);
   const [sceneData, setSceneData] = useState<any>(INITIAL_FORM);
@@ -88,7 +189,7 @@ export default function RitualWizard() {
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
   const currentStep = STEPS[stage - 1];
-  const currentValue = currentStep ? (formData[currentStep.id] || '') : '';
+  const currentValue = currentStep ? formData[currentStep.id] || '' : '';
   const canValidate = Boolean(currentValue.trim().length > 0);
 
   const updateField = (fieldKey: string, value: string) => {
@@ -102,14 +203,16 @@ export default function RitualWizard() {
     setViewState('GUIDANCE');
     setCanProceed(false);
     setSceneData((prev: any) => ({ ...prev, [currentStep.id]: currentValue }));
-    await checkStep(currentStep.label, currentValue);
+
+    // ✅ FIX: step stable (id), pas le label
+    await checkStep(currentStep.id, currentValue);
   };
 
   const handleNextStep = () => {
     clearGuidance();
     setCanProceed(false);
     if (stage < 10) {
-      setStage(prev => prev + 1);
+      setStage((prev) => prev + 1);
       setViewState('INPUT');
     } else {
       handleFinalDraw();
@@ -121,7 +224,10 @@ export default function RitualWizard() {
     setSceneData((prev: any) => ({ ...prev, ...formData }));
     const fallbackProgress = Math.max(0, Math.min(1, (stage - 1) / 9));
     const climateSnapshot = (() => {
-      const fallback = { progress: fallbackProgress, mood: formData.mood || '' };
+      const fallback = {
+        progress: fallbackProgress,
+        mood: formData.mood || '',
+      };
       try {
         const audit = (window as any).__ORB_AUDIT__;
         const snap = audit?.snapshot?.();
@@ -131,7 +237,8 @@ export default function RitualWizard() {
         const paletteMode = snap?.ritualGenome?.paletteMode;
         const primary = palette?.primary?.hex;
         const accent = palette?.accent?.hex;
-        const progress = typeof snap?.progress === 'number' ? snap.progress : fallbackProgress;
+        const progress =
+          typeof snap?.progress === 'number' ? snap.progress : fallbackProgress;
         return {
           progress,
           mood: formData.mood || '',
@@ -139,7 +246,7 @@ export default function RitualWizard() {
           fog: targets?.fog,
           bloom: targets?.bloom,
           volume: targets?.volume,
-          palette: { mode: paletteMode, primary, accent }
+          palette: { mode: paletteMode, primary, accent },
         };
       } catch {
         return fallback;
@@ -150,9 +257,9 @@ export default function RitualWizard() {
       {
         ...formData,
         nameOrNickname: formData.name,
-        questionText: formData.question
+        questionText: formData.question,
       } as any,
-      { climateSnapshot }
+      { climateSnapshot },
     );
   };
 
@@ -177,16 +284,20 @@ export default function RitualWizard() {
       const rect = el.getBoundingClientRect();
       const vw = window.innerWidth || 1;
       const vh = window.innerHeight || 1;
-      const areaRatio = Math.max(0, Math.min(1, (rect.width * rect.height) / (vw * vh)));
+      const areaRatio = Math.max(
+        0,
+        Math.min(1, (rect.width * rect.height) / (vw * vh)),
+      );
       const linesApprox = Math.max(1, Math.round(rect.height / 18));
       const metrics = {
-        textLength: lastResult?.interpretation?.length ?? formData.question?.length ?? 0,
+        textLength:
+          lastResult?.interpretation?.length ?? formData.question?.length ?? 0,
         boxW: rect.width,
         boxH: rect.height,
         linesApprox,
         areaRatio,
         viewportW: vw,
-        viewportH: vh
+        viewportH: vh,
       };
       setSceneData((prev: any) => ({ ...prev, textMetrics: metrics }));
     };
@@ -211,7 +322,7 @@ export default function RitualWizard() {
       ...prev,
       visualParams: lastResult.visualParams,
       seed: lastResult.seed ?? lastResult.visualParams?.seed,
-      textLength
+      textLength,
     }));
   }, [lastResult]);
 
@@ -219,16 +330,18 @@ export default function RitualWizard() {
   const renderCards = (items: string[], fieldKey: string) => (
     <div className="grid grid-cols-2 md:grid-cols-3 gap-2 w-full">
       {items.map((item) => (
-        <button 
-          key={item} 
+        <button
+          key={item}
           type="button"
           onClick={() => updateField(fieldKey, item)}
           className={`
             p-3 text-sm rounded border transition-all duration-300 font-oracle backdrop-blur-md
             hover:bg-white/10 hover:text-white hover:border-white/40
-            ${formData[fieldKey] === item 
-              ? 'bg-amber-500/20 border-amber-400 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.5)]' 
-              : 'bg-black/60 border-white/20 text-white/70'}
+            ${
+              formData[fieldKey] === item
+                ? 'bg-amber-500/20 border-amber-400 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.5)]'
+                : 'bg-black/60 border-white/20 text-white/70'
+            }
           `}
         >
           {item}
@@ -239,25 +352,26 @@ export default function RitualWizard() {
 
   return (
     <div className="orbital-container">
-      
-      {/* 0. FOND 3D INTERACTIF */}
       <div className="zone-oracle-bg">
-        <Oracle3DSceneMemo formData={sceneData} stage={stage} loading={loading} result={lastResult} />
+        <Oracle3DSceneMemo
+          formData={sceneData}
+          stage={stage}
+          loading={loading}
+          result={lastResult}
+        />
       </div>
 
-      {/* 1. ZONE HAUTE : QUESTIONS / GUIDANCE / BOUTON FERMER */}
       <div className="orbital-top">
         <div className="orbital-content contrast-guard">
           <AnimatePresence mode="wait">
-            
-            {/* CAS A : RESULTAT (Bouton Fermer en HAUT) */}
             {lastResult ? (
               <motion.div
                 key="result-top"
-                initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
                 className="flex flex-col items-center gap-4"
               >
-                <button 
+                <button
                   onClick={handleReset}
                   className="px-6 py-2 border border-amber-500/50 text-amber-500 hover:bg-amber-500 hover:text-black uppercase tracking-widest text-xs transition-all pointer-events-auto"
                 >
@@ -268,10 +382,11 @@ export default function RitualWizard() {
                 </div>
               </motion.div>
             ) : (
-              /* CAS B : FLUX NORMAL DU RITUEL */
               <motion.div
                 key={`top-${stage}-${viewState}`}
-                initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
               >
                 {viewState === 'INPUT' && currentStep && (
                   <>
@@ -287,10 +402,17 @@ export default function RitualWizard() {
                 {viewState === 'GUIDANCE' && (
                   <div className="glass-clear inline-block">
                     {guidanceLoading ? (
-                      <p className="text-amber-400 animate-pulse italic">L'Oracle écoute...</p>
+                      <p className="text-amber-400 animate-pulse italic">
+                        L'Oracle écoute...
+                      </p>
                     ) : (
                       <p className="text-lg md:text-xl text-amber-100 italic font-oracle leading-relaxed max-w-lg mx-auto">
-                        {lastGuidance && <Typewriter text={lastGuidance} onComplete={() => setCanProceed(true)} />}
+                        {lastGuidance && (
+                          <Typewriter
+                            text={lastGuidance}
+                            onComplete={() => setCanProceed(true)}
+                          />
+                        )}
                       </p>
                     )}
                   </div>
@@ -301,84 +423,98 @@ export default function RitualWizard() {
         </div>
       </div>
 
-      {/* 2. ZONE BASSE : INPUTS / INTERPRETATION SCROLLABLE */}
       <div className="orbital-bottom">
         <div className="orbital-content contrast-guard">
           <AnimatePresence mode="wait">
-            
-            {/* CAS A : RESULTAT (Interpretation scrollable en BAS) */}
             {lastResult && (
               <motion.div
                 key="result-bottom"
-                initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }}
+                initial={{ opacity: 0, y: 50 }}
+                animate={{ opacity: 1, y: 0 }}
                 className="glass-clear w-full max-h-[40vh] overflow-y-auto custom-scrollbar text-left shadow-2xl"
                 ref={textRef}
               >
                 <div className="prose prose-invert prose-p:text-slate-200 prose-p:font-hud prose-p:leading-relaxed">
-                  <p><Typewriter text={lastResult.interpretation} speed={5} /></p>
+                  <p>
+                    <Typewriter text={lastResult.interpretation} speed={5} />
+                  </p>
                 </div>
               </motion.div>
             )}
 
-            {/* CAS B : PHASE D'INPUT (Si pas de résultat) */}
             {!lastResult && !loading && (
               <motion.div
                 key={`bottom-${stage}-${viewState}`}
-                initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
                 className="w-full flex flex-col items-center gap-4"
               >
-                {/* ETAT INPUT */}
                 {viewState === 'INPUT' && currentStep && (
                   <>
-                    {/* CHOIX DE CARTES */}
-                    {currentStep.type === 'cards' && renderCards(
-                      currentStep.id === 'mood' ? MOODS : 
-                      currentStep.id === 'weight' ? WEIGHTS :
-                      currentStep.id === 'desire' ? DESIRES :
-                      currentStep.id === 'sacrifice' ? SACRIFICES :
-                      currentStep.id === 'social' ? SOCIALS : ETERNITIES,
-                      currentStep.id
-                    )}
+                    {currentStep.type === 'cards' &&
+                      renderCards(
+                        currentStep.id === 'mood'
+                          ? MOODS
+                          : currentStep.id === 'weight'
+                            ? WEIGHTS
+                            : currentStep.id === 'desire'
+                              ? DESIRES
+                              : currentStep.id === 'sacrifice'
+                                ? SACRIFICES
+                                : currentStep.id === 'social'
+                                  ? SOCIALS
+                                  : ETERNITIES,
+                        currentStep.id,
+                      )}
 
-                    {/* CHOIX DE FORMATS */}
                     {currentStep.type === 'formats' && (
                       <div className="grid grid-cols-2 gap-2 w-full">
-                        {FORMATS.map(f => (
-                          <button 
-                            key={f.id} 
+                        {FORMATS.map((f) => (
+                          <button
+                            key={f.id}
                             type="button"
-                            onClick={() => updateField('format', f.id)} 
+                            onClick={() => updateField('format', f.id)}
                             className={`p-3 border text-left transition-all rounded backdrop-blur-md hover:bg-white/10 hover:text-white hover:border-white/40
-                              ${formData.format === f.id 
-                                ? 'bg-amber-500/20 border-amber-400 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.5)]' 
-                                : 'bg-black/60 border-white/20 text-white/70'}`}
+                              ${
+                                formData.format === f.id
+                                  ? 'bg-amber-500/20 border-amber-400 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.5)]'
+                                  : 'bg-black/60 border-white/20 text-white/70'
+                              }`}
                           >
-                            <div className="font-oracle text-white">{f.label}</div>
-                            <div className="text-[10px] text-gray-400 uppercase tracking-tighter">{f.desc}</div>
+                            <div className="font-oracle text-white">
+                              {f.label}
+                            </div>
+                            <div className="text-[10px] text-gray-400 uppercase tracking-tighter">
+                              {f.desc}
+                            </div>
                           </button>
                         ))}
                       </div>
                     )}
 
-                    {/* INPUT TEXTE CLASSIQUE */}
                     {!currentStep.type && (
-                      <input 
-                        autoFocus 
-                        type="text" 
-                        placeholder={currentStep.placeholder} 
-                        value={formData[currentStep.id] || ''} 
-                        onChange={(e) => updateField(currentStep.id, e.target.value)} 
-                        onKeyDown={(e) => e.key === 'Enter' && canValidate && handleValidate()} 
-                        className="oracle-input pointer-events-auto" 
+                      <input
+                        autoFocus
+                        type="text"
+                        placeholder={currentStep.placeholder}
+                        value={formData[currentStep.id] || ''}
+                        onChange={(e) =>
+                          updateField(currentStep.id, e.target.value)
+                        }
+                        onKeyDown={(e) =>
+                          e.key === 'Enter' && canValidate && handleValidate()
+                        }
+                        className="oracle-input pointer-events-auto"
                       />
                     )}
 
-                    {/* BOUTON VALIDER ÉTAPE */}
                     {canValidate && (
-                      <motion.button 
-                        initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                      <motion.button
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
                         type="button"
-                        onClick={handleValidate} 
+                        onClick={handleValidate}
                         className="mt-2 px-8 py-2 bg-white/10 hover:bg-white hover:text-black border border-white/20 text-white transition-all uppercase text-xs tracking-widest rounded shadow-lg pointer-events-auto"
                       >
                         Confirmer
@@ -387,27 +523,27 @@ export default function RitualWizard() {
                   </>
                 )}
 
-                {/* ETAT GUIDANCE (Bouton continuer en bas) */}
                 {viewState === 'GUIDANCE' && canProceed && (
-                  <motion.button 
-                    initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                  <motion.button
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
                     type="button"
-                    onClick={handleNextStep} 
+                    onClick={handleNextStep}
                     className="px-10 py-3 bg-amber-600 hover:bg-amber-500 text-white font-oracle font-bold text-lg shadow-lg shadow-amber-900/50 rounded-sm pointer-events-auto"
                   >
-                    {stage < 10 ? "Continuer le voyage" : "Invoquer Zarathoustra"}
+                    {stage < 10
+                      ? 'Continuer le voyage'
+                      : 'Invoquer Zarathoustra'}
                   </motion.button>
                 )}
               </motion.div>
             )}
 
-            {/* LOADER DE TRANSITION */}
             {loading && (
               <div className="text-amber-500 text-xs tracking-[0.4em] animate-pulse mb-8 z-50">
                 ALIGNEMENT DES ASTRES...
               </div>
             )}
-            
           </AnimatePresence>
         </div>
       </div>
