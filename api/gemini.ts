@@ -16,6 +16,8 @@ import type {
   GeminiMode,
   StrictViolation,
 } from '../src/server/gemini/contract-types.js';
+import { composeOracleComposition } from '../src/server/gemini/compose-oracle-composition.js';
+import { enrichOracleCompositionMotifs } from '../src/server/gemini/enrich-oracle-motifs.js';
 import { evaluateStrictInvariants } from '../src/server/gemini/evaluate-strict-invariants.js';
 import { validateOracleHermeneuticAnchors } from '../src/server/gemini/oracle-hermeneutic.js';
 import {
@@ -281,6 +283,7 @@ function buildResponse(args: {
   text: string;
   json: unknown | null;
   hermeneutic?: OracleResponse['hermeneutic'];
+  composition?: OracleResponse['composition'];
   jsonError: string | null;
   citationsUsed: Citation[];
   raw?: unknown;
@@ -293,6 +296,7 @@ function buildResponse(args: {
     text: args.text,
     json: args.json,
     hermeneutic: args.hermeneutic,
+    composition: args.composition,
     jsonError: toJsonError(args.jsonError),
     citationsUsed: args.citationsUsed,
     knowledge,
@@ -972,6 +976,7 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
 
   let json: unknown | null = null;
   let hermeneutic: OracleResponse['hermeneutic'] = null;
+  let composition: OracleResponse['composition'] = null;
   let jsonErrorCode: string | null = null;
   let responseRaw = (call as any)?.raw ?? null;
 
@@ -1040,6 +1045,7 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
 
           if (!anchorValidation.ok) {
             hermeneutic = null;
+            composition = null;
             jsonErrorCode = 'SCHEMA_VALIDATION_FAILED';
             responseRaw = mergeRawMeta((call as any)?.raw, {
               rawJsonError: 'SCHEMA_VALIDATION_FAILED',
@@ -1054,8 +1060,54 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
               missingRoles: anchorValidation.missingRoles,
             });
           } else {
-            hermeneutic = parsedHermeneutic.data;
-            jsonErrorCode = null;
+            const enrichedMotifs = enrichOracleCompositionMotifs(
+              parsedHermeneutic.data,
+              citationsUsed,
+            );
+
+            if (!enrichedMotifs.ok) {
+              hermeneutic = null;
+              composition = null;
+              jsonErrorCode = 'SCHEMA_VALIDATION_FAILED';
+              responseRaw = mergeRawMeta((call as any)?.raw, {
+                rawJsonError: 'SCHEMA_VALIDATION_FAILED',
+                reason: 'ORACLE_COMPOSITION_CITATION_MISSING',
+                error: enrichedMotifs.error,
+                missingCitationIds: enrichedMotifs.missingCitationIds,
+              });
+
+              logEvent('WARN', traceId, 'oracle_composition_enrichment_failed', {
+                missingCitationIds: enrichedMotifs.missingCitationIds,
+              });
+            } else {
+              try {
+                hermeneutic = parsedHermeneutic.data;
+                composition = composeOracleComposition(
+                  parsedHermeneutic.data,
+                  enrichedMotifs.motifs,
+                );
+                jsonErrorCode = null;
+              } catch (error: unknown) {
+                hermeneutic = null;
+                composition = null;
+                jsonErrorCode = 'SCHEMA_VALIDATION_FAILED';
+                responseRaw = mergeRawMeta((call as any)?.raw, {
+                  rawJsonError: 'SCHEMA_VALIDATION_FAILED',
+                  reason: 'ORACLE_COMPOSITION_INVALID',
+                  error:
+                    error instanceof Error
+                      ? error.message
+                      : 'oracle composition failed',
+                });
+
+                logEvent('WARN', traceId, 'oracle_composition_invalid', {
+                  error:
+                    error instanceof Error
+                      ? error.message
+                      : 'oracle composition failed',
+                });
+              }
+            }
           }
         }
       } else {
@@ -1147,6 +1199,7 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
       text: String((call as any).text ?? ''),
       json,
       hermeneutic,
+      composition,
       jsonError: jsonErrorCode ?? rawMeta.rawJsonError,
       citationsUsed,
       raw,
@@ -1305,6 +1358,7 @@ export function createHandler(deps: HandlerDeps = {}) {
         text: String(baseResponse?.text ?? ''),
         json: jsonPayload,
         hermeneutic,
+        composition: reqMode === 'oracle' ? baseResponse?.composition ?? null : null,
         jsonError: finalState.finalJsonError,
         rawJsonError: finalState.raw.rawJsonError,
         finalJsonError: finalState.finalJsonError,

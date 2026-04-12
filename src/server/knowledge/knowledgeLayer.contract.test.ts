@@ -105,7 +105,7 @@ describe('knowledge layer contract', () => {
     process.env.GEMINI_FAIL_CLOSED_STRICT = '1';
   });
 
-  it('returns citationsUsed (>=2), locks corpus, and exposes hermeneutic with audit json', async () => {
+  it('returns citationsUsed (>=2), locks corpus, and exposes hermeneutic plus composition with audit json', async () => {
     const prompt = 'Rituel: je franchis le seuil et je cite Zarathoustra.';
     const nameOrNickname = 'test';
     const req = OracleRequestSchema.parse({
@@ -137,6 +137,8 @@ describe('knowledge layer contract', () => {
     expect(out.citationsUsed.every((c) => String(c.id).length > 0)).toBe(true);
     expect(out.json).toBeTruthy();
     expect(out.hermeneutic).toBeTruthy();
+    expect(out.composition?.prose.length).toBeGreaterThan(40);
+    expect(out.composition?.motifs.length).toBeGreaterThanOrEqual(2);
     expect(out.hermeneutic?.anchors.length).toBeGreaterThanOrEqual(2);
     expect(
       out.hermeneutic?.anchors.every((anchor) =>

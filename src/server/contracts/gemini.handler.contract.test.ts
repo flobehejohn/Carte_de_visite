@@ -79,12 +79,12 @@ const makeStructuredOracleHermeneuticOk = (citationIds: string[]) => {
       ],
       visual_prescription: {
         primary_color: '#ffd700',
-      chaos: 0.32,
-      fog_density: 0.14,
-      shape_archetype: 'spiral',
-    },
-    confidence: 0.88,
-  };
+        chaos: 0.32,
+        fog_density: 0.14,
+        shape_archetype: 'spiral',
+      },
+      confidence: 0.88,
+    };
 
     return {
       ok: true,
@@ -232,7 +232,7 @@ describe('api/gemini handler contract', () => {
     expect(res.body.jsonError).toBe(null);
   });
 
-  it('A3bis: oracle structured success returns hermeneutic while keeping json/raw/meta/debug', async () => {
+  it('A3bis: oracle structured success returns hermeneutic and composition while keeping json/raw/meta/debug', async () => {
     process.env.GEMINI_STRUCTURED_OUTPUTS = '1';
 
     const prompt = 'Rituel: test oracle structure';
@@ -273,6 +273,9 @@ describe('api/gemini handler contract', () => {
     expect(res.body.mode).toBe('oracle');
     expect(res.body.hermeneutic?.quote).toContain('flamme');
     expect(Array.isArray(res.body.hermeneutic?.anchors)).toBe(true);
+    expect(res.body.composition?.prose.length).toBeGreaterThan(40);
+    expect(Array.isArray(res.body.composition?.motifs)).toBe(true);
+    expect(res.body.composition?.motifs[0]?.citation_id).toBe(citationIds[0]);
     expect(res.body.json).toBeTruthy();
     expect(res.body.raw).toBeTruthy();
     expect(res.body.meta).toBeTruthy();

@@ -236,11 +236,17 @@ describe('citation mapping contract', () => {
 
     expect(response.json).toBeTruthy();
     expect(response.hermeneutic).toBeTruthy();
+    expect(response.composition).toBeTruthy();
 
     const anchorIds = response.hermeneutic?.anchors.map((anchor) =>
       String(anchor.citation_id),
     );
     expect(anchorIds).toEqual(selectedIds);
+
+    const compositionIds = response.composition?.motifs.map((motif) =>
+      String(motif.citation_id),
+    );
+    expect(compositionIds).toEqual(selectedIds);
 
     const responseCitationIds = new Set(
       response.citationsUsed.map((citation) => getCitationId(citation)),
@@ -248,6 +254,31 @@ describe('citation mapping contract', () => {
 
     for (const id of selectedIds) {
       expect(responseCitationIds.has(id)).toBe(true);
+    }
+
+    for (const motif of response.composition?.motifs ?? []) {
+      expect(motif.role.length).toBeGreaterThan(0);
+      expect(motif.motif.length).toBeGreaterThan(0);
+      expect(motif.claim.length).toBeGreaterThan(0);
+
+      const citation = response.citationsUsed.find(
+        (entry) => getCitationId(entry) === motif.citation_id,
+      ) as CitationLike | undefined;
+
+      expect(citation).toBeTruthy();
+      if (!citation) continue;
+
+      const record = citation as Record<string, unknown>;
+      const partTitle = getStringField(record, 'part_title');
+      const sectionTitle = getStringField(record, 'section_title');
+
+      if (partTitle.length > 0) {
+        expect(motif.part_title).toBe(partTitle);
+      }
+
+      if (sectionTitle.length > 0) {
+        expect(motif.section_title).toBe(sectionTitle);
+      }
     }
   });
 });
