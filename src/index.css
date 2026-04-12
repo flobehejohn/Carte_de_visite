@@ -1,0 +1,106 @@
+/* src/index.css */
+@import url('https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,300;0,400;0,600;1,400&family=Inter:wght@300;400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --gold-dim: rgba(212, 175, 55, 0.6);
+  --gold-bright: #ffd700;
+  --glass-blur: blur(20px);
+}
+
+html, body, #root {
+  margin: 0; padding: 0; width: 100%; height: 100%;
+  background-color: #000; overflow: hidden; color: #e2e8f0;
+}
+
+/* STRUCTURE ORBITALE */
+.orbital-container {
+  position: relative; 
+  width: 100vw; 
+  height: 100vh;
+  display: flex; 
+  flex-direction: column; 
+  justify-content: space-between;
+  z-index: 10; 
+  padding: 3rem 1.5rem;
+  pointer-events: none; /* Laisse passer vers la 3D */
+}
+
+.zone-oracle-bg {
+  position: absolute; 
+  inset: 0; 
+  z-index: 0; 
+  pointer-events: all; /* La 3D réagit au clic */
+  background: radial-gradient(circle at center, #0a0a0a 0%, #000000 100%);
+}
+
+.orbital-top, .orbital-bottom {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  pointer-events: none; /* Traverse les zones flex */
+}
+
+/* LISIBILITÉ DU TEXTE : Triple contour pour contrer le blanc/bloom */
+.orbital-content {
+  pointer-events: auto; /* REDONNE LE CLIC AUX INPUTS */
+  width: 100%; 
+  max-width: 640px; 
+  text-align: center;
+  z-index: 100;
+  text-shadow: 
+    0 0 35px rgba(0,0,0,1), 
+    0 0 15px rgba(0,0,0,0.9),
+    1px 1px 3px rgba(0,0,0,1);
+}
+
+/* PANNEAU GLASS-MORPHE ADAPTATIF */
+.glass-clear {
+  background: rgba(0, 0, 0, 0.55); /* Fond sombre pour protéger du Bloom */
+  backdrop-filter: var(--glass-blur) saturate(150%);
+  -webkit-backdrop-filter: var(--glass-blur) saturate(150%);
+  border: 1px solid rgba(255, 215, 0, 0.15);
+  box-shadow: 0 15px 60px rgba(0, 0, 0, 0.9);
+  border-radius: 12px;
+  padding: 2rem;
+}
+
+.font-oracle { font-family: 'Spectral', serif; }
+.font-hud { font-family: 'Inter', sans-serif; }
+
+/* CHAMP TEXTE VISIBLE ET ACCESSIBLE */
+.oracle-input {
+  background: rgba(0, 0, 0, 0.45) !important;
+  border: none;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+  color: var(--gold-bright);
+  font-family: 'Spectral', serif;
+  font-size: 1.8rem;
+  text-align: center;
+  width: 100%;
+  padding: 1.2rem;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(5px);
+  pointer-events: auto !important;
+}
+
+.oracle-input:focus {
+  outline: none;
+  border-bottom-color: var(--gold-bright);
+  background: rgba(0, 0, 0, 0.65) !important;
+  box-shadow: 0 10px 40px -15px rgba(255, 215, 0, 0.2);
+}
+
+.oracle-input::placeholder {
+  color: rgba(255, 255, 255, 0.2);
+  font-style: italic;
+}
+
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: var(--gold-dim); border-radius: 2px; }
+.cursor-blink { color: var(--gold-bright); animation: blink 1s infinite; }
+@keyframes blink { 50% { opacity: 0; } }

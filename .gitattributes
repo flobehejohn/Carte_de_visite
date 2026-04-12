@@ -1,0 +1,41 @@
+* text=auto
+
+# Toujours LF (reproductible CI)
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.ps1   text eol=lf
+*.psm1  text eol=lf
+*.psd1  text eol=lf
+*.sh    text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.js    text eol=lf
+*.mjs   text eol=lf
+*.cjs   text eol=lf
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.json  text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.svg   text eol=lf
+*.xml   text eol=lf
+*.csv   text eol=lf
+*.lock  text eol=lf
+
+# Binaires (ne jamais toucher)
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.webp binary
+*.gif  binary
+*.glb  binary
+*.gltf binary
+*.wasm binary
+*.mp3  binary
+*.wav  binary
+*.mp4  binary
+*.mov  binary
+*.ttf  binary
+*.otf  binary
+*.woff binary
+*.woff2 binary
