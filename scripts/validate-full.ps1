@@ -8,7 +8,8 @@ param(
     [switch]$Strict,
     [string]$Mode = "",
     [switch]$Archive,
-    [switch]$NoCleanLatest
+    [switch]$NoCleanLatest,
+    [switch]$Quiet
 )
 
 Set-StrictMode -Version Latest
@@ -19,6 +20,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $ScriptDir "_auditRun.ps1")
 
 $log = New-LogState
+if ($Quiet) { $VerbosePreference = "SilentlyContinue" }
 
 function Get-OverallStatus([object[]]$steps) {
     if ($steps | Where-Object { $_.Status -eq "ERR" }) { return "ERR" }
@@ -86,15 +88,15 @@ try {
     }
 
     $steps += Invoke-Step -State $log -Name "audit-runtime" -WarnExitCodes @(2) -LogPath (Join-Path $dirs.runtime "audit-runtime.log") -Command {
-        pwsh -NoProfile -ExecutionPolicy Bypass -File $auditRuntime -RepoRoot $RepoRoot -OutDir $dirs.runtime -RunStamp $RunStamp
+        pwsh -NoProfile -ExecutionPolicy Bypass -File $auditRuntime -RepoRoot $RepoRoot -OutDir "audit/_latest/runtime" -RunStamp $RunStamp -Quiet:$Quiet
     }
 
     $steps += Invoke-Step -State $log -Name "audit-opacity" -WarnExitCodes @(2) -LogPath (Join-Path $dirs.opacity "audit-opacity.log") -Command {
-        pwsh -NoProfile -ExecutionPolicy Bypass -File $auditOpacity -RepoRoot $RepoRoot -OutDir $dirs.opacity -RunStamp $RunStamp
+        pwsh -NoProfile -ExecutionPolicy Bypass -File $auditOpacity -RepoRoot $RepoRoot -OutDir "audit/_latest/opacity" -RunStamp $RunStamp -Quiet:$Quiet
     }
 
     $steps += Invoke-Step -State $log -Name "audit-opacity-sinks" -WarnExitCodes @(2) -LogPath (Join-Path $dirs.opacity_sinks "audit-opacity-sinks.log") -Command {
-        pwsh -NoProfile -ExecutionPolicy Bypass -File $auditSinks -RepoRoot $RepoRoot -OutDir $dirs.opacity_sinks -RunStamp $RunStamp
+        pwsh -NoProfile -ExecutionPolicy Bypass -File $auditSinks -RepoRoot $RepoRoot -OutDir "audit/_latest/opacity_sinks" -RunStamp $RunStamp -Quiet:$Quiet
     }
 
     $overall = Get-OverallStatus $steps
@@ -163,6 +165,7 @@ try {
 
     $latestPath = Join-Path $audit.BaseDir "latest.txt"
     Set-Content -LiteralPath $latestPath -Value $runDir -Encoding UTF8
+    Ok $log ("latest : {0}" -f $runDir)
 
     if ($overall -eq "OK") { exit 0 }
     if ($overall -eq "WARN" -and -not $Strict) { exit 0 }

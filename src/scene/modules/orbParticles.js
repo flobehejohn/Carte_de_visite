@@ -62,24 +62,7 @@ function getOpacityMul(ctx) {
 }
 
 function applyOpacityToMaterials(ctx, cfg) {
-  // IMPORTANT: variable explicitement reliée à ctx.appliedOpacityParticlesMul
-  const particlesMul = getParticlesOpacityMul(ctx);
-  const base = clamp01(cfg.opacity);
-
-  // Points: suit toujours le mul (sinon changement de climate mul ne se répercute pas)
-  if (ctx.particlesPoints?.material) {
-    ctx.particlesPoints.material.opacity = base * particlesMul;
-  }
-
-  // Trails: base * 0.9 (le reste est dans la couleur/alpha des sommets)
-  if (ctx.particlesTrails?.material) {
-    ctx.particlesTrails.material.opacity = base * 0.9 * particlesMul;
-  }
-
-  // Links: valeur "par défaut" quand links n'est pas actif (quand actif, updateParticleLinks gère dynamique)
-  if (ctx.particlesLinks?.material && cfg.mode !== 'links') {
-    ctx.particlesLinks.material.opacity = Math.min(1, base * 0.45) * particlesMul;
-  }
+  // opacity is applied by applyMaterials (RenderParams)
 }
 
 function ensureConfig(ctx) {
@@ -222,16 +205,20 @@ export function createInnerParticles(ctx) {
 
   // IMPORTANT: variable explicitement reliée à ctx.appliedOpacityParticlesMul
   const particlesMul = getParticlesOpacityMul(ctx);
+  const baseOpacity = clamp01(cfg.opacity);
+  const linkBaseOpacity = Math.min(1, baseOpacity * 0.45);
 
   // Points
   const pMat = new THREE.PointsMaterial({
     size: cfg.size,
     vertexColors: true,
     transparent: true,
-    opacity: clamp01(cfg.opacity) * particlesMul,
+    opacity: baseOpacity * particlesMul,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
+  if (!pMat.userData) pMat.userData = {};
+  pMat.userData.opacityBase = baseOpacity;
   ctx.particlesPoints = new THREE.Points(geometry, pMat);
   ctx.particlesPoints.frustumCulled = false;
   (ctx.orbGroup || ctx.scene).add(ctx.particlesPoints);
@@ -244,10 +231,12 @@ export function createInnerParticles(ctx) {
   const linkMaterial = new THREE.LineBasicMaterial({
     color: cfg.color1,
     transparent: true,
-    opacity: Math.min(1, clamp01(cfg.opacity) * 0.45) * particlesMul,
+    opacity: linkBaseOpacity * particlesMul,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
+  if (!linkMaterial.userData) linkMaterial.userData = {};
+  linkMaterial.userData.opacityBase = linkBaseOpacity;
   ctx.particlesLinks = new THREE.LineSegments(linkGeometry, linkMaterial);
   ctx.particlesLinks.visible = false;
   ctx.particlesLinks.userData.maxSegments = maxSegments;
@@ -265,10 +254,12 @@ export function createInnerParticles(ctx) {
     size: cfg.size * 0.75,
     vertexColors: true,
     transparent: true,
-    opacity: clamp01(cfg.opacity) * particlesMul,
+    opacity: baseOpacity * particlesMul,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
+  if (!trailMaterial.userData) trailMaterial.userData = {};
+  trailMaterial.userData.opacityBase = baseOpacity;
   ctx.particlesTrails = new THREE.Points(trailGeometry, trailMaterial);
   ctx.particlesTrails.visible = false;
   (ctx.orbGroup || ctx.scene).add(ctx.particlesTrails);
@@ -378,9 +369,6 @@ export function updateParticleLinks(ctx) {
     return;
   }
 
-  // IMPORTANT: variable explicitement reliée à ctx.appliedOpacityParticlesMul
-  const particlesMul = getParticlesOpacityMul(ctx);
-
   const pPos = ctx.particlesPoints.geometry.attributes.position.array;
   const count = pPos.length / 3;
 
@@ -469,9 +457,7 @@ export function updateParticleLinks(ctx) {
   const c = cfg.color1.clone().lerp(cfg.color2, 0.5);
   ctx.particlesLinks.material.color.copy(c);
 
-  // opacité modulée (lente) + particlesMul (SINK: doit rester sur 1 ligne pour l'audit)
-  const slow = 0.5 + 0.5 * Math.sin(nowMs * 0.0007);
-  ctx.particlesLinks.material.opacity = Math.min(1, clamp01(cfg.opacity) * (0.22 + slow * 0.28)) * particlesMul;
+  // opacity is applied by applyMaterials (RenderParams)
   ctx.particlesLinks.visible = true;
 }
 
@@ -486,9 +472,6 @@ export function updateParticleTrails(ctx) {
     if (ctx.particlesTrails) ctx.particlesTrails.visible = false;
     return;
   }
-
-  // IMPORTANT: variable explicitement reliée à ctx.appliedOpacityParticlesMul
-  const particlesMul = getParticlesOpacityMul(ctx);
 
   const pPos = ctx.particlesPoints.geometry.attributes.position.array;
   const count = pPos.length / 3;
@@ -531,8 +514,7 @@ export function updateParticleTrails(ctx) {
   ctx.particlesTrails.geometry.attributes.position.needsUpdate = true;
   ctx.particlesTrails.geometry.attributes.color.needsUpdate = true;
 
-  // IMPORTANT: sink opacité * particlesMul (audit-opacity-sinks)
-  ctx.particlesTrails.material.opacity = clamp01(cfg.opacity) * 0.9 * particlesMul;
+  // opacity is applied by applyMaterials (RenderParams)
   ctx.particlesTrails.visible = true;
 }
 
@@ -548,6 +530,21 @@ export function setParticlesConfig(ctx, patch = {}) {
   Object.assign(prev, patch);
 
   const cfg = ensureConfig(ctx);
+  const baseOpacity = clamp01(cfg.opacity);
+  const linkBaseOpacity = Math.min(1, baseOpacity * 0.45);
+
+  if (ctx.particlesPoints?.material) {
+    if (!ctx.particlesPoints.material.userData) ctx.particlesPoints.material.userData = {};
+    ctx.particlesPoints.material.userData.opacityBase = baseOpacity;
+  }
+  if (ctx.particlesTrails?.material) {
+    if (!ctx.particlesTrails.material.userData) ctx.particlesTrails.material.userData = {};
+    ctx.particlesTrails.material.userData.opacityBase = baseOpacity;
+  }
+  if (ctx.particlesLinks?.material) {
+    if (!ctx.particlesLinks.material.userData) ctx.particlesLinks.material.userData = {};
+    ctx.particlesLinks.material.userData.opacityBase = linkBaseOpacity;
+  }
 
   // rebuild si structure change
   const rebuildKeys = ['count', 'distribution'];
@@ -570,11 +567,7 @@ export function setParticlesConfig(ctx, patch = {}) {
     ctx.particlesTrails.material.needsUpdate = true;
   }
   if (ctx.particlesLinks?.material) {
-    // opacité "par défaut" quand links n'est pas actif (quand actif, updateParticleLinks gère dynamique)
-    if (cfg.mode !== 'links') {
-      const particlesMul = getParticlesOpacityMul(ctx);
-      ctx.particlesLinks.material.opacity = Math.min(1, clamp01(cfg.opacity) * 0.45) * particlesMul;
-    }
+    // opacity is applied by applyMaterials (RenderParams)
     ctx.particlesLinks.material.needsUpdate = true;
   }
 

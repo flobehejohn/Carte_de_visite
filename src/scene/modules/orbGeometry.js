@@ -196,6 +196,8 @@ export function createOrbLayers(ctx) {
       depthWrite: false,
       blending: THREE.AdditiveBlending
     });
+    if (!wireMat.userData) wireMat.userData = {};
+    wireMat.userData.opacityBase = 0;
 
     const wire = new THREE.LineSegments(wireGeo, wireMat);
     wire.frustumCulled = false;
@@ -229,6 +231,8 @@ export function updateWireframeStyle(ctx, baseColor, baseOpacity, time = 0, turb
   const col = baseColor?.isColor ? baseColor : new THREE.Color(baseColor ?? 0xffffff);
   const hsl = col.getHSL({ h: 0, s: 0, l: 0 });
 
+  const visibilityMul = Number.isFinite(ctx?._wireVisibilityMul) ? Math.max(0, ctx._wireVisibilityMul) : 1;
+
   for (const w of ctx.wireFrames) {
     const i = w.userData.layerIndex ?? 0;
     const phase = w.userData.phase ?? 0;
@@ -239,15 +243,26 @@ export function updateWireframeStyle(ctx, baseColor, baseOpacity, time = 0, turb
 
     // opacité: couches internes plus faibles
     const innerFalloff = THREE.MathUtils.lerp(cfg.wireOpacity, cfg.wireOpacityInner, i / Math.max(1, cfg.wireLayers - 1));
-    const op = Math.max(0, Math.min(1, (innerFalloff * baseOpacity) * (0.85 + breath + micro) * (w.userData.opacityMul ?? 1)));
+    const baseFactor = (innerFalloff * (0.85 + breath + micro) * (w.userData.opacityMul ?? 1));
+    const op = Math.max(0, Math.min(1, baseFactor * baseOpacity));
 
     // teinte: micro-shift par couche
     const hue = (hsl.h + (i - cfg.wireLayers * 0.5) * cfg.wireHueShift + breath * 0.008) % 1;
     const c = new THREE.Color().setHSL((hue + 1) % 1, Math.min(1, hsl.s + 0.05), Math.min(1, hsl.l + 0.15));
 
     w.material.color.copy(c);
-    w.material.opacity = op;
-    w.visible = op > 0.01;
+    if (Array.isArray(w.material)) {
+      for (const mat of w.material) {
+        if (!mat) continue;
+        if (!mat.userData) mat.userData = {};
+        mat.userData.opacityBase = op;
+      }
+    } else if (w.material) {
+      if (!w.material.userData) w.material.userData = {};
+      w.material.userData.opacityBase = op;
+    }
+    // opacity is applied by applyMaterials (RenderParams)
+    w.visible = (op * visibilityMul) > 0.01;
 
     // scale + twist légers (couches "vivantes")
     const scalePulse = 1 + breath * 0.06;

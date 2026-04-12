@@ -7,6 +7,8 @@ import * as orbParticles from './modules/orbParticles.js';
 import * as orbPoly from './modules/orbPoly.js';
 import * as orbVolumes from './modules/orbVolumes.js';
 import { ClimateController } from './params/ClimateController';
+import { mapClimateToRenderParams } from './render/materials/mapClimateToRenderParams';
+import { applyMaterials } from './render/materials/applyMaterials';
 
 /**
  * RitualOrchestrator — version "Ultime"
@@ -133,6 +135,7 @@ export class RitualOrchestrator {
     this.textLength = 0;
     this.textMetrics = null;
     this.lastLayoutLog = 0;
+    this._renderMapOpts = { dt: 0, smoothing: { enabled: true, tauMs: 200 } };
 
     this.motion = { mode: 'calm', phase: 0, energy: 0.25, lastSwitch: 0 };
     this.lastParticleModeChange = 0;
@@ -278,9 +281,6 @@ export class RitualOrchestrator {
       this.ctx.scene.add(this.foregroundMesh);
     } else {
       this.foregroundMesh.material.color.setHex(0x000000);
-      // IMPORTANT: relier l'opacité du voile à la valeur appliquée (audit-opacity-sinks)
-      const fgApplied = (typeof this._climateForegroundOpacity === 'number') ? this._climateForegroundOpacity : 1.0;
-      this.foregroundMesh.material.opacity = 1.0 * fgApplied;
       this.ctx.appliedOpacityForeground = (typeof this._climateForegroundOpacity === 'number') ? this._climateForegroundOpacity : null;
     }
 
@@ -928,8 +928,8 @@ export class RitualOrchestrator {
     orbGeometry.setDeformAmplitude(this.ctx, { base: s.deformBase, pulse: s.deformPulse, dislocation: s.dislocation });
     orbGeometry.deformPolyhedron(this.ctx, time);
 
-    const wireOpacityMul = this._climateWireOpacityMul ?? 1.0;
-    const wireOpacity = s.wireOpacity * wireOpacityMul;
+    const wireOpacity = s.wireOpacity;
+    this.ctx._wireVisibilityMul = this._climateWireOpacityMul ?? 1.0;
 
     orbGeometry.updateWireframeStyle(
       this.ctx,
@@ -962,6 +962,16 @@ export class RitualOrchestrator {
     this.ctx.safetyFactor = safetyFactor;
 
     this.applyTargetsToRuntime(this.ctx, this.ctx.climateTargets, safetyFactor, safety?.bloomClamp ?? null);
+    if (this.ctx.climateTargets) {
+      this.ctx._foregroundOpacityBase = s.foregroundOpacity;
+      this._renderMapOpts.dt = dtMs;
+      const prevParams = this.ctx.renderParams ?? null;
+      const rp = mapClimateToRenderParams(this.ctx.climateTargets, this._renderMapOpts, prevParams);
+      this.ctx.renderParams = rp;
+      const materialsFlags = this.ctx.runtimeFlags?.materials;
+      applyMaterials(this.ctx, rp, dtMs, materialsFlags);
+      if (this.foregroundMesh) this.foregroundMesh.visible = rp.opacity.foregroundOpacity > 0.01;
+    }
 
     if (this.ctx.renderer) {
       let nextExposure = null;
@@ -1031,10 +1041,6 @@ export class RitualOrchestrator {
 
     // Voile — bloc unique
     if (this.foregroundMesh) {
-      const climateForeground = this._climateForegroundOpacity;
-      const foregroundOpacity = typeof climateForeground === 'number' ? climateForeground : s.foregroundOpacity;
-      this.foregroundMesh.material.opacity = foregroundOpacity;
-      this.foregroundMesh.visible = foregroundOpacity > 0.01;
       this.foregroundMesh.rotation.z = time * 0.02;
     }
 
@@ -1042,8 +1048,5 @@ export class RitualOrchestrator {
     orbGround?.updateGroundDeformation?.(this.ctx, time);
   }
 }
-
-
-
 
 

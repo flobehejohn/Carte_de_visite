@@ -1,4 +1,9 @@
 # scripts/gate-presets.ps1
+[CmdletBinding()]
+param(
+  [switch]$Quiet
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
@@ -29,7 +34,11 @@ Run "vitest variants unit" {
 }
 
 Run "audit presets" {
-  pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\audit-presets.ps1 -OutDir audit/_latest/presets
+  if ($Quiet) {
+    pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\audit-presets.ps1 -OutDir audit/_latest/presets -Quiet
+  } else {
+    pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\audit-presets.ps1 -OutDir audit/_latest/presets
+  }
 }
 
 $latest = Join-Path $repoRoot "audit\\_latest\\presets"
@@ -41,4 +50,5 @@ if ($jsonCount -lt 1 -or $csvCount -lt 1) {
   throw "Audit outputs missing .json or .csv in $latest"
 }
 
+Write-Host ("[OK] audit presets latest => {0}" -f $latest) -ForegroundColor Green
 Write-Host "`nFULL GREEN" -ForegroundColor Green

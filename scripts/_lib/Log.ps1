@@ -58,7 +58,8 @@ function Write-LogLine {
         Add-Content -LiteralPath $script:LogFilePath -Value $line -Encoding UTF8
     }
 
-    Write-Host $line -ForegroundColor $Color
+    if ($Level -eq "INFO") { Write-Verbose $line }
+    else { Write-Host $line -ForegroundColor $Color }
 }
 
 function Write-LogFile {

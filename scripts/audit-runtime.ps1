@@ -3,8 +3,10 @@ param(
     [Parameter(Position = 0)]
     [string]$RepoRoot = "",
 
-    [string]$OutDir = ".\audit\runtime",
-    [string]$RunStamp = ""
+    [string]$OutDir = "audit/_latest/runtime",
+    [string]$RunStamp = "",
+    [int]$Keep = 3,
+    [switch]$Quiet
 )
 
 Set-StrictMode -Version Latest
@@ -13,6 +15,9 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $ScriptDir "_auditRun.ps1")
 
+$script:Quiet = [bool]$Quiet
+if ($script:Quiet) { $VerbosePreference = "SilentlyContinue" }
+
 $script:WarnCount = 0
 $script:ErrCount = 0
 $script:LogLines = New-Object System.Collections.Generic.List[string]
@@ -20,7 +25,12 @@ $script:LogLines = New-Object System.Collections.Generic.List[string]
 function Log([string]$level, [string]$msg, [ConsoleColor]$color = [ConsoleColor]::Gray) {
     $line = "[$level] $msg"
     $script:LogLines.Add($line) | Out-Null
-    Write-Host $line -ForegroundColor $color
+    if ($script:Quiet) {
+        if ($level -ne "INFO") { Write-Host $line -ForegroundColor $color }
+        return
+    }
+    if ($level -eq "INFO") { Write-Verbose $line }
+    else { Write-Host $line -ForegroundColor $color }
 }
 function Info($m) { Log "INFO" $m ([ConsoleColor]::Gray) }
 function Ok($m) { Log "OK"   $m ([ConsoleColor]::Green) }
@@ -54,7 +64,14 @@ try {
     $RepoRoot = Resolve-RepoRoot -RepoRoot $RepoRoot -ScriptDir $ScriptDir
     if (-not $RunStamp -or $RunStamp.Trim() -eq "") { $RunStamp = Now-Stamp }
 
-    $outAbs = Resolve-OutDirAbs -RepoRoot $RepoRoot -OutDir $OutDir -DefaultSubDir ".\audit\runtime"
+    $category = "runtime"
+    $baseDir = Join-Path $RepoRoot "audit\$category"
+    $runDir = Join-Path $baseDir $RunStamp
+    $latest = Resolve-OutDirAbs -RepoRoot $RepoRoot -OutDir $OutDir -DefaultSubDir "audit/_latest/$category"
+    Ensure-Dir $runDir
+    $outAbs = $runDir
+
+    if (-not $script:Quiet) { Write-Host "`n=== audit runtime ===" -ForegroundColor Cyan }
 
     $target = Join-Path $RepoRoot "src\scene\RitualOrchestrator.js"
     if (-not (Test-Path $target)) { throw "Fichier manquant: $target" }
@@ -144,19 +161,21 @@ try {
     Set-Content -LiteralPath $txtPath -Value ($script:LogLines -join "`r`n") -Encoding UTF8
     ($payload | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $jsonPath -Encoding UTF8
 
-    Copy-Item -Force $txtPath  (Join-Path $outAbs "runtimeaudit-latest.txt")
-    Copy-Item -Force $jsonPath (Join-Path $outAbs "runtimeaudit-latest.json")
-
     Info "Audit runtime log : $txtPath"
     Info "Audit runtime json: $jsonPath"
+    $latestPath = Write-AuditLatest -Category $category -RunDir $runDir -LatestDir $latest -Keep $Keep
+    $exitCode = if ($script:ErrCount -gt 0) { 1 } elseif ($script:WarnCount -gt 0) { 2 } else { 0 }
 
-    Write-Host "`n---- Résumé audit ----"
-    Write-Host ("WARN: {0}" -f $script:WarnCount)
-    Write-Host ("ERR : {0}" -f $script:ErrCount)
-
-    if ($script:ErrCount -gt 0) { exit 1 }
-    if ($script:WarnCount -gt 0) { exit 2 }
-    exit 0
+    if ($exitCode -eq 0) {
+        Write-Host ("[OK] audit runtime => {0}" -f $latestPath) -ForegroundColor Green
+        exit 0
+    }
+    if ($exitCode -eq 2) {
+        Write-Host ("[OK] audit runtime (warn) => {0}" -f $latestPath) -ForegroundColor Yellow
+        exit 2
+    }
+    Write-Host ("[KO] audit runtime => {0}" -f $latestPath) -ForegroundColor Red
+    exit 1
 }
 catch {
     Err $_.Exception.Message
