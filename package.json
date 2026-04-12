@@ -32,9 +32,11 @@
     "motion-dom": "^11.18.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "three": "^0.182.0"
+    "three": "^0.182.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/node": "^25.2.0",
     "@types/react": "^18.3.8",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.3",
