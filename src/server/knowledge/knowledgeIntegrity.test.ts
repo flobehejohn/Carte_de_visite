@@ -47,7 +47,11 @@ describe('Zarathoustra knowledge manifest', () => {
   it('matches sha256 for tracked files with canonical text hashing', () => {
     const dir = path.join(process.cwd(), 'src/server/knowledge');
     const manifestPath = path.join(dir, 'zarathoustra.manifest.json');
-    expect(fs.existsSync(manifestPath)).toBe(true);
+
+    expect(
+      fs.existsSync(manifestPath),
+      `manifest missing: ${manifestPath}`,
+    ).toBe(true);
 
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as {
       files: Array<{ name: string; sha256: string }>;
@@ -55,8 +59,17 @@ describe('Zarathoustra knowledge manifest', () => {
 
     for (const f of manifest.files) {
       const filePath = path.join(dir, f.name);
-      expect(fs.existsSync(filePath)).toBe(true);
-      expect(sha256Canonical(filePath)).toBe(String(f.sha256));
+
+      expect(
+        fs.existsSync(filePath),
+        `tracked knowledge file missing: ${f.name} (${filePath})`,
+      ).toBe(true);
+
+      const actual = sha256Canonical(filePath);
+      expect(
+        actual,
+        `sha256 mismatch for ${f.name}\nexpected=${String(f.sha256)}\nactual=${actual}`,
+      ).toBe(String(f.sha256));
     }
   });
 });

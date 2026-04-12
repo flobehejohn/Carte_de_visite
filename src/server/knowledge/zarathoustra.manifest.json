@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-03-13T16:44:23.3987889+01:00",
+  "generatedAt": "2026-03-13T17:05:32.9819626+01:00",
   "knowledgeDir": "src/server/knowledge",
   "files": [
     {
@@ -26,11 +26,6 @@
       "name": "zarathoustra.sentences.json",
       "sha256": "5e9e7908bd3465f63b5657853907967d76eb5ef5217b972f9ae58d3fbbe36aec",
       "bytes": 1666441
-    },
-    {
-      "name": "zarathoustra.sentences.misses.log",
-      "sha256": "074db65a26094d4fb405eb5c4667b3967ee039d857b5a49dfeba37cd073f2d85",
-      "bytes": 31351
     }
   ]
 }
