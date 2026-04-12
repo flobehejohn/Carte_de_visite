@@ -1,6 +1,9 @@
 // api/gemini.ts
 import {
   ApiEnvelopeSchema,
+  GuardianJsonSchema,
+  MAX_CITATIONS,
+  OracleJsonSchema,
   OracleRequestSchema,
   OracleResponseSchema,
 } from '../src/server/contracts/oracle.schemas.js';
@@ -9,6 +12,15 @@ import type {
   OracleRequest,
   OracleResponse,
 } from '../src/server/contracts/oracle.types.js';
+import type {
+  GeminiMode,
+  StrictViolation,
+} from '../src/server/gemini/contract-types.js';
+import { evaluateStrictInvariants } from '../src/server/gemini/evaluate-strict-invariants.js';
+import {
+  normalizeFinalState,
+  normalizeRawContractMeta,
+} from '../src/server/gemini/normalize-final-state.js';
 import { callGeminiStructured } from '../src/server/gemini/structuredOracle.js';
 import { getKnowledgeHealth } from '../src/server/knowledge/health.js';
 import {
@@ -35,8 +47,7 @@ import {
   makeTraceId,
   safeLog,
 } from '../src/server/observability/trace.js';
-
-type GeminiMode = 'raw' | 'oracle' | 'guardian';
+import { GeminiEnvelopeSchema } from '../src/shared/contracts/gemini.response.contracts.js';
 
 type HandlerDeps = {
   callGeminiImpl?: typeof callGemini;
@@ -67,6 +78,29 @@ type HandleResult = {
   retrieveMs?: number;
 };
 
+function isFailClosedStrictOn(mode: GeminiMode): boolean {
+  if (mode === 'raw') return false;
+  const v = String(process.env.GEMINI_FAIL_CLOSED_STRICT ?? '').trim();
+  if (v === '0') return false;
+  if (v === '1') return true;
+  return true;
+}
+
+function getMinCitationsEffective(
+  body: OracleRequest,
+  mode: GeminiMode,
+): number {
+  if (mode === 'raw') return 0;
+  const raw = clampNumber((body as any).minCitations, 0, MAX_CITATIONS, 2);
+  return Math.max(2, Math.floor(raw));
+}
+
+function extractCitationSource(c: any): string {
+  return String(c?.source ?? '')
+    .trim()
+    .toLowerCase();
+}
+
 function normalizeModelName(v?: string): string {
   const s = String(v ?? '').trim();
   if (!s) return '';
@@ -86,13 +120,13 @@ function buildRetrievalQuery(body: OracleRequest, mode: GeminiMode): string {
     return JSON.stringify({
       ritual: body.ritual ?? {},
       prompt: body.prompt ?? '',
-      climate: body.climateSnapshot ?? null,
+      climate: (body as any).climateSnapshot ?? null,
     });
   }
   if (mode === 'guardian') {
     return JSON.stringify({
-      step: body.step ?? '',
-      value: body.value ?? '',
+      step: (body as any).step ?? '',
+      value: (body as any).value ?? '',
       prompt: body.prompt ?? '',
     });
   }
@@ -122,8 +156,9 @@ function safeGuardianFallback(): any {
   return {
     comment: 'Le seuil reste ouvert.',
     isSafe: true,
-    citations: [],
     confidence: 0.6,
+    citations: [],
+    citation_ids: [],
   };
 }
 
@@ -133,6 +168,7 @@ const JSON_ERROR_ALLOWED = new Set<string>([
   'MISSING_API_KEY',
   'UPSTREAM_ERROR',
   'INVALID_JSON_FROM_LLM',
+  'SCHEMA_VALIDATION_FAILED',
   'KNOWLEDGE_EMPTY',
   'KNOWLEDGE_CORRUPTED',
   'INTERNAL_ERROR',
@@ -154,11 +190,6 @@ function logEvent(
   safeLog(level, traceId, msg, meta);
 }
 
-/**
- * ✅ IMPORTANT : sanitize raw pour garantir JSON.stringify(payload) sans 500
- * - si raw est non sérialisable => on le remplace par un objet "raw_omitted"
- * - si raw est trop volumineux => on remplace par preview
- */
 function sanitizeRawForJson(
   raw: unknown,
   traceId: string,
@@ -177,7 +208,6 @@ function sanitizeRawForJson(
       preview: s.slice(0, maxChars) + '…',
     };
   } catch {
-    // non serializable (circular, functions, etc.)
     let hint = '';
     try {
       hint = Object.prototype.toString.call(raw);
@@ -214,8 +244,9 @@ function buildResponse(args: {
     citationsUsed: args.citationsUsed,
     knowledge,
   };
-  if (args.raw !== undefined)
+  if (args.raw !== undefined) {
     payload.raw = sanitizeRawForJson(args.raw, args.traceId);
+  }
   return OracleResponseSchema.parse(payload);
 }
 
@@ -224,6 +255,42 @@ function getHeader(req: any, name: string): string {
   const headers = (req?.headers ?? {}) as Record<string, unknown>;
   const v = headers[key];
   return v ? String(v) : '';
+}
+
+function coerceRequestBody(body: unknown): unknown {
+  if (body === undefined || body === null) return {};
+
+  if (typeof body === 'string') {
+    const s = body.trim();
+    if (!s) return {};
+    try {
+      return JSON.parse(s);
+    } catch {
+      return body;
+    }
+  }
+
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(body)) {
+    const s = body.toString('utf8').trim();
+    if (!s) return {};
+    try {
+      return JSON.parse(s);
+    } catch {
+      return s;
+    }
+  }
+
+  if (body instanceof Uint8Array) {
+    const s = Buffer.from(body).toString('utf8').trim();
+    if (!s) return {};
+    try {
+      return JSON.parse(s);
+    } catch {
+      return s;
+    }
+  }
+
+  return body;
 }
 
 function ensureTraceId(req: any, body?: { traceId?: unknown }): string {
@@ -274,6 +341,7 @@ function respondJson(
     } else if (typeof res.json === 'function') {
       res.json(finalPayload);
     }
+
     return true;
   } catch {
     return false;
@@ -324,10 +392,16 @@ function isStructuredOutputsOn(): boolean {
   return true;
 }
 
-function getJsonRetryMax(): number {
-  const n = Number(process.env.GEMINI_JSON_RETRY_MAX ?? '1');
-  if (!Number.isFinite(n)) return 1;
-  return Math.max(0, Math.min(3, Math.floor(n)));
+function getJsonRetryMax(structuredWanted: boolean, strictOn: boolean): number {
+  const raw = String(process.env.GEMINI_JSON_RETRY_MAX ?? '').trim();
+  if (raw) {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return structuredWanted ? 2 : 1;
+    return Math.max(0, Math.min(3, Math.floor(n)));
+  }
+  if (structuredWanted && strictOn) return 2;
+  if (structuredWanted) return 1;
+  return 1;
 }
 
 function safeSlice(v: unknown, max = 220): string {
@@ -369,14 +443,11 @@ function summarizeZodIssues(
     : [];
 
   if (!fields.length && !form.length) return null;
+
   return {
     fields: fields.length ? fields : undefined,
     form: form.length ? form : undefined,
   };
-}
-
-function isStructuredUsed(call: any): boolean {
-  return Boolean(call?.raw?.structured === true);
 }
 
 function addStructuredStabilityHints(prompt: string): string {
@@ -407,48 +478,147 @@ function pickApiKey(): {
   return { key: null, source: 'NONE', both };
 }
 
+function pickFinalJsonSchema(mode: GeminiMode) {
+  if (mode === 'oracle') return OracleJsonSchema;
+  if (mode === 'guardian') return GuardianJsonSchema;
+  return null;
+}
+
+function getErrorHttpStatus(code: string): number {
+  if (code === 'INVALID_REQUEST') return 400;
+  if (code === 'MISSING_API_KEY') return 500;
+  if (code === 'UPSTREAM_ERROR') return 502;
+  if (code === 'INTERNAL_ERROR') return 500;
+  return 500;
+}
+
+function isOperationalJsonError(code: unknown): boolean {
+  return (
+    code === 'INVALID_REQUEST' ||
+    code === 'MISSING_API_KEY' ||
+    code === 'UPSTREAM_ERROR' ||
+    code === 'INTERNAL_ERROR'
+  );
+}
+
+function buildStrictDebugPreview(args: {
+  baseResponse: any;
+  finalState: any;
+  violations: StrictViolation[];
+}) {
+  const response = args.baseResponse ?? {};
+  const citations = Array.isArray(response?.citationsUsed)
+    ? (response.citationsUsed as any[])
+    : [];
+
+  const sources = Array.from(
+    new Set(citations.map(extractCitationSource).filter(Boolean)),
+  );
+
+  const knowledge = response?.knowledge ?? null;
+
+  return {
+    mode: response?.mode,
+    model: response?.model,
+    rawJsonError: args.finalState?.raw?.rawJsonError ?? null,
+    finalJsonError: args.finalState?.finalJsonError ?? null,
+    structured: Boolean(args.finalState?.raw?.structured === true),
+    structuredUsed: Boolean(args.finalState?.structuredUsed === true),
+    raw: response?.raw ?? undefined,
+    citationsCount: citations.length,
+    sources,
+    citationsPreview: citations.slice(0, 6).map((c) => ({
+      id: String(c?.id ?? ''),
+      source: String(c?.source ?? ''),
+    })),
+    knowledge: knowledge
+      ? {
+          corpusLoaded: Boolean(knowledge.corpusLoaded),
+          corpusHash: knowledge.corpusHash ?? null,
+          integrityMode: knowledge.integrityMode ?? null,
+        }
+      : null,
+    violations: args.violations.map((v) => v.code),
+    textPreview: safeSlice(response?.text, 260),
+    jsonPreview: safeJsonSlice(args.finalState?.finalJson, 900),
+  };
+}
+
 export async function handleGeminiRequest(
   body: OracleRequest,
   deps: HandlerDeps = {},
 ): Promise<HandleResult> {
   const traceId = String(body.traceId ?? '').trim() || makeTraceId('srv');
-  const modeInput = String(body.mode ?? '')
+  const modeInput = String((body as any).mode ?? '')
     .trim()
     .toLowerCase();
   const mode = normalizeMode(modeInput);
 
+  const strictOn = isFailClosedStrictOn(mode);
+
   const envModel = normalizeModelName(process.env.GEMINI_MODEL);
-  const clientModel = normalizeModelName(body.model);
+  const clientModel = normalizeModelName((body as any).model);
   const model = envModel || clientModel || DEFAULT_MODEL;
 
   const expectJson =
-    body.expectJson === true || modeInput === 'json' || mode !== 'raw';
+    (body as any).expectJson === true || modeInput === 'json' || mode !== 'raw';
 
-  const temperature =
+  const structuredOutputsOn = isStructuredOutputsOn();
+  const structuredWanted =
+    structuredOutputsOn &&
+    expectJson &&
+    (mode === 'oracle' || mode === 'guardian');
+
+  const tempUser =
     mode === 'guardian'
-      ? clampNumber(body.temperature, 0, 2, 0.2)
-      : clampNumber(body.temperature, 0, 2, 0.7);
+      ? clampNumber((body as any).temperature, 0, 2, 0.1)
+      : clampNumber(
+          (body as any).temperature,
+          0,
+          2,
+          mode === 'raw' ? 0.7 : 0.1,
+        );
 
-  const topP = clampNumber(body.topP, 0, 1, 0.9);
+  const temperature = structuredWanted
+    ? clampNumber(tempUser, 0, 0.2, 0.1)
+    : tempUser;
+
+  const topP = clampNumber((body as any).topP, 0, 1, 0.9);
 
   const maxOutputTokens =
     mode === 'oracle'
-      ? Math.round(clampNumber(body.maxOutputTokens, 1, 8192, 1200))
-      : Math.round(clampNumber(body.maxOutputTokens, 1, 8192, 600));
+      ? Math.round(
+          clampNumber(
+            (body as any).maxOutputTokens,
+            structuredWanted ? 1024 : 1,
+            8192,
+            1200,
+          ),
+        )
+      : Math.round(
+          clampNumber(
+            (body as any).maxOutputTokens,
+            structuredWanted ? 256 : 1,
+            8192,
+            600,
+          ),
+        );
 
   const timeoutMs = clampNumber(
     process.env.GEMINI_TIMEOUT_MS
       ? Number(process.env.GEMINI_TIMEOUT_MS)
-      : undefined,
+      : (body as any).timeoutMs,
     1000,
     60000,
     25000,
   );
 
+  const minCitations = getMinCitationsEffective(body, mode);
+
   const wantCitations =
-    body.wantCitations === true ||
+    (body as any).wantCitations === true ||
     mode !== 'raw' ||
-    shouldRequireCitations(body.prompt, body.wantCitations);
+    shouldRequireCitations((body as any).prompt, (body as any).wantCitations);
 
   let citationsUsed: Citation[] = [];
   let outOfCorpus = false;
@@ -462,10 +632,26 @@ export async function handleGeminiRequest(
     outOfCorpus = isOutOfCorpusRequest(query);
 
     try {
+      const kWanted = Math.max(minCitations, mode === 'oracle' ? 6 : 4);
+      const k = Math.min(MAX_CITATIONS, Math.max(0, Math.floor(kWanted)));
+
       citationsUsed = retrieveZaraCitations(query, {
-        k: mode === 'oracle' ? 6 : 4,
+        k,
         traceId,
       });
+
+      const leaked = citationsUsed.filter(
+        (c: any) =>
+          extractCitationSource(c) &&
+          extractCitationSource(c) !== 'zarathoustra',
+      );
+
+      if (leaked.length > 0) {
+        knowledgeError = knowledgeError ?? 'KNOWLEDGE_CORRUPTED';
+        citationsUsed = citationsUsed.filter(
+          (c: any) => extractCitationSource(c) === 'zarathoustra',
+        );
+      }
     } catch (err: any) {
       knowledgeError = err?.message
         ? String(err.message)
@@ -475,28 +661,20 @@ export async function handleGeminiRequest(
       retrieveMs = Math.max(0, Date.now() - t0);
     }
 
-    if (citationsUsed.length < 2) {
+    if (citationsUsed.length < minCitations) {
       knowledgeError = knowledgeError ?? 'KNOWLEDGE_EMPTY';
     }
   }
 
   if (knowledgeError && mode !== 'raw') {
-    const knowledgeErrorCode =
-      knowledgeError.indexOf('CRITICAL') >= 0
-        ? 'KNOWLEDGE_CORRUPTED'
-        : 'KNOWLEDGE_EMPTY';
-
-    logEvent('ERR', traceId, 'knowledge_error', { code: knowledgeErrorCode });
+    logEvent('ERR', traceId, 'knowledge_error', { code: knowledgeError });
 
     const fallback =
       mode === 'oracle'
         ? safeOracleFallback(citationsUsed, outOfCorpus)
         : safeGuardianFallback();
 
-    const json =
-      mode === 'oracle' || mode === 'guardian'
-        ? applyCitationsToJson(fallback, citationsUsed)
-        : null;
+    const json = applyCitationsToJson(fallback, citationsUsed);
 
     return {
       response: buildResponse({
@@ -506,10 +684,17 @@ export async function handleGeminiRequest(
         text:
           typeof fallback?.quote === 'string'
             ? fallback.quote
-            : 'Oracle disconnected.',
+            : (fallback.comment ?? 'Knowledge degraded.'),
         json,
-        jsonError: knowledgeErrorCode,
+        jsonError: knowledgeError,
         citationsUsed,
+        raw: {
+          structured: false,
+          fallback: true,
+          repairApplied: false,
+          reason: knowledgeError,
+          retryCount: 0,
+        },
       }),
       retrieveMs,
       llmMs: undefined,
@@ -517,8 +702,9 @@ export async function handleGeminiRequest(
   }
 
   let finalPrompt = '';
+
   if (mode === 'raw') {
-    const prompt = sanitizeUserPrompt(body.prompt);
+    const prompt = sanitizeUserPrompt((body as any).prompt);
     if (!prompt) {
       return {
         response: buildResponse({
@@ -534,20 +720,21 @@ export async function handleGeminiRequest(
         llmMs: undefined,
       };
     }
+
     finalPrompt = buildRawPrompt(prompt, expectJson);
   } else if (mode === 'oracle') {
     finalPrompt = buildOraclePrompt({
-      ritual: body.ritual,
-      climateSnapshot: body.climateSnapshot,
-      prompt: body.prompt,
+      ritual: (body as any).ritual,
+      climateSnapshot: (body as any).climateSnapshot,
+      prompt: (body as any).prompt,
       citations: citationsUsed,
       outOfCorpus,
     });
   } else {
     finalPrompt = buildGuardianPrompt({
-      step: body.step,
-      value: body.value,
-      prompt: body.prompt,
+      step: (body as any).step,
+      value: (body as any).value,
+      prompt: (body as any).prompt,
       citations: citationsUsed,
       outOfCorpus,
     });
@@ -577,18 +764,17 @@ export async function handleGeminiRequest(
     });
   }
 
-  const structuredWanted =
-    isStructuredOutputsOn() &&
-    expectJson &&
-    (mode === 'oracle' || mode === 'guardian');
-
   logEvent('INFO', traceId, 'start', {
     mode,
     model,
     keySource: keyPick.source,
     cit: citationsUsed.length,
+    minCit: minCitations,
     out: outOfCorpus ? 1 : 0,
     structured: structuredWanted ? 1 : 0,
+    strict: strictOn ? 1 : 0,
+    maxOutputTokens,
+    temperature,
   });
 
   let llmMs: number | undefined = undefined;
@@ -597,7 +783,7 @@ export async function handleGeminiRequest(
     | Awaited<ReturnType<typeof callGemini>>
     | Awaited<ReturnType<typeof callGeminiStructured>>;
 
-  const retryMax = getJsonRetryMax();
+  const retryMax = getJsonRetryMax(structuredWanted, strictOn);
 
   if (structuredWanted) {
     const structuredImpl =
@@ -619,7 +805,7 @@ RÉ-ESSAI ${attempt}/${retryMax}:
 ${extraHint ? `- Détail: ${extraHint}` : ''}
 
 `;
-      const temp = attempt === 0 ? temperature : Math.min(temperature, 0.2);
+      const temp = attempt === 0 ? temperature : 0;
 
       return await structuredImpl({
         key: keyPick.key!,
@@ -669,20 +855,24 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
           retryCount,
         },
       } as any;
+    } else if (strictOn) {
+      call = {
+        ...(st as any),
+        raw: {
+          ...((st as any).raw ?? {}),
+          retryCount,
+          fallback: false,
+          reason: (st as any)?.raw?.reason ?? 'STRUCTURED_FAILED',
+        },
+      } as any;
     } else {
       const rawAny = (st as any).raw ?? null;
-
-      const issuesSummary = summarizeZodIssues(rawAny?.issues);
-      const preview = rawAny?.parsedPreview
-        ? safeJsonSlice(rawAny.parsedPreview, 650)
-        : '';
 
       logEvent('WARN', traceId, 'structured_fallback', {
         status: (st as any)?.status,
         reason: rawAny?.reason ?? rawAny?.error ?? 'unknown',
         parseError: rawAny?.parseError ?? undefined,
-        issues: issuesSummary ?? undefined,
-        preview: preview || undefined,
+        preview: rawAny?.parsedPreview ?? undefined,
         retryCount,
       });
 
@@ -727,10 +917,18 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
     call = raw as any;
   }
 
+  let json: unknown | null = null;
+
   if (!call.ok) {
-    logEvent('WARN', traceId, 'upstream_error', {
+    const rawAny = (call as any).raw ?? null;
+    const reason = rawAny?.reason ? String(rawAny.reason) : 'UPSTREAM_ERROR';
+
+    logEvent('WARN', traceId, 'llm_call_failed', {
       status: (call as any).status,
+      reason,
       msg: safeSlice((call as any).text),
+      parseError: rawAny?.parseError ?? undefined,
+      parseStage: rawAny?.parseStage ?? undefined,
     });
 
     const fallback =
@@ -740,7 +938,7 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
           ? safeGuardianFallback()
           : null;
 
-    const json =
+    json =
       mode === 'oracle' || mode === 'guardian'
         ? applyCitationsToJson(fallback, citationsUsed)
         : null;
@@ -753,9 +951,14 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
         text:
           typeof (fallback as any)?.quote === 'string'
             ? (fallback as any).quote
-            : String((call as any).text ?? ''),
+            : typeof (fallback as any)?.comment === 'string'
+              ? (fallback as any).comment
+              : String((call as any).text ?? ''),
         json,
-        jsonError: 'UPSTREAM_ERROR',
+        jsonError:
+          reason === 'UPSTREAM_ERROR'
+            ? 'UPSTREAM_ERROR'
+            : 'INVALID_JSON_FROM_LLM',
         citationsUsed,
         raw: (call as any).raw,
       }),
@@ -764,27 +967,16 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
     };
   }
 
-  let json: unknown | null = null;
-  let jsonError: string | null = null;
-
   if (expectJson) {
     if (mode === 'oracle') {
       const parsed = parseOracleJson((call as any).text ?? '');
       json = parsed.json;
-      jsonError = parsed.jsonError ? 'INVALID_JSON_FROM_LLM' : null;
     } else if (mode === 'guardian') {
       const parsed = parseGuardianJson((call as any).text ?? '');
       json = parsed.json;
-      jsonError = parsed.jsonError ? 'INVALID_JSON_FROM_LLM' : null;
     } else {
       const parsed = tryParseJson((call as any).text ?? '');
-      if (parsed.ok) {
-        json = parsed.value;
-        jsonError = null;
-      } else {
-        json = null;
-        jsonError = 'INVALID_JSON_FROM_LLM';
-      }
+      json = parsed.ok ? parsed.value : null;
     }
   }
 
@@ -801,27 +993,23 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
       mode === 'oracle'
         ? safeOracleFallback(citationsUsed, outOfCorpus)
         : safeGuardianFallback();
+
     json = applyCitationsToJson(json, citationsUsed);
-    jsonError = jsonError ?? 'INVALID_JSON_FROM_LLM';
   }
 
   const raw = (call as any)?.raw ?? null;
+  const rawMeta = normalizeRawContractMeta(raw);
 
   logEvent('INFO', traceId, 'done', {
     ms: llmMs,
     json: Boolean(json),
-    err: Boolean(jsonError),
-    structured: structuredWanted ? 1 : 0,
-    structuredUsed: isStructuredUsed(call) ? 1 : 0,
-    repaired: Boolean(raw?.repaired) ? 1 : 0,
-    retryCount:
-      typeof raw?.retryCount === 'number'
-        ? raw.retryCount
-        : Number(raw?.retryCount ?? 0) || 0,
-    fallback: Boolean(raw?.fallback) ? 1 : 0,
-    reason: typeof raw?.reason === 'string' ? raw.reason : undefined,
-    parseError:
-      typeof raw?.parseError === 'string' ? raw.parseError : undefined,
+    rawStructured: rawMeta.structured ? 1 : 0,
+    repaired: rawMeta.repairApplied ? 1 : 0,
+    retryCount: rawMeta.retryCount,
+    fallback: rawMeta.fallback ? 1 : 0,
+    reason: rawMeta.reason ?? undefined,
+    parseError: rawMeta.parseError ?? undefined,
+    rawJsonError: rawMeta.rawJsonError ?? undefined,
   });
 
   return {
@@ -831,7 +1019,7 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
       mode,
       text: String((call as any).text ?? ''),
       json,
-      jsonError,
+      jsonError: rawMeta.rawJsonError,
       citationsUsed,
       raw,
     }),
@@ -843,7 +1031,8 @@ ${extraHint ? `- Détail: ${extraHint}` : ''}
 export function createHandler(deps: HandlerDeps = {}) {
   return async function handler(req: any, res: any) {
     const startedAt = Date.now();
-    const traceId = ensureTraceId(req, req?.body);
+    const incomingBody = coerceRequestBody(req?.body);
+    const traceId = ensureTraceId(req, incomingBody as any);
 
     try {
       if (req.method !== 'POST') {
@@ -856,30 +1045,42 @@ export function createHandler(deps: HandlerDeps = {}) {
         return;
       }
 
-      const parsed = OracleRequestSchema.safeParse(req.body ?? {});
+      const parsed = OracleRequestSchema.safeParse(incomingBody ?? {});
       if (!parsed.success) {
-        const payload = buildApiErrorEnvelope(
-          traceId,
-          'BAD_REQUEST',
-          'Invalid request body',
-        );
+        const flat = parsed.error.flatten();
+        const issues = summarizeZodIssues(flat);
+
+        const minCitationsOutOfRange = parsed.error.issues.some((i) => {
+          const p0 = (i as any)?.path?.[0];
+          return p0 === 'minCitations';
+        });
+
+        const message = minCitationsOutOfRange
+          ? `minCitations must be between 0 and ${MAX_CITATIONS}`
+          : 'Invalid request body';
+
+        const payload = {
+          ...buildApiErrorEnvelope(traceId, 'INVALID_BODY', message),
+          issues: issues ?? undefined,
+          maxCitations: MAX_CITATIONS,
+        };
+
         respondJson(res, 400, payload, traceId);
         return;
       }
 
-      const prompt = String(parsed.data.prompt ?? '').trim();
+      const prompt = String((parsed.data as any).prompt ?? '').trim();
       if (!prompt) {
         const payload = buildApiErrorEnvelope(
           traceId,
-          'BAD_REQUEST',
+          'INVALID_BODY',
           'prompt is required',
         );
         respondJson(res, 400, payload, traceId);
         return;
       }
 
-      const body: OracleRequest = { ...parsed.data, traceId };
-
+      const body: OracleRequest = { ...(parsed.data as any), traceId };
       const result = await handleGeminiRequest(body, deps);
 
       const totalMs =
@@ -887,43 +1088,198 @@ export function createHandler(deps: HandlerDeps = {}) {
           ? deps.forceTimingMs
           : Math.max(0, Date.now() - startedAt);
 
-      const payload = buildApiSuccessEnvelope(
-        result.response,
-        totalMs,
-        result.llmMs,
-        result.retrieveMs,
+      const baseResponse = (result.response ?? {}) as any;
+      const baseJsonError = baseResponse?.jsonError ?? null;
+
+      if (isOperationalJsonError(baseJsonError)) {
+        const code = String(baseJsonError);
+        const payload = buildApiErrorEnvelope(
+          traceId,
+          code,
+          String(baseResponse?.text ?? code),
+          totalMs,
+          result.llmMs,
+          result.retrieveMs,
+        );
+        respondJson(res, getErrorHttpStatus(code), payload, traceId);
+        return;
+      }
+
+      const reqMode = normalizeMode(String((body as any).mode ?? ''));
+      const minCitations = getMinCitationsEffective(body, reqMode);
+      const finalSchema = pickFinalJsonSchema(reqMode);
+
+      const finalState =
+        reqMode === 'raw' || !finalSchema
+          ? {
+              mode: reqMode,
+              finalJson: baseResponse?.json ?? null,
+              finalJsonError: null,
+              schemaValid: true,
+              structuredUsed: false,
+              raw: normalizeRawContractMeta(baseResponse?.raw),
+              citationsUsed: Array.isArray(baseResponse?.citationsUsed)
+                ? baseResponse.citationsUsed
+                : [],
+              knowledge: baseResponse?.knowledge,
+            }
+          : normalizeFinalState({
+              mode: reqMode,
+              schema: finalSchema as any,
+              finalJsonCandidate: baseResponse?.json ?? null,
+              raw: baseResponse?.raw,
+              citationsUsed: Array.isArray(baseResponse?.citationsUsed)
+                ? baseResponse.citationsUsed
+                : [],
+              knowledge: baseResponse?.knowledge,
+            });
+
+      const violations = isFailClosedStrictOn(reqMode)
+        ? evaluateStrictInvariants(finalState as any, {
+            minCitations,
+            lockedSource: 'zarathoustra',
+            structuredOutputsOn: isStructuredOutputsOn(),
+          })
+        : [];
+
+      const citations = Array.isArray(baseResponse?.citationsUsed)
+        ? baseResponse.citationsUsed
+        : [];
+      const sources = Array.from(
+        new Set(citations.map(extractCitationSource).filter(Boolean)),
       );
 
-      const parsedEnvelope = ApiEnvelopeSchema.safeParse(payload);
-      if (!parsedEnvelope.success) {
-        if (isContractGuardOn()) {
-          logEvent('ERR', traceId, 'contract_broken', {
-            code: 'CONTRACT_BROKEN',
+      const payload = {
+        ok: violations.length === 0,
+        traceId,
+        model: baseResponse?.model ?? '',
+        mode: reqMode,
+        text: String(baseResponse?.text ?? ''),
+        json: finalState.finalJson,
+        jsonError: finalState.finalJsonError,
+        rawJsonError: finalState.raw.rawJsonError,
+        finalJsonError: finalState.finalJsonError,
+        citationsUsed: citations,
+        knowledge: baseResponse?.knowledge,
+        timings: {
+          totalMs,
+          llmMs: result.llmMs,
+          retrieveMs: result.retrieveMs,
+        },
+        raw: {
+          ...(baseResponse?.raw && typeof baseResponse.raw === 'object'
+            ? baseResponse.raw
+            : {}),
+          structured: finalState.raw.structured,
+          fallback: finalState.raw.fallback,
+          repairApplied: finalState.raw.repairApplied,
+          reason: finalState.raw.reason,
+          parseError: finalState.raw.parseError,
+          rawJsonError: finalState.raw.rawJsonError,
+          retryCount: finalState.raw.retryCount,
+        },
+        meta: {
+          mode: reqMode,
+          minCitations,
+          citationsCount: citations.length,
+          sources,
+          structuredOutputsOn: isStructuredOutputsOn(),
+          structuredUsed: finalState.structuredUsed,
+          rawStructured: finalState.raw.structured,
+          fallback: finalState.raw.fallback,
+          repairApplied: finalState.raw.repairApplied,
+          rawJsonError: finalState.raw.rawJsonError,
+          finalJsonError: finalState.finalJsonError,
+          corpusLoaded: baseResponse?.knowledge?.corpusLoaded === true,
+        },
+        violations,
+        debug: buildStrictDebugPreview({
+          baseResponse,
+          finalState,
+          violations,
+        }),
+      };
+
+      if (isContractGuardOn()) {
+        const envelope = GeminiEnvelopeSchema.safeParse(payload);
+        if (!envelope.success) {
+          logEvent('ERR', traceId, 'contract_internal_inconsistency', {
+            details: envelope.error.flatten(),
           });
-          const errPayload = buildApiErrorEnvelope(
+
+          const errPayload = {
+            ok: false,
             traceId,
-            'CONTRACT_BROKEN',
-            'Response failed runtime contract validation',
-            totalMs,
-            result.llmMs,
-            result.retrieveMs,
-          );
+            error: {
+              code: 'CONTRACT_INTERNAL_INCONSISTENCY',
+              message: 'Response envelope is internally inconsistent',
+              details: envelope.error.flatten(),
+            },
+            timings: {
+              totalMs,
+              llmMs: result.llmMs,
+              retrieveMs: result.retrieveMs,
+            },
+          };
+
           respondJson(res, 500, errPayload, traceId);
           return;
         }
-        logEvent('WARN', traceId, 'contract_warn', { code: 'CONTRACT_BROKEN' });
+      } else {
+        const basicEnvelope = ApiEnvelopeSchema.safeParse({
+          ...buildApiSuccessEnvelope(
+            result.response,
+            totalMs,
+            result.llmMs,
+            result.retrieveMs,
+          ),
+          jsonError: payload.jsonError,
+        });
+
+        if (!basicEnvelope.success) {
+          logEvent('WARN', traceId, 'contract_warn', {
+            code: 'CONTRACT_BROKEN',
+          });
+        }
+      }
+
+      if (isFailClosedStrictOn(reqMode) && violations.length > 0) {
+        logEvent('ERR', traceId, 'strict_invariant_violation', {
+          mode: reqMode,
+          rawJsonError: finalState.raw.rawJsonError,
+          finalJsonError: finalState.finalJsonError,
+          structuredUsed: finalState.structuredUsed,
+          violations: violations.map((v) => v.code),
+        });
+
+        respondJson(
+          res,
+          422,
+          {
+            ...payload,
+            ok: false,
+            error: {
+              code: 'STRICT_INVARIANT_VIOLATION',
+              message: 'Strict invariants violated (fail-closed).',
+            },
+          },
+          traceId,
+        );
+        return;
       }
 
       respondJson(res, 200, payload, traceId);
     } catch {
       const totalMs = Math.max(0, Date.now() - startedAt);
       logEvent('ERR', traceId, 'handler_error', { code: 'INTERNAL_ERROR' });
+
       const payload = buildApiErrorEnvelope(
         traceId,
         'INTERNAL_ERROR',
         'Internal error',
         totalMs,
       );
+
       respondJson(res, 500, payload, traceId);
     }
   };

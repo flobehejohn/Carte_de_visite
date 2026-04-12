@@ -1,0 +1,36 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`citation snapshot contract > same request -> same citation snapshot within a run 1`] = `
+[
+  {
+    "id": "28",
+    "section_title": "LE PROLOGUE DE ZARATHOUSTRA",
+    "source": "zarathoustra",
+  },
+  {
+    "id": "966",
+    "section_title": "",
+    "source": "zarathoustra",
+  },
+  {
+    "id": "1147",
+    "section_title": "",
+    "source": "zarathoustra",
+  },
+  {
+    "id": "3728",
+    "section_title": "LE CONVALESCENT",
+    "source": "zarathoustra",
+  },
+  {
+    "id": "4506",
+    "section_title": "",
+    "source": "zarathoustra",
+  },
+  {
+    "id": "5190",
+    "section_title": "DE L’HOMME SUPÉRIEUR",
+    "source": "zarathoustra",
+  },
+]
+`;

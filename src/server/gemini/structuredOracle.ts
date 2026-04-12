@@ -1,12 +1,13 @@
 // src/server/gemini/structuredOracle.ts
 import { GoogleGenAI, Schema, Type } from '@google/genai';
 import { z } from 'zod';
+import type { JsonErrorCode, RawContractMeta } from './contract-types.js';
 import {
-    GuardianStructuredSchema,
-    OracleStructuredSchema,
+  GuardianStructuredSchema,
+  OracleStructuredSchema,
 } from '../../shared/contracts/gemini.contracts.js';
 
-type GeminiMode = 'raw' | 'oracle' | 'guardian';
+export type GeminiMode = 'raw' | 'oracle' | 'guardian';
 
 export type StructuredCallArgs = {
   key: string;
@@ -24,11 +25,20 @@ export type GeminiCallResult = {
   ok: boolean;
   status: number;
   text: string;
-  raw?: unknown;
+  jsonCandidate?: unknown | null;
+  raw: RawContractMeta & {
+    traceId: string;
+    model: string;
+    repairAllowed?: boolean;
+    issues?: unknown;
+    preview?: string | null;
+    parsedPreview?: string | null;
+    error?: string | null;
+  };
   ms: number;
 };
 
-function pickZodSchema(mode: GeminiMode): z.ZodTypeAny | null {
+export function pickZodSchema(mode: GeminiMode): z.ZodTypeAny | null {
   if (mode === 'oracle') return OracleStructuredSchema;
   if (mode === 'guardian') return GuardianStructuredSchema;
   return null;
@@ -97,10 +107,12 @@ function pickNativeSchema(mode: GeminiMode): Schema | null {
 }
 
 function isJsonRepairAllowed(): boolean {
-  const v = String(process.env.GEMINI_ALLOW_JSON_REPAIR ?? '').trim();
-  if (v === '1') return true;
-  if (v === '0') return false;
-  return false; // défaut strict
+  const raw =
+    process.env.GEMINI_ALLOW_JSON_REPAIR ??
+    process.env.GEMINI_JSON_REPAIR ??
+    '';
+  const v = String(raw).trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
 }
 
 function withTimeout<T>(p: Promise<T>, timeoutMs: number): Promise<T> {
@@ -153,20 +165,63 @@ async function readRespText(resp: any): Promise<string> {
   return String(resp ?? '');
 }
 
-// -------- JSON parse strict (fences + extraction + OPTIONAL repair) --------
 function stripJsonFences(s: string): string {
-  return s
+  const t = String(s ?? '').trim();
+  const m = t.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (m?.[1]) return m[1].trim();
+  return t
     .replace(/^```json\s*/i, '')
     .replace(/^```\s*/i, '')
     .replace(/```$/i, '')
     .trim();
 }
 
-function tryExtractBracedObject(s: string): string {
-  const i = s.indexOf('{');
-  const j = s.lastIndexOf('}');
-  if (i >= 0 && j > i) return s.slice(i, j + 1);
-  return s;
+function extractJsonCandidate(s: string): string | null {
+  const t = String(s ?? '').trim();
+  const iObj = t.indexOf('{');
+  const iArr = t.indexOf('[');
+  const starts = [iObj, iArr].filter((x) => x >= 0);
+  if (!starts.length) return null;
+
+  const start = Math.min(...starts);
+  const open = t[start];
+  const close = open === '{' ? '}' : ']';
+
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+
+  for (let i = start; i < t.length; i++) {
+    const ch = t[i];
+
+    if (inStr) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (ch === '\\') {
+        esc = true;
+        continue;
+      }
+      if (ch === '"') {
+        inStr = false;
+        continue;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inStr = true;
+      continue;
+    }
+
+    if (ch === open) depth++;
+    if (ch === close) depth--;
+
+    if (depth === 0) return t.slice(start, i + 1);
+  }
+
+  return t.slice(start);
 }
 
 function removeTrailingCommas(s: string): string {
@@ -222,72 +277,69 @@ function escapeBadCharsInsideStrings(s: string): string {
   return out;
 }
 
-type ParseOk = { ok: true; value: any; repaired: boolean; stage: string };
-type ParseKo = { ok: false; err: string; stage: string };
+type ParseOk = {
+  ok: true;
+  value: any;
+  repaired: boolean;
+  stage: string;
+  candidate: string;
+  rawJsonError: JsonErrorCode;
+};
+
+type ParseKo = { ok: false; err: string; stage: string; candidate?: string };
 
 function parseJsonCandidate(text: string): ParseOk | ParseKo {
-  const raw = String(text ?? '').trim();
-  if (!raw) return { ok: false, err: 'EMPTY_TEXT', stage: 'empty' };
+  const raw0 = String(text ?? '').trim();
+  if (!raw0) return { ok: false, err: 'EMPTY_TEXT', stage: 'empty' };
 
-  // direct
+  const unfenced = stripJsonFences(raw0);
+  const candidate = extractJsonCandidate(unfenced) ?? unfenced;
+
   try {
     return {
       ok: true,
-      value: JSON.parse(raw),
+      value: JSON.parse(candidate),
       repaired: false,
       stage: 'direct',
+      candidate,
+      rawJsonError: null,
     };
-  } catch {}
-
-  const unfenced = stripJsonFences(raw);
-  try {
-    return {
-      ok: true,
-      value: JSON.parse(unfenced),
-      repaired: false,
-      stage: 'unfenced',
-    };
-  } catch {}
-
-  const extracted = tryExtractBracedObject(unfenced);
-  try {
-    return {
-      ok: true,
-      value: JSON.parse(extracted),
-      repaired: false,
-      stage: 'extracted',
-    };
-  } catch {}
-
-  if (!isJsonRepairAllowed()) {
-    return {
-      ok: false,
-      err: 'JSON.parse failed (repair disabled)',
-      stage: 'strict_fail',
-    };
+  } catch (e1: any) {
+    if (!isJsonRepairAllowed()) {
+      return {
+        ok: false,
+        err: `JSON.parse failed (repair disabled): ${String(
+          e1?.message ?? e1,
+        )}`,
+        stage: 'strict_fail',
+        candidate,
+      };
+    }
   }
 
-  // repair (si autorisé)
   const repairedText = removeTrailingCommas(
-    escapeBadCharsInsideStrings(extracted),
+    escapeBadCharsInsideStrings(candidate),
   );
+
   try {
     return {
       ok: true,
       value: JSON.parse(repairedText),
       repaired: true,
       stage: 'repaired',
+      candidate: repairedText,
+      rawJsonError: 'INVALID_JSON_FROM_LLM',
     };
-  } catch (e: any) {
+  } catch (e2: any) {
     return {
       ok: false,
-      err: String(e?.message ?? 'PARSE_FAILED'),
+      err: `JSON.parse failed after repair: ${String(e2?.message ?? e2)}`,
       stage: 'repaired_fail',
+      candidate,
     };
   }
 }
 
-// Normalisation STRICT : on ne “fabrique” pas de champs manquants
 function strictNormalizeOracle(input: any): any {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
   const o: any = { ...input };
@@ -352,6 +404,42 @@ function safePreview(obj: any, max = 650): string | null {
   }
 }
 
+function buildRawMeta(args: {
+  traceId: string;
+  model: string;
+  structured: boolean;
+  fallback?: boolean;
+  repairApplied?: boolean;
+  reason?: string | null;
+  parseError?: string | null;
+  rawJsonError?: JsonErrorCode;
+  retryCount?: number;
+  parseStage?: string | null;
+  preview?: string | null;
+  parsedPreview?: string | null;
+  repairAllowed?: boolean;
+  issues?: unknown;
+  error?: string | null;
+}): GeminiCallResult['raw'] {
+  return {
+    traceId: args.traceId,
+    model: args.model,
+    structured: args.structured,
+    fallback: args.fallback === true,
+    repairApplied: args.repairApplied === true,
+    reason: args.reason ?? null,
+    parseError: args.parseError ?? null,
+    rawJsonError: args.rawJsonError ?? null,
+    retryCount: Math.max(0, Math.floor(args.retryCount ?? 0)),
+    parseStage: args.parseStage ?? null,
+    preview: args.preview ?? null,
+    parsedPreview: args.parsedPreview ?? null,
+    repairAllowed: args.repairAllowed,
+    issues: args.issues,
+    error: args.error ?? null,
+  };
+}
+
 export async function callGeminiStructured(
   args: StructuredCallArgs,
 ): Promise<GeminiCallResult> {
@@ -365,12 +453,13 @@ export async function callGeminiStructured(
       ok: false,
       status: 400,
       text: 'Structured outputs requested but no schema for this mode.',
-      raw: {
+      jsonCandidate: null,
+      raw: buildRawMeta({
         traceId: args.traceId,
-        mode: args.mode,
-        structured: true,
+        model: args.model,
+        structured: false,
         reason: 'NO_SCHEMA',
-      },
+      }),
       ms: Math.max(0, Date.now() - t0),
     };
   }
@@ -394,7 +483,6 @@ export async function callGeminiStructured(
     );
 
     const text = await readRespText(resp);
-
     const parsed = parseJsonCandidate(text);
 
     if (!parsed.ok) {
@@ -402,14 +490,18 @@ export async function callGeminiStructured(
         ok: false,
         status: 422,
         text,
-        raw: {
+        jsonCandidate: null,
+        raw: buildRawMeta({
           traceId: args.traceId,
-          mode: args.mode,
-          structured: true,
+          model: args.model,
+          structured: false,
           reason: 'INVALID_JSON_FROM_LLM',
           parseError: parsed.err,
+          rawJsonError: 'INVALID_JSON_FROM_LLM',
           parseStage: parsed.stage,
-        },
+          preview: parsed.candidate ? parsed.candidate.slice(0, 650) : null,
+          repairAllowed: isJsonRepairAllowed(),
+        }),
         ms: Math.max(0, Date.now() - t0),
       };
     }
@@ -428,32 +520,38 @@ export async function callGeminiStructured(
         ok: false,
         status: 422,
         text: JSON.stringify(normalized),
-        raw: {
+        jsonCandidate: normalized,
+        raw: buildRawMeta({
           traceId: args.traceId,
-          mode: args.mode,
-          structured: true,
+          model: args.model,
+          structured: false,
           reason: 'SCHEMA_VALIDATION_FAILED',
+          rawJsonError: 'SCHEMA_VALIDATION_FAILED',
           parseStage: parsed.stage,
-          repaired: parsed.repaired,
+          repairApplied: parsed.repaired,
           issues: validated.error.flatten(),
           parsedPreview: safePreview(normalized),
-        },
+        }),
         ms: Math.max(0, Date.now() - t0),
       };
     }
 
+    const directStructured = !parsed.repaired;
     return {
       ok: true,
       status: 200,
       text: JSON.stringify(validated.data),
-      raw: {
+      jsonCandidate: validated.data,
+      raw: buildRawMeta({
         traceId: args.traceId,
-        mode: args.mode,
-        structured: true,
-        repaired: parsed.repaired,
-        parseStage: parsed.stage,
+        model: args.model,
+        structured: directStructured,
         fallback: false,
-      },
+        repairApplied: parsed.repaired,
+        reason: parsed.repaired ? 'NATIVE_REPAIR_OK' : 'NATIVE_OK',
+        rawJsonError: parsed.rawJsonError,
+        parseStage: parsed.stage,
+      }),
       ms: Math.max(0, Date.now() - t0),
     };
   } catch (err: any) {
@@ -463,13 +561,14 @@ export async function callGeminiStructured(
       ok: false,
       status: typeof status === 'number' ? status : 500,
       text: msg,
-      raw: {
+      jsonCandidate: null,
+      raw: buildRawMeta({
         traceId: args.traceId,
-        mode: args.mode,
-        structured: true,
+        model: args.model,
+        structured: false,
         reason: 'UPSTREAM_ERROR',
         error: msg,
-      },
+      }),
       ms: Math.max(0, Date.now() - t0),
     };
   }
