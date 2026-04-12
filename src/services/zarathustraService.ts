@@ -24,6 +24,55 @@ type OracleOptions = {
   debug?: boolean;
 };
 
+export type GuardianSymbolicFocus =
+  | 'threshold'
+  | 'climate'
+  | 'burden'
+  | 'fracture'
+  | 'desire'
+  | 'renunciation'
+  | 'circle'
+  | 'return'
+  | 'form'
+  | 'question'
+  | 'unknown';
+
+export type GuardianMovement =
+  | 'opening'
+  | 'deepening'
+  | 'clarifying'
+  | 'crossing'
+  | 'naming'
+  | 'orienting'
+  | 'releasing'
+  | 'holding'
+  | 'receiving';
+
+export type GuardianTone = 'calm' | 'grave' | 'ardent' | 'clear';
+
+export type GuardianGuidance = {
+  comment: string;
+  echo: string;
+  subcomment: string;
+  isSafe: boolean;
+  confidence: number;
+  symbolic_focus: GuardianSymbolicFocus;
+  movement: GuardianMovement;
+  tone: GuardianTone;
+  rewrite_hint: string;
+};
+
+type GuardianPayloadLike = {
+  comment?: unknown;
+  isSafe?: unknown;
+  is_safe?: unknown;
+  confidence?: unknown;
+  symbolic_focus?: unknown;
+  movement?: unknown;
+  tone?: unknown;
+  rewrite_hint?: unknown;
+};
+
 const SAFE_FALLBACK_VISUAL: Required<
   Pick<
     VisualParams,
@@ -38,20 +87,87 @@ const SAFE_FALLBACK_VISUAL: Required<
 
 const LOG_THROTTLE_MS = 1200;
 
+const GUARDIAN_STEP_DEFAULTS: Record<
+  string,
+  {
+    symbolic_focus: GuardianSymbolicFocus;
+    movement: GuardianMovement;
+    tone: GuardianTone;
+    rewrite_hint: string;
+  }
+> = {
+  name: {
+    symbolic_focus: 'threshold',
+    movement: 'opening',
+    tone: 'calm',
+    rewrite_hint: 'name-opens-threshold',
+  },
+  mood: {
+    symbolic_focus: 'climate',
+    movement: 'deepening',
+    tone: 'calm',
+    rewrite_hint: 'mood-colors-climate',
+  },
+  weight: {
+    symbolic_focus: 'burden',
+    movement: 'holding',
+    tone: 'grave',
+    rewrite_hint: 'weight-gives-gravity',
+  },
+  fear: {
+    symbolic_focus: 'fracture',
+    movement: 'clarifying',
+    tone: 'grave',
+    rewrite_hint: 'fear-becomes-visible-threshold',
+  },
+  desire: {
+    symbolic_focus: 'desire',
+    movement: 'orienting',
+    tone: 'ardent',
+    rewrite_hint: 'desire-points-direction',
+  },
+  sacrifice: {
+    symbolic_focus: 'renunciation',
+    movement: 'releasing',
+    tone: 'grave',
+    rewrite_hint: 'sacrifice-opens-passage',
+  },
+  social: {
+    symbolic_focus: 'circle',
+    movement: 'clarifying',
+    tone: 'clear',
+    rewrite_hint: 'social-place-clarifies-circle',
+  },
+  eternity: {
+    symbolic_focus: 'return',
+    movement: 'deepening',
+    tone: 'grave',
+    rewrite_hint: 'eternity-opens-return',
+  },
+  format: {
+    symbolic_focus: 'form',
+    movement: 'receiving',
+    tone: 'clear',
+    rewrite_hint: 'format-shapes-truth',
+  },
+  question: {
+    symbolic_focus: 'question',
+    movement: 'naming',
+    tone: 'ardent',
+    rewrite_hint: 'question-forms-living-knot',
+  },
+};
+
 const GENERIC_GUARDIAN_PATTERNS = [
-  /\best acceptable\b/i,
   /\bacceptable\b/i,
   /\bsans signal de danger\b/i,
   /\baucun signal de danger\b/i,
   /\bn apporte pas de sens\b/i,
   /\bmanque de sens\b/i,
-  /\bvalide\b/i,
+  /\bvalid\w*\b/i,
   /\bok\b/i,
   /\bpeut etre accepte\b/i,
   /\best recevable\b/i,
-  /\ble texte est acceptable\b/i,
-  /\ble prenom\b.*\best acceptable\b/i,
-  /\ble nom\b.*\best acceptable\b/i,
   /\bnom ou prenom simple\b/i,
 ];
 
@@ -124,6 +240,143 @@ function quoted(value: string, fallback = 'cette parole'): string {
   return clean ? `« ${clean} »` : fallback;
 }
 
+function composeGuardianComment(echo: string, subcomment: string): string {
+  const a = normalizeWhitespace(echo);
+  const b = normalizeWhitespace(subcomment);
+  if (!a && !b) return '';
+  if (!a) return b;
+  if (!b) return a;
+  return `${a}\n\n${b}`;
+}
+
+export function extractGuidanceParts(input?: string | null): {
+  echo: string;
+  subcomment: string;
+} {
+  const clean = String(input ?? '').trim();
+  if (!clean) return { echo: '', subcomment: '' };
+
+  const parts = clean
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length <= 1) {
+    return { echo: parts[0] ?? clean, subcomment: '' };
+  }
+
+  return {
+    echo: parts[0],
+    subcomment: parts.slice(1).join(' '),
+  };
+}
+
+function normalizeConfidence(value: unknown, fallback = 0.86): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  if (n < 0) return 0;
+  if (n > 1) return 1;
+  return n;
+}
+
+function normalizeGuardianFocus(
+  value: unknown,
+  fallback: GuardianSymbolicFocus,
+): GuardianSymbolicFocus {
+  switch (
+    String(value ?? '')
+      .trim()
+      .toLowerCase()
+  ) {
+    case 'threshold':
+      return 'threshold';
+    case 'climate':
+      return 'climate';
+    case 'burden':
+      return 'burden';
+    case 'fracture':
+      return 'fracture';
+    case 'desire':
+      return 'desire';
+    case 'renunciation':
+      return 'renunciation';
+    case 'circle':
+      return 'circle';
+    case 'return':
+      return 'return';
+    case 'form':
+      return 'form';
+    case 'question':
+      return 'question';
+    default:
+      return fallback;
+  }
+}
+
+function normalizeGuardianMovement(
+  value: unknown,
+  fallback: GuardianMovement,
+): GuardianMovement {
+  switch (
+    String(value ?? '')
+      .trim()
+      .toLowerCase()
+  ) {
+    case 'opening':
+      return 'opening';
+    case 'deepening':
+      return 'deepening';
+    case 'clarifying':
+      return 'clarifying';
+    case 'crossing':
+      return 'crossing';
+    case 'naming':
+      return 'naming';
+    case 'orienting':
+      return 'orienting';
+    case 'releasing':
+      return 'releasing';
+    case 'holding':
+      return 'holding';
+    case 'receiving':
+      return 'receiving';
+    default:
+      return fallback;
+  }
+}
+
+function normalizeGuardianTone(
+  value: unknown,
+  fallback: GuardianTone,
+): GuardianTone {
+  switch (
+    String(value ?? '')
+      .trim()
+      .toLowerCase()
+  ) {
+    case 'calm':
+      return 'calm';
+    case 'grave':
+      return 'grave';
+    case 'ardent':
+      return 'ardent';
+    case 'clear':
+      return 'clear';
+    default:
+      return fallback;
+  }
+}
+
+function defaultGuardianConfig(step: string) {
+  return (
+    GUARDIAN_STEP_DEFAULTS[step] ?? {
+      symbolic_focus: 'unknown' as GuardianSymbolicFocus,
+      movement: 'opening' as GuardianMovement,
+      tone: 'calm' as GuardianTone,
+      rewrite_hint: 'generic-threshold-guidance',
+    }
+  );
+}
+
 function looksGuardianGeneric(comment: string): boolean {
   const clean = normalizeWhitespace(comment);
   if (!clean) return true;
@@ -134,66 +387,217 @@ function looksGuardianGeneric(comment: string): boolean {
   return GENERIC_GUARDIAN_PATTERNS.some((pattern) => pattern.test(ascii));
 }
 
-function buildGuardianComment(
-  step: string,
-  value: string,
-  isSafe: boolean,
-): string {
+function sanitizeGuardianOutputPart(text: string): string {
+  return normalizeWhitespace(text)
+    .replace(/\bacceptable\b/gi, 'recevable')
+    .replace(/\bsans signal de danger\b/gi, 'sans obstacle immédiat')
+    .replace(/\baucun signal de danger\b/gi, 'sans obstacle immédiat')
+    .replace(/\bvalid\w*\b/gi, 'mettre à l’épreuve')
+    .replace(/\bok\b/gi, 'admis')
+    .replace(
+      /\bn apporte pas de sens\b/gi,
+      'demande encore une forme plus vive',
+    )
+    .replace(/\bnom ou prenom simple\b/gi, 'nom premier');
+}
+
+function buildUnsafeGuardianEcho(step: string, value: string): string {
   const clean = normalizeWhitespace(value);
-
-  if (!isSafe) {
-    switch (step) {
-      case 'name':
-        return 'Le seuil ne refuse pas ce nom, mais il demande une présence un peu plus incarnée.';
-      case 'question':
-        return 'La question touche quelque chose, mais elle demande encore une tension plus nette pour porter le rite.';
-      default:
-        return 'Cette étape peut encore être reformulée pour gagner en justesse avant de poursuivre.';
-    }
-  }
-
   switch (step) {
     case 'name':
-      return `${quoted(clean, 'ce nom')} suffit pour franchir le premier seuil : ici, un nom ouvre une présence, pas un simple formulaire.`;
-    case 'mood':
-      return `Sous le signe de ${quoted(clean, 'cette humeur')}, le rite reçoit déjà une météo intérieure ; garde cette couleur pour la suite.`;
-    case 'format':
-      return `${quoted(clean, 'cette forme')} donnera sa manière de frapper juste ; le réceptacle peut déjà porter la vérité.`;
+      return `${quoted(clean, 'ce nom')} peut entrer dans le rite, mais demande une présence un peu plus incarnée.`;
     case 'question':
-      return `Dans ${quoted(clean, 'cette question')}, on entend déjà une tension vivante entre manque et appel ; elle peut porter l’invocation.`;
-    case 'weight':
-      return `En nommant ${quoted(clean, 'ce fardeau')}, tu donnes au rite un poids réel ; quelque chose peut désormais être traversé.`;
-    case 'fear':
-      return `La peur nommée, ${quoted(clean, 'cette peur')}, cesse d’être pure brume ; elle devient un seuil que l’on peut regarder sans détour.`;
-    case 'desire':
-      return `Ton désir, ${quoted(clean, 'ce désir')}, trace déjà une direction ; il donne au tirage une orientation plus haute que le simple manque.`;
-    case 'sacrifice':
-      return `Ce que tu consens à quitter, ${quoted(clean, 'ce sacrifice')}, ouvre un passage ; le rite possède désormais une perte à honorer.`;
-    case 'social':
-      return `La place que tu te donnes parmi les autres est assez nette pour nourrir l’interprétation ; le cercle peut poursuivre.`;
-    case 'eternity':
-      return `Cette parole ouvre bien l’horizon du retour : elle donne au rite une durée intérieure, et non un simple instant isolé.`;
+      return 'La question touche quelque chose, mais sa pointe doit être encore resserrée.';
     default:
-      return 'Le seuil peut recevoir cette parole ; tu peux poursuivre.';
+      return 'Le seuil reste ouvert, mais cette étape demande encore une formulation plus juste.';
   }
 }
 
-function normalizeGuardianComment(
+function buildUnsafeGuardianSubcomment(
+  step: string,
+  _value: string,
+  movement: GuardianMovement,
+): string {
+  switch (step) {
+    case 'name':
+      return `Il ne s’agit pas d’ajouter beaucoup, seulement de donner au nom une chair plus sensible pour que le passage gagne en netteté et en ${movement === 'clarifying' ? 'éclaircissement' : 'justesse'}.`;
+    case 'question':
+      return 'Le rite recevra mieux une question moins diffuse, plus tendue entre ce qui manque et ce qui appelle.';
+    default:
+      return 'Une reformulation simple, plus concrète ou plus tendue, suffira pour redonner au passage sa forme exacte.';
+  }
+}
+
+function buildGuardianEcho(
   step: string,
   value: string,
-  comment: string,
   isSafe: boolean,
+  symbolicFocus: GuardianSymbolicFocus,
+  movement: GuardianMovement,
+  tone: GuardianTone,
 ): string {
-  const raw = normalizeWhitespace(comment);
-  if (!raw) return buildGuardianComment(step, value, isSafe);
+  if (!isSafe) return buildUnsafeGuardianEcho(step, value);
 
-  if (!isSafe) return raw;
+  const clean = normalizeWhitespace(value);
+  const toneWord =
+    tone === 'grave'
+      ? 'grave'
+      : tone === 'ardent'
+        ? 'ardente'
+        : tone === 'clear'
+          ? 'claire'
+          : 'sobre';
 
-  if (looksGuardianGeneric(raw)) {
-    return buildGuardianComment(step, value, isSafe);
+  switch (step) {
+    case 'name':
+      return `${quoted(clean, 'ce nom')} ouvre un seuil ${toneWord} ; tu peux entrer sans te justifier.`;
+    case 'mood':
+      return `Sous le signe de ${quoted(clean, 'cette humeur')}, le rite reçoit déjà son climat intérieur.`;
+    case 'format':
+      return `${quoted(clean, 'cette forme')} peut désormais porter la manière dont la vérité va frapper.`;
+    case 'question':
+      return `Dans ${quoted(clean, 'cette question')}, on entend déjà un nœud vivant capable d’appeler l’oracle.`;
+    case 'weight':
+      return `En nommant ${quoted(clean, 'ce poids')}, tu donnes au rite une gravité qu’il peut réellement traverser.`;
+    case 'fear':
+      return `La peur dite, ${quoted(clean, 'cette peur')}, cesse d’être une brume et devient un bord visible.`;
+    case 'desire':
+      return `Ton désir, ${quoted(clean, 'ce désir')}, trace déjà une direction plus haute que le simple manque.`;
+    case 'sacrifice':
+      return `Ce que tu consens à quitter, ${quoted(clean, 'ce sacrifice')}, ouvre un passage réel dans le rite.`;
+    case 'social':
+      return `La place que tu nommes parmi les autres donne déjà au cercle une figure lisible.`;
+    case 'eternity':
+      return `Cette parole ouvre un horizon de retour ; elle donne au rite une durée intérieure.`;
+    default:
+      return `Cette parole trouve un ${symbolicFocus === 'unknown' ? 'seuil' : symbolicFocus} et peut poursuivre son ${movement}.`;
+  }
+}
+
+function buildGuardianSubcomment(
+  step: string,
+  value: string,
+  isSafe: boolean,
+  symbolicFocus: GuardianSymbolicFocus,
+  movement: GuardianMovement,
+  tone: GuardianTone,
+): string {
+  if (!isSafe) {
+    return buildUnsafeGuardianSubcomment(step, value, movement);
   }
 
-  return raw;
+  const movementNoun =
+    movement === 'opening'
+      ? 'ouverture'
+      : movement === 'deepening'
+        ? 'approfondissement'
+        : movement === 'clarifying'
+          ? 'éclaircissement'
+          : movement === 'crossing'
+            ? 'franchissement'
+            : movement === 'naming'
+              ? 'nomination'
+              : movement === 'orienting'
+                ? 'orientation'
+                : movement === 'releasing'
+                  ? 'déliaison'
+                  : movement === 'holding'
+                    ? 'tenue'
+                    : 'accueil';
+
+  switch (step) {
+    case 'name':
+      return `Ici, le nom n’est pas une pièce à produire : il devient présence, apparition et premier passage, dans une ouverture claire du seuil.`;
+    case 'mood':
+      return `Cette humeur ne sert pas à classer l’âme ; elle règle la lumière intérieure de ce qui va se dire et donne au rite une qualité de climat immédiatement sensible.`;
+    case 'format':
+      return `La forme choisie ne décore pas la vérité : elle décide de sa coupe, de sa vitesse et de la manière dont elle pourra être reçue sans se disperser.`;
+    case 'question':
+      return `Une question n’a pas besoin d’être parfaite pour être digne ; il suffit qu’elle porte une tension juste entre manque, appel et pensée pour nourrir l’invocation.`;
+    case 'weight':
+      return `Le poids nommé retire au rite toute abstraction inutile : il lui donne une matière contre laquelle mesurer la traversée, la tenue et le possible dépassement.`;
+    case 'fear':
+      return `Quand la peur reçoit des mots, elle cesse de commander depuis l’ombre ; elle devient une ligne de fracture qu’on peut regarder sans détour et franchir avec plus de lucidité.`;
+    case 'desire':
+      return `Le désir formulé n’est pas seulement une envie ; il devient un axe d’orientation, une poussée de hauteur, quelque chose qui attire déjà l’interprétation hors de l’inertie.`;
+    case 'sacrifice':
+      return `Le sacrifice nommé donne au passage sa perte féconde : quelque chose devra tomber, non pour mutiler le vivant, mais pour lui rendre une force plus exacte.`;
+    case 'social':
+      return `Dire sa place parmi les autres donne au rite un cercle concret : proximité, retrait, guide, solitude ou partage cessent d’être flous et deviennent lisibles.`;
+    case 'eternity':
+      return `L’éternité n’est pas ici un grand mot abstrait ; elle devient la forme intérieure du retour, une manière d’éprouver ce qui pourrait revenir et ce qui mérite d’être recommencé.`;
+    default:
+      return `Le rite reçoit ici un ${symbolicFocus}, un mouvement d’${movementNoun} et une tonalité ${tone} ; cela suffit pour poursuivre sans retomber dans une approbation bureaucratique.`;
+  }
+}
+
+export function buildGuardianGuidanceFromPayload(
+  step: string,
+  value: string,
+  payload: GuardianPayloadLike = {},
+): GuardianGuidance {
+  const defaults = defaultGuardianConfig(step);
+  const isSafe = Boolean(payload?.isSafe ?? payload?.is_safe ?? true);
+  const confidence = normalizeConfidence(
+    payload?.confidence,
+    isSafe ? 0.9 : 0.74,
+  );
+
+  const rawComment = normalizeWhitespace(payload?.comment);
+  const symbolic_focus = normalizeGuardianFocus(
+    payload?.symbolic_focus,
+    defaults.symbolic_focus,
+  );
+  const movement = normalizeGuardianMovement(
+    payload?.movement,
+    defaults.movement,
+  );
+  const tone = normalizeGuardianTone(payload?.tone, defaults.tone);
+
+  const rewrite_hint =
+    normalizeWhitespace(payload?.rewrite_hint) || defaults.rewrite_hint;
+
+  const echo = sanitizeGuardianOutputPart(
+    buildGuardianEcho(step, value, isSafe, symbolic_focus, movement, tone),
+  );
+  const subcomment = sanitizeGuardianOutputPart(
+    buildGuardianSubcomment(
+      step,
+      value,
+      isSafe,
+      symbolic_focus,
+      movement,
+      tone,
+    ),
+  );
+
+  const deterministicComment = composeGuardianComment(echo, subcomment);
+
+  if (!rawComment || looksGuardianGeneric(rawComment)) {
+    return {
+      comment: deterministicComment,
+      echo,
+      subcomment,
+      isSafe,
+      confidence,
+      symbolic_focus,
+      movement,
+      tone,
+      rewrite_hint,
+    };
+  }
+
+  return {
+    comment: deterministicComment,
+    echo,
+    subcomment,
+    isSafe,
+    confidence,
+    symbolic_focus,
+    movement,
+    tone,
+    rewrite_hint,
+  };
 }
 
 /**
@@ -317,7 +721,7 @@ export async function getStepGuidance(
   step: string,
   value: string,
   opts?: { debug?: boolean },
-): Promise<{ comment: string; isSafe: boolean }> {
+): Promise<GuardianGuidance> {
   const guard = new ZaraLangGuard(!!opts?.debug);
 
   try {
@@ -329,12 +733,17 @@ export async function getStepGuidance(
       'Tu es le Gardien du Seuil.',
       'Tu verifies une etape du rituel et tu aides l utilisateur a poursuivre.',
       'Reponds en JSON strict.',
-      'comment = une seule phrase courte, specifique a l etape, legerement rituelle, attentive aux mots fournis, jamais administrative.',
-      'Si isSafe=true, le commentaire doit ouvrir la suite en interpretant legerement le texte.',
+      'Le contrat doit toujours contenir: comment, isSafe, confidence.',
+      'Ajoute si possible: symbolic_focus, movement, tone, rewrite_hint.',
+      'symbolic_focus ∈ threshold|climate|burden|fracture|desire|renunciation|circle|return|form|question.',
+      'movement ∈ opening|deepening|clarifying|crossing|naming|orienting|releasing|holding|receiving.',
+      'tone ∈ calm|grave|ardent|clear.',
+      'comment = une seule phrase courte, specifique a l etape, attentive aux mots fournis, jamais bureaucratique.',
+      'Si isSafe=true, la phrase doit ouvrir la suite en interpretant legerement le texte.',
       'INTERDIT: "acceptable", "sans signal de danger", "valide", "ok", "n apporte pas de sens", "simple".',
       'Pour un prenom simple, transforme-le en seuil symbolique sobre.',
       'FORMAT JSON STRICT OBLIGATOIRE:',
-      '{"comment": string, "isSafe": boolean, "confidence": number}',
+      '{"comment": string, "isSafe": boolean, "confidence": number, "symbolic_focus"?: string, "movement"?: string, "tone"?: string, "rewrite_hint"?: string}',
       '',
       `ETAPE: ${stepA}`,
       `TEXTE: ${valueA}`,
@@ -350,48 +759,37 @@ export async function getStepGuidance(
     });
 
     const { env, payload, mode } = unwrapGeminiPayload(r);
+
     if (!payload) {
-      return {
-        comment: buildGuardianComment(stepA, valueDisplay, true),
+      return buildGuardianGuidanceFromPayload(stepA, valueDisplay, {
         isSafe: true,
-      };
+      });
     }
 
-    let comment = '';
-    if (mode === 'guardian') {
-      comment = String(payload?.comment ?? env?.text ?? '');
-    } else if (mode === 'oracle') {
-      comment = String(
-        payload?.interpretation ?? payload?.quote ?? env?.text ?? '',
-      );
-    } else {
-      comment = String(payload?.comment ?? env?.text ?? '');
+    const rawComment =
+      mode === 'guardian'
+        ? String(payload?.comment ?? env?.text ?? '')
+        : mode === 'oracle'
+          ? String(payload?.interpretation ?? payload?.quote ?? env?.text ?? '')
+          : String(payload?.comment ?? env?.text ?? '');
+
+    const guidance = buildGuardianGuidanceFromPayload(stepA, valueDisplay, {
+      ...(payload && typeof payload === 'object' ? payload : {}),
+      comment: rawComment,
+      isSafe: payload?.isSafe ?? payload?.is_safe ?? true,
+    });
+
+    if (guard.shouldRetry(rawComment)) {
+      return buildGuardianGuidanceFromPayload(stepA, valueDisplay, {
+        ...guidance,
+        comment: '',
+      });
     }
 
-    const isSafe = Boolean(payload?.isSafe ?? payload?.is_safe ?? true);
-
-    if (guard.shouldRetry(comment)) {
-      comment = normalizeWhitespace(comment);
-    }
-
-    const normalizedComment = normalizeGuardianComment(
-      stepA,
-      valueDisplay,
-      comment,
-      isSafe,
-    );
-
-    return {
-      comment:
-        normalizedComment || buildGuardianComment(stepA, valueDisplay, isSafe),
-      isSafe,
-    };
+    return guidance;
   } catch (e) {
     logger.warn('Guardian error:', e);
-    return {
-      comment: buildGuardianComment(step, value, true),
-      isSafe: true,
-    };
+    return buildGuardianGuidanceFromPayload(step, value, { isSafe: true });
   }
 }
 
