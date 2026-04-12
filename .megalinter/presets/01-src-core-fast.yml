@@ -1,0 +1,16 @@
+# .megalinter/presets/01-src-core-fast.yml
+# Dev "feedback rapide" : TS/TSX uniquement.
+# Optimisé pour être lancé AVEC -Files (sinon ça reste un scan, juste moins large que 01-src-core)
+
+EXTENDS:
+  - '.megalinter/presets/_base.yml'
+
+# On cible uniquement TS/TSX du src (évite .vue / .js)
+FILTER_REGEX_INCLUDE: '^src/.*\.(ts|tsx)$'
+
+# Si jamais tu lances sans -Files, on évite un scan "full codebase" trop large
+VALIDATE_ALL_CODEBASE: false
+
+ENABLE_LINTERS:
+  - TYPESCRIPT_ES
+  - TSX_ESLINT
