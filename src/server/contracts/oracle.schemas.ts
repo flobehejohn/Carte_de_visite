@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import {
+  GuardianGuidanceSchema,
+  OracleCompositionSchema,
+  OracleHermeneuticV2Schema,
+} from '../../shared/contracts/gemini.contracts.js';
 
 export const MAX_CITATIONS = 12 as const;
 
@@ -150,6 +155,9 @@ export const OracleResponseSchema = z
         }),
       )
       .optional(),
+    guidance: GuardianGuidanceSchema.nullable().optional(),
+    hermeneutic: OracleHermeneuticV2Schema.nullable().optional(),
+    composition: OracleCompositionSchema.nullable().optional(),
     debug: z.unknown().optional(),
   })
   .passthrough();
