@@ -33,3 +33,7 @@ tsconfig.tsbuildinfo
 
 tsconfig.tsbuildinfo
 
+
+# local script backups
+scripts/_bak/
+
