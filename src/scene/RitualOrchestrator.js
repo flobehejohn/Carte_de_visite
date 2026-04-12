@@ -12,21 +12,18 @@ import { applyMaterials } from './render/materials/applyMaterials';
 import { mapClimateToRenderParams } from './render/materials/mapClimateToRenderParams';
 
 /**
- * RitualOrchestrator — version "Ultime" (Thème B - Débridé)
- * Objectifs:
- * - Spatialisation et Layout Pressure stricte
- * - Variabilité extrême (Sphères pures, Océans fluides, Clair-obscur)
- * - Fogs et transparences massives
- * - Déterminisme via Seed
- * - Émission des invariants runtime vers la CI (OrbAuditBridge)
+ * RitualOrchestrator — version "Ultime" (Thème E : Cinématographie & Atmosphère)
+ * - Transitions fluides (Metamorphosis)
+ * - Volumetric Fake Lighting (Orbital Lights + FBM Shader coloré)
+ * - Cheminement (Journey Z-Axis)
+ * - VRT Compatible
  */
 
-/* -------------------------- RNG déterministe -------------------------- */
 function cyrb128(str) {
-  let h1 = 1779033703,
-    h2 = 3144134277,
-    h3 = 1013904242,
-    h4 = 2773480762;
+  let h1 = 1779033703;
+  let h2 = 3144134277;
+  let h3 = 1013904242;
+  let h4 = 2773480762;
   for (let i = 0, k; i < str.length; i++) {
     k = str.charCodeAt(i);
     h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
@@ -92,21 +89,17 @@ function normalizeClampValue(candidate, fallback = null) {
   if (typeof candidate === 'number' && Number.isFinite(candidate))
     return candidate;
   if (!candidate || typeof candidate !== 'object') return fallback;
-
   const min =
     typeof candidate.min === 'number' && Number.isFinite(candidate.min)
       ? candidate.min
       : null;
-
   const max =
     typeof candidate.max === 'number' && Number.isFinite(candidate.max)
       ? candidate.max
       : null;
-
   if (min !== null && max !== null) return Math.min(min, max);
   if (max !== null) return max;
   if (min !== null) return min;
-
   return fallback;
 }
 
@@ -126,69 +119,41 @@ function isDev() {
     return false;
   }
 }
-
 function isFn(value) {
   return typeof value === 'function';
 }
 
 function buildVolumeSafe(ctx) {
-  if (isFn(orbVolumes.buildVolume)) {
-    return orbVolumes.buildVolume(ctx);
-  }
-  if (isFn(orbVolumes.setVolumeConfig)) {
+  if (isFn(orbVolumes.buildVolume)) return orbVolumes.buildVolume(ctx);
+  if (isFn(orbVolumes.setVolumeConfig))
     return orbVolumes.setVolumeConfig(ctx, { forceRebuild: true });
-  }
-  if (isFn(orbVolumes.ensureVolumeConfig)) {
-    orbVolumes.ensureVolumeConfig(ctx);
-  }
+  if (isFn(orbVolumes.ensureVolumeConfig)) orbVolumes.ensureVolumeConfig(ctx);
   return null;
 }
-
 function updateVolumeSafe(ctx, time = 0) {
-  if (isFn(orbVolumes.updateVolumeForFrame)) {
+  if (isFn(orbVolumes.updateVolumeForFrame))
     return orbVolumes.updateVolumeForFrame(ctx, time);
-  }
   return null;
 }
-
 function setVolumeConfigSafe(ctx, patch = {}) {
-  if (isFn(orbVolumes.setVolumeConfig)) {
+  if (isFn(orbVolumes.setVolumeConfig))
     return orbVolumes.setVolumeConfig(ctx, patch);
-  }
   if (isFn(orbVolumes.ensureVolumeConfig)) {
     const cfg = orbVolumes.ensureVolumeConfig(ctx);
-    if (patch && typeof patch === 'object') {
-      Object.assign(cfg, patch);
-    }
+    if (patch && typeof patch === 'object') Object.assign(cfg, patch);
     return cfg;
   }
   return ctx?.volumeConfig ?? null;
 }
-
 function ensureVolumeConfigSafe(ctx) {
-  if (isFn(orbVolumes.ensureVolumeConfig)) {
+  if (isFn(orbVolumes.ensureVolumeConfig))
     return orbVolumes.ensureVolumeConfig(ctx);
-  }
   return ctx?.volumeConfig ?? null;
 }
 
-// INJECTION DES PRIMITIVES PURES : Probabilité massive d'obtenir des sphères pures.
-const SHAPE_POOL_LOW = ['tetra', 'octa', 'box', 'sphere', 'sphere'];
-const SHAPE_POOL_MID = [
-  'icosa',
-  'dodeca',
-  'sphere',
-  'sphere',
-  'capsule',
-  'torus',
-];
-const SHAPE_POOL_HIGH = [
-  'torusKnot',
-  'sphere',
-  'knotComplex',
-  'torus',
-  'torusKnot',
-];
+const SHAPE_POOL_LOW = ['tetra', 'octa', 'box', 'sphere'];
+const SHAPE_POOL_MID = ['icosa', 'dodeca', 'sphere', 'capsule', 'torus'];
+const SHAPE_POOL_HIGH = ['torusKnot', 'knotComplex', 'torusKnot'];
 
 const PALETTE_MODES = ['mono', 'complement', 'split', 'triad', 'analog'];
 const MOTION_SIGNATURES = ['calm', 'breath', 'link', 'storm', 'burst'];
@@ -199,6 +164,12 @@ export class RitualOrchestrator {
     this.mood = 'Default';
     this.progress = 0;
     this.lastTime = 0;
+
+    // Base de la Caméra pour le Shake
+    this.baseCameraPos = new THREE.Vector3(0, 0, 0);
+    if (this.ctx.camera) {
+      this.baseCameraPos.copy(this.ctx.camera.position);
+    }
 
     this.baseRadius = Math.max(ctx?.orbShellConfig?.radius ?? 2.35, 2.35);
     this.baseYOffset = ctx?.orbGroup?.position?.y ?? 0;
@@ -212,8 +183,8 @@ export class RitualOrchestrator {
     this.textLength = 0;
     this.textMetrics = null;
     this.lastLayoutLog = 0;
-    this._renderMapOpts = { dt: 0, smoothing: { enabled: true, tauMs: 200 } };
 
+    this._renderMapOpts = { dt: 0, smoothing: { enabled: true, tauMs: 200 } };
     this.motion = { mode: 'calm', phase: 0, energy: 0.25, lastSwitch: 0 };
     this.lastParticleModeChange = 0;
     this.particleModeChanges = 0;
@@ -223,11 +194,23 @@ export class RitualOrchestrator {
 
     this.lastInputs = {};
 
+    this.isVRT = false;
+    this.vrtTime = null;
+    this._vrtWarmedUp = false;
+
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('vrtTime')) {
+        this.isVRT = true;
+        this.vrtTime = parseFloat(params.get('vrtTime'));
+      }
+    }
+
     this.rng = makeRng(`ritual-default-${Date.now()}-${Math.random()}`);
 
     this.ritualDNA = {
       seed: this.rng.seedString,
-      path: { p0: 'sphere', p1: 'icosa', p2: 'sphere' },
+      path: { p0: 'sphere', p1: 'icosa', p2: 'torusKnot' },
       texture: 'smooth',
       paletteMode: 'analog',
       noiseScale: 1.0,
@@ -238,47 +221,49 @@ export class RitualOrchestrator {
     this.currentState = {
       orbScale: 0.18,
       orbYOffset: 0,
-      orbZOffset: 0,
-
+      orbZOffset: -40.0,
       lightKey: 0.35,
       lightFill: 0.18,
       rim: 0.08,
-
       deformBase: 0.0,
       deformPulse: 0.0,
       dislocation: 0.0,
       turbulence: 0.0,
-
       spinSpeed: 0.0,
       wobble: 0.0,
-
       wireOpacity: 0.22,
       backgroundStrength: 0.18,
       glowIntensity: 0.18,
       glowSize: 1.0,
       softness: 0.62,
-
       foregroundOpacity: 0.08,
-
+      veilChaos: 0.0,
+      cameraFov: 45,
+      cameraShake: 0.0,
+      chromaticAberration: 0.0,
       lightColor: new THREE.Color(0x9bb4ff),
       bgColor: new THREE.Color(0x182235),
       wireColor: new THREE.Color(0xe5eeff),
     };
+
     this.targetState = { ...this.currentState };
     this.visualState = { shape: 'tetra', detail: 0 };
     this.visualTarget = { shape: 'tetra', detail: 0 };
   }
 
   initRitual(userName = '', options = {}) {
-    const explicitSeed = options?.seed ? String(options.seed) : null;
+    let explicitSeed = options?.seed ? String(options.seed) : null;
+    if (this.isVRT && typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('vrtSeed')) explicitSeed = params.get('vrtSeed');
+    }
+
     const seedString =
       explicitSeed ??
       `${String(userName || 'Anonyme')}-${Date.now()}-${Math.random()}`;
     this.rng = makeRng(seedString);
 
-    const textureType = this.rng.random();
-    const paletteMode = this.rng.pick(PALETTE_MODES);
-    const signature = this.rng.pick(MOTION_SIGNATURES);
+    const chaosBase = this.rng.random();
 
     this.ritualDNA = {
       seed: seedString,
@@ -288,16 +273,12 @@ export class RitualOrchestrator {
         p2: this.rng.pick(SHAPE_POOL_HIGH),
       },
       texture:
-        textureType < 0.33
-          ? 'smooth'
-          : textureType < 0.66
-            ? 'jagged'
-            : 'liquid',
-      paletteMode,
-      noiseScale: this.rng.float(0.55, 3.5), // Élargi pour des déformations plus massives
+        chaosBase < 0.3 ? 'smooth' : chaosBase < 0.7 ? 'jagged' : 'liquid',
+      paletteMode: this.rng.pick(PALETTE_MODES),
+      noiseScale: this.rng.float(0.55, 3.5),
       noiseSpeed: this.rng.float(0.4, 2.0),
-      particleStyle: this.rng.bool(0.65) ? 'volume' : 'shell', // Favorise l'effet brouillard
-      signature,
+      particleStyle: this.rng.bool(0.5) ? 'volume' : 'shell',
+      signature: this.rng.pick(MOTION_SIGNATURES),
     };
 
     this.llmParams = null;
@@ -321,7 +302,6 @@ export class RitualOrchestrator {
 
     this.ctx.orbShellConfig = this.ctx.orbShellConfig || {};
     this.ctx.orbShellConfig.radius = Math.max(this.baseRadius, 2.35);
-
     this.ctx.orbShellConfig.shapeType = this.ritualDNA.path.p0;
     this.ctx.orbShellConfig.detail = 2;
 
@@ -338,15 +318,65 @@ export class RitualOrchestrator {
     orbFluidParticles.setFluidParticlesConfig?.(this.ctx, { enabled: false });
 
     if (!this.foregroundMesh) {
-      const fgGeo = new THREE.PlaneGeometry(20, 20);
+      const fgGeo = new THREE.PlaneGeometry(30, 30);
       const fgMat = new THREE.MeshBasicMaterial({
-        color: 0x000000,
+        color: 0x05070a,
         transparent: true,
         opacity: 1.0,
         side: THREE.DoubleSide,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
       });
+
+      fgMat.onBeforeCompile = (shader) => {
+        shader.uniforms.uTime = { value: 0 };
+        shader.uniforms.uChaos = { value: 0 };
+        shader.uniforms.uColor = { value: new THREE.Color() };
+
+        fgMat.userData.shader = shader;
+
+        shader.vertexShader = `
+          varying vec2 vUvVeil;
+          ${shader.vertexShader}
+        `.replace(
+          `#include <uv_vertex>`,
+          `#include <uv_vertex>\n vUvVeil = uv;`,
+        );
+
+        shader.fragmentShader = `
+          uniform float uTime;
+          uniform float uChaos;
+          uniform vec3 uColor;
+          varying vec2 vUvVeil;
+          
+          float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
+          float noise(vec2 st) {
+              vec2 i = floor(st); vec2 f = fract(st);
+              float a = random(i); float b = random(i + vec2(1.0, 0.0));
+              float c = random(i + vec2(0.0, 1.0)); float d = random(i + vec2(1.0, 1.0));
+              vec2 u = f * f * (3.0 - 2.0 * f);
+              return mix(a, b, u.x) + (c - a)* u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+          }
+          float fbm(vec2 st) {
+              float v = 0.0; float a = 0.5;
+              for(int i=0; i<3; i++) { v += a * noise(st); st *= 2.0; a *= 0.5; }
+              return v;
+          }
+          ${shader.fragmentShader}
+        `.replace(
+          `vec4 diffuseColor = vec4( diffuse, opacity );`,
+          `
+          vec2 uv1 = vUvVeil + vec2(uTime * 0.03, -uTime * 0.01);
+          vec2 uv2 = vUvVeil + vec2(-uTime * 0.02, uTime * 0.03);
+          
+          float n = fbm(uv1 * 4.0 + fbm(uv2 * 2.5));
+          float intensity = smoothstep(0.1, 0.9, n);
+          vec3 atmosphereColor = mix(diffuse, uColor * 2.5, intensity * uChaos);
+          vec4 diffuseColor = vec4( atmosphereColor, opacity * intensity );
+          `,
+        );
+      };
+
       this.foregroundMesh = new THREE.Mesh(fgGeo, fgMat);
       this.foregroundMesh.position.z = 4.0;
       this.foregroundMesh.renderOrder = 10;
@@ -354,7 +384,6 @@ export class RitualOrchestrator {
     } else {
       this.foregroundMesh.material.color.setHex(0x05070a);
       this.foregroundMesh.material.setValues({ opacity: 0.08 });
-
       this.ctx.appliedOpacityForeground =
         typeof this._climateForegroundOpacity === 'number'
           ? this._climateForegroundOpacity
@@ -373,7 +402,12 @@ export class RitualOrchestrator {
       softness: 0.62,
       wireOpacity: 0.28,
       foregroundOpacity: 0.08,
+      veilChaos: 0.0,
+      cameraFov: 45,
+      cameraShake: 0.0,
+      chromaticAberration: 0.0,
     });
+
     this.currentState.lightColor.setHex(0xa8b8ff);
     this.currentState.bgColor.setHex(0x172235);
     this.currentState.wireColor.setHex(0xf0f5ff);
@@ -397,9 +431,9 @@ export class RitualOrchestrator {
       this.hatchPulse = 0.55;
       this.ctx.climateController?.setVisualParams(this.llmParams);
     }
-
-    if (payload.textLength) this.textLength = payload.textLength;
-
+    if (payload.textLength) {
+      this.textLength = payload.textLength;
+    }
     if (payload.textMetrics) {
       this.textMetrics = payload.textMetrics;
       const now =
@@ -410,11 +444,19 @@ export class RitualOrchestrator {
         this.lastLayoutLog = now;
       }
     }
-
     if (payload.seed && typeof payload.seed === 'string') {
       this.rng = makeRng(payload.seed);
       this.ritualDNA.seed = payload.seed;
       this.ctx.climateController?.setSeed(payload.seed);
+    }
+    if (this.isVRT && typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('vrtChaos')) {
+        this.llmParams = {
+          ...this.llmParams,
+          chaos: parseFloat(params.get('vrtChaos')),
+        };
+      }
     }
 
     this.lastInputs = { ...this.lastInputs, ...payload };
@@ -435,8 +477,16 @@ export class RitualOrchestrator {
         : this.ritualDNA.texture === 'liquid'
           ? 1.05
           : 0.95;
-
     const chaos = clamp01(chaosLLM * textureFactor);
+
+    const isVoid = this.rng.bool(0.2) && chaos < 0.3;
+    const isStorm = chaos > 0.7;
+    const isElementalOrb = this.rng.bool(0.3) || isStorm;
+
+    let weatherMode = 'void';
+    if (!isVoid) {
+      weatherMode = this.rng.pick(['rain', 'ash', 'abyss', 'embers']);
+    }
 
     const baseHue = this.llmParams?.primary_color
       ? new THREE.Color(this.llmParams.primary_color).getHSL({
@@ -448,9 +498,8 @@ export class RitualOrchestrator {
         ? fearSig * 0.08
         : 0.55 + desireSig * 0.18;
 
-    // Couleurs plus profondes pour accentuer le Fog et Clair-obscur
     const sat = 0.55 + chaos * 0.45;
-    const lum = 0.35 + 0.2 * (1 - chaos);
+    const lum = 0.25 + chaos * 0.25;
     const primary = new THREE.Color().setHSL(baseHue, sat, lum);
 
     const paletteMode = this.ritualDNA.paletteMode;
@@ -521,6 +570,7 @@ export class RitualOrchestrator {
     const wireBreath = this.rng.float(0.15, 0.35);
 
     const signature = this.ritualDNA.signature;
+
     const motion = {
       signature,
       energy: THREE.MathUtils.clamp(0.18 + chaos * 0.62 + p * 0.22, 0.12, 0.95),
@@ -541,26 +591,25 @@ export class RitualOrchestrator {
       0.2,
       1.0,
     );
-    const particleCount = Math.floor(180 + density * 1200); // Plus de particules
+    const particleCount = Math.floor(180 + density * 1200);
     const particleSize = this.rng.float(0.06, 0.25) * (0.9 + chaos * 0.4);
     const linkDistance = this.rng.float(0.85, 1.6) * (1.1 - chaos * 0.35);
 
-    // GESTION DU FOG ET VOLUME PROFOND
+    const bgStrength = isVoid
+      ? 0.02
+      : THREE.MathUtils.clamp(0.15 + p * 0.2 + chaos * 0.3, 0.1, 0.8);
+
     const volume = {
       enabled: true,
-      backgroundColor: palette.primary.clone().multiplyScalar(0.08), // Plus sombre
+      backgroundColor: isVoid
+        ? new THREE.Color(0x000000)
+        : palette.primary.clone().multiplyScalar(0.08),
       glowColor: palette.primary.clone().lerp(new THREE.Color(0xffffff), 0.25),
-      glowIntensity: THREE.MathUtils.clamp(
-        0.5 + p * 0.35 + chaos * 0.25,
-        0.4,
-        1.5,
-      ), // Glow très fort possible
-      backgroundStrength: THREE.MathUtils.clamp(
-        0.25 + p * 0.2 + chaos * 0.1,
-        0.1,
-        0.6,
-      ),
-      softness: THREE.MathUtils.clamp(0.7 - p * 0.2 + chaos * 0.2, 0.3, 0.9), // Brouillard doux
+      glowIntensity: isVoid
+        ? 0.1
+        : THREE.MathUtils.clamp(0.5 + p * 0.35 + chaos * 0.25, 0.4, 1.5),
+      backgroundStrength: bgStrength,
+      softness: THREE.MathUtils.clamp(0.7 - p * 0.2 + chaos * 0.2, 0.3, 0.9),
       noise: {
         scale: this.rng.float(2.0, 8.0),
         speed: this.rng.float(0.1, 0.4) * (0.8 + chaos),
@@ -568,8 +617,8 @@ export class RitualOrchestrator {
       },
     };
 
-    // CLAIR-OBSCUR : Lumière directionnelle très forte, Fill light très faible
     const clairObscur = chaos > 0.5 ? 1.5 : 1.0;
+
     const lighting = {
       key:
         THREE.MathUtils.clamp(0.8 + p * 1.2 + chaos * 0.5, 0.6, 3.0) *
@@ -610,10 +659,15 @@ export class RitualOrchestrator {
         layers: wireLayers,
         spacing: wireSpacing,
         breath: wireBreath,
-        opacityBase: THREE.MathUtils.clamp(0.12 + p * 0.6, 0.08, 0.95),
-        opacityInner: THREE.MathUtils.clamp(0.06 + p * 0.25, 0.03, 0.55),
+        opacityBase: isElementalOrb
+          ? 0.0
+          : THREE.MathUtils.clamp(0.12 + p * 0.6, 0.08, 0.95),
+        opacityInner: isElementalOrb
+          ? 0.0
+          : THREE.MathUtils.clamp(0.06 + p * 0.25, 0.03, 0.55),
       },
       colors: {
+        solidOpacity: isElementalOrb ? 0.0 : 1.0,
         solid: palette.primary.clone().multiplyScalar(0.25),
         wire: palette.primary.clone().offsetHSL(0, 0.1, 0.3),
       },
@@ -621,14 +675,17 @@ export class RitualOrchestrator {
 
     const particles = {
       enabled: p > 0.12,
-      count: particleCount,
+      count: isElementalOrb ? particleCount * 2 : particleCount,
       size: particleSize,
       opacity: THREE.MathUtils.clamp(0.4 + p * 0.45, 0.3, 0.95),
       color1: palette.primary.clone(),
       color2: palette.accent.clone(),
       radiusFactor: THREE.MathUtils.clamp(1.1 + p * 0.55, 1.1, 2.2),
-      distribution:
-        this.ritualDNA.particleStyle === 'volume' ? 'volume' : 'shell',
+      distribution: isElementalOrb
+        ? 'volume'
+        : this.ritualDNA.particleStyle === 'volume'
+          ? 'volume'
+          : 'shell',
       linkDistance,
       trailLength: Math.floor(10 + p * 14 + chaos * 8),
       trailFade: THREE.MathUtils.clamp(0.86 + chaos * 0.08, 0.84, 0.96),
@@ -641,7 +698,7 @@ export class RitualOrchestrator {
     };
 
     const poly = {
-      enabled: p > 0.45 && this.rng.bool(0.65),
+      enabled: !isElementalOrb && p > 0.45 && this.rng.bool(0.65),
       wireframe: true,
       subsampling: THREE.MathUtils.clamp(0.35 + (1 - chaos) * 0.35, 0.18, 0.85),
       noiseAmplitude: THREE.MathUtils.clamp(0.02 + chaos * 0.12, 0.0, 0.24),
@@ -662,15 +719,18 @@ export class RitualOrchestrator {
       flipFaces: this.rng.bool(0.2),
     };
 
-    // OCEANIC / AQUATIC FLOW
-    const isAquatic = this.rng.bool(chaos * 0.6); // Le chaos induit des effets lourds
+    const isAquatic = this.rng.bool(chaos * 0.6);
+
     const fluid = {
-      enabled: p > 0.65 && this.rng.bool(0.75),
+      enabled: weatherMode !== 'void' && p > 0.4,
       maxCount: Math.floor(300 + density * 800),
       size: this.rng.float(0.03, 0.08) * (1.0 + chaos * 0.4),
-      flowMode: isAquatic
-        ? 'vortex'
-        : this.rng.pick(['stream', 'suction', 'burst', 'curl']),
+      flowMode:
+        weatherMode === 'rain'
+          ? 'stream'
+          : weatherMode === 'abyss'
+            ? 'vortex'
+            : 'curl',
       flowStrength: THREE.MathUtils.clamp(
         0.6 + chaos * 1.5 + p * 0.4,
         0.35,
@@ -678,14 +738,17 @@ export class RitualOrchestrator {
       ),
       spawnRate: Math.floor(30 + density * 150),
       lifetime: THREE.MathUtils.clamp(2.5 + (1 - chaos) * 3.0, 1.5, 6.0),
-      speed: isAquatic
-        ? 0.35
-        : THREE.MathUtils.clamp(0.75 + chaos * 1.5, 0.45, 3.0),
-      spread: THREE.MathUtils.clamp(0.3 + density * 0.9, 0.2, 1.8),
+      speed:
+        weatherMode === 'rain'
+          ? 3.5
+          : THREE.MathUtils.clamp(0.75 + chaos * 1.5, 0.45, 3.0),
+      spread:
+        weatherMode === 'rain'
+          ? 3.0
+          : THREE.MathUtils.clamp(0.3 + density * 0.9, 0.2, 1.8),
       noise: THREE.MathUtils.clamp(0.15 + chaos * 0.9, 0.1, 1.5),
-      gravity: isAquatic
-        ? -0.05
-        : -THREE.MathUtils.clamp(0.2 + (1 - chaos) * 0.8, 0.1, 1.0),
+      gravity:
+        weatherMode === 'rain' ? -1.5 : weatherMode === 'ash' ? 0.2 : -0.1,
       colorStart: palette.primary.clone(),
       colorEnd: palette.accent.clone(),
       burstInterval: THREE.MathUtils.clamp(3.0 - chaos * 1.5, 1.0, 4.0),
@@ -705,12 +768,25 @@ export class RitualOrchestrator {
       volume,
       poly,
       fluid,
+      environmental: {
+        weather: weatherMode,
+        isVoid,
+        isElemental: isElementalOrb,
+      },
       rng: this.rng,
     };
   }
 
   updateState(progress, payload = this.lastInputs) {
     this.progress = clamp01(progress);
+
+    if (this.isVRT && typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('vrtProgress')) {
+        this.progress = parseFloat(params.get('vrtProgress'));
+      }
+    }
+
     const p = this.progress;
     const data = payload || {};
     const reveal = p > 0.9;
@@ -723,40 +799,51 @@ export class RitualOrchestrator {
     this.targetState.bgColor.copy(genome.volume.backgroundColor);
     this.targetState.wireColor.copy(genome.geometry.colors.wire);
 
-    if (p < 0.15)
+    this.targetState.veilChaos = genome.chaos;
+
+    this.targetState.chromaticAberration = Math.max(
+      0,
+      (genome.chaos - 0.5) * 0.4,
+    );
+    this.targetState.cameraShake = Math.max(0, (genome.chaos - 0.7) * 0.15);
+
+    if (p < 0.15) {
       this.visualTarget = { shape: this.ritualDNA.path.p0, detail: 0 };
-    else if (p < 0.5)
+    } else if (p < 0.5) {
       this.visualTarget = { shape: this.ritualDNA.path.p1, detail: 1 };
-    else if (p < 0.85)
+    } else if (p < 0.85) {
       this.visualTarget = { shape: this.ritualDNA.path.p2, detail: 2 };
-    else {
+    } else {
       const finalShape =
         this.llmParams?.shape_archetype || this.ritualDNA.path.p2;
       this.visualTarget = { shape: finalShape, detail: 4 };
+
       if (reveal && !this.revealActive) {
         this.revealActive = true;
         this.flashTimer = 0.8;
       }
     }
 
-    // SPATIALISATION ET LAYOUT PRESSURE (Thème B - Garanti par Test)
     const tm = this.textMetrics;
     const areaRatio = tm?.areaRatio ?? 0;
     const linesApprox = tm?.linesApprox ?? 1;
     const viewportW = tm?.viewportW ?? 1200;
     const mobileFactor = viewportW < 900 ? 1.15 : 1.0;
+
     const layoutPressure = clamp01(
       (areaRatio * 1.2 + linesApprox / 30) * mobileFactor,
     );
-
     const textRatio = Math.min(1.0, (this.textLength || 0) / 520);
     const pressScale = clamp01(layoutPressure);
 
-    // Logique de recul (ZOffset) et rétrécissement (Scale)
+    this.targetState.cameraFov = 45 + pressScale * 20;
+
     const baseScale =
       (p < 0.12 ? 0.96 : p < 0.5 ? 1.12 : 1.18) * (1 - pressScale * 0.25);
-    const baseYOffset = pressScale * (viewportW < 900 ? 0.8 : 0.42); // Remonte fort sur mobile
-    const baseZOffset = -pressScale * 1.2; // Recul en profondeur
+    const baseYOffset = pressScale * (viewportW < 900 ? 0.8 : 0.42);
+
+    const journeyProgressionZ = -30 * (1.0 - p);
+    const baseZOffset = journeyProgressionZ - pressScale * 1.2;
 
     if (reveal) {
       this.targetState.orbScale = Math.min(
@@ -785,7 +872,9 @@ export class RitualOrchestrator {
     this.targetState.turbulence = genome.geometry.turbulence;
     this.targetState.spinSpeed = 0.06 + genome.motion.energy * 0.25;
     this.targetState.wobble = 0.05 + genome.motion.energy * 0.2;
-    this.targetState.foregroundOpacity = p < 0.12 ? 0.08 : p < 0.4 ? 0.03 : 0.0;
+
+    this.targetState.foregroundOpacity =
+      p < 0.12 ? 0.08 : p < 0.4 ? 0.15 : 0.25 + genome.chaos * 0.2;
 
     orbParticles.setParticlesConfig?.(this.ctx, {
       enabled: genome.particles.enabled,
@@ -863,7 +952,6 @@ export class RitualOrchestrator {
     if (!ctx) return;
 
     const emergency = !!ctx?.runtimeFlags?.emergencyMode;
-
     const safeFactor = Number.isFinite(safetyFactor)
       ? clamp01(safetyFactor)
       : 1.0;
@@ -923,7 +1011,7 @@ export class RitualOrchestrator {
             sceneFog = ctx.scene.fog;
           }
           if (sceneFog?.isFogExp2 && typeof fog.density === 'number') {
-            sceneFog.density = fog.density * (1 - readabilityLift * 0.55); // Le fog s'efface devant le texte
+            sceneFog.density = fog.density * (1 - readabilityLift * 0.55);
           }
           if (fog.color != null && sceneFog?.color?.set) {
             sceneFog.color.set(fog.color);
@@ -945,32 +1033,22 @@ export class RitualOrchestrator {
       const b = targets?.bloom;
 
       let nextStrength = null;
-      if (typeof b?.strength === 'number') {
+      if (typeof b?.strength === 'number')
         nextStrength = b.strength * safeFactor;
-      }
       nextStrength = normalizeClampValue(clampCfg?.strength, nextStrength);
-      if (typeof nextStrength === 'number') {
+      if (typeof nextStrength === 'number')
         ctx.bloomPass.strength = nextStrength;
-      }
 
       let nextRadius = null;
-      if (typeof b?.radius === 'number') {
-        nextRadius = b.radius;
-      }
+      if (typeof b?.radius === 'number') nextRadius = b.radius;
       nextRadius = normalizeClampValue(clampCfg?.radius, nextRadius);
-      if (typeof nextRadius === 'number') {
-        ctx.bloomPass.radius = nextRadius;
-      }
+      if (typeof nextRadius === 'number') ctx.bloomPass.radius = nextRadius;
 
       let nextThreshold = null;
-      if (typeof b?.threshold === 'number') {
-        nextThreshold = b.threshold;
-      }
+      if (typeof b?.threshold === 'number') nextThreshold = b.threshold;
       nextThreshold = normalizeClampValue(clampCfg?.threshold, nextThreshold);
-      if (typeof nextThreshold === 'number') {
+      if (typeof nextThreshold === 'number')
         ctx.bloomPass.threshold = nextThreshold;
-      }
-
       ctx.appliedBloomStrength = ctx.bloomPass.strength ?? null;
     } else {
       ctx.appliedBloomStrength = null;
@@ -1005,10 +1083,18 @@ export class RitualOrchestrator {
       const vignette = volumeCfg.vignette;
       if (typeof vignette === 'number') {
         const vp = ctx.vignettePass;
-        if (vp?.uniforms?.vignette) vp.uniforms.vignette.value = vignette;
-        else if (vp?.uniforms?.strength) vp.uniforms.strength.value = vignette;
-        else if (vp?.material?.uniforms?.uVignette)
+        if (vp?.uniforms?.vignette) {
+          vp.uniforms.vignette.value = vignette;
+        } else if (vp?.uniforms?.strength) {
+          vp.uniforms.strength.value = vignette;
+        } else if (vp?.material?.uniforms?.uVignette) {
           vp.material.uniforms.uVignette.value = vignette;
+        }
+
+        if (vp?.material?.uniforms?.uChromaticAberration) {
+          vp.material.uniforms.uChromaticAberration.value =
+            s.chromaticAberration;
+        }
       }
 
       ctx.appliedVignette = typeof vignette === 'number' ? vignette : null;
@@ -1062,9 +1148,14 @@ export class RitualOrchestrator {
   }
 
   update(time = 0) {
-    const dt = Math.min(0.05, Math.max(0.001, time - (this.lastTime || time)));
-    this.lastTime = time;
+    let dt = Math.min(0.05, Math.max(0.001, time - (this.lastTime || time)));
 
+    if (this.isVRT && this.vrtTime !== null) {
+      time = this.vrtTime;
+      dt = 0.0;
+    }
+
+    this.lastTime = time;
     const dtMs = dt * 1000;
 
     if (this.ctx.climateController) {
@@ -1078,21 +1169,60 @@ export class RitualOrchestrator {
     const g = this.ctx.ritualGenome;
 
     let flashAdd = 0;
-    if (this.flashTimer > 0) {
+    if (this.isVRT) {
+      this.flashTimer = 0;
+    } else if (this.flashTimer > 0) {
       this.flashTimer -= dt;
       flashAdd = Math.min(0.65, this.flashTimer * 0.85);
     }
 
-    if (this.hatchPulse > 0.01) this.hatchPulse *= 1.0 - dt * 3.2;
-    else this.hatchPulse = 0;
-
-    const smooth = 3.2;
-    for (const k in s) {
-      if (typeof s[k] === 'number') s[k] = damp(s[k], t[k], smooth, dt);
+    if (this.isVRT) {
+      this.hatchPulse = 0;
+    } else if (this.hatchPulse > 0.01) {
+      this.hatchPulse *= 1.0 - dt * 3.2;
+    } else {
+      this.hatchPulse = 0;
     }
-    s.lightColor.lerp(t.lightColor, dt * 2.0);
-    s.bgColor.lerp(t.bgColor, dt * 2.0);
-    s.wireColor.lerp(t.wireColor, dt * 2.0);
+
+    const smooth = 1.8;
+    for (const k in s) {
+      if (typeof s[k] === 'number') {
+        s[k] = this.isVRT ? t[k] : damp(s[k], t[k], smooth, dt);
+      }
+    }
+
+    if (this.isVRT) {
+      s.lightColor.copy(t.lightColor);
+      s.bgColor.copy(t.bgColor);
+      s.wireColor.copy(t.wireColor);
+    } else {
+      s.lightColor.lerp(t.lightColor, dt * 2.0);
+      s.bgColor.lerp(t.bgColor, dt * 2.0);
+      s.wireColor.lerp(t.wireColor, dt * 2.0);
+    }
+
+    if (this.ctx.camera) {
+      if (Math.abs(this.ctx.camera.fov - s.cameraFov) > 0.1) {
+        this.ctx.camera.fov = s.cameraFov;
+        this.ctx.camera.updateProjectionMatrix();
+      }
+
+      if (s.cameraShake > 0.001) {
+        const sx = this.isVRT
+          ? 0
+          : (this.rng.random() - 0.5) * s.cameraShake * 0.1;
+        const sy = this.isVRT
+          ? 0
+          : (this.rng.random() - 0.5) * s.cameraShake * 0.1;
+        this.ctx.camera.position.set(
+          this.baseCameraPos.x + sx,
+          this.baseCameraPos.y + sy,
+          this.baseCameraPos.z,
+        );
+      } else {
+        this.ctx.camera.position.copy(this.baseCameraPos);
+      }
+    }
 
     const volumeCfg = ensureVolumeConfigSafe(this.ctx);
     this.applyTargetsToRuntime(this.ctx, this.ctx.climateTargets);
@@ -1104,18 +1234,27 @@ export class RitualOrchestrator {
       const heart =
         Math.sin(time * (1.6 + g.motion.energy * 1.8)) *
         (0.02 + s.turbulence * 0.06);
-
       const scalePulse = 1 + this.hatchPulse * 0.18 + heart * 0.18;
+
       this.ctx.orbGroup.scale.setScalar(s.orbScale * scalePulse);
 
-      const jitter =
-        (this.rng.random() - 0.5) *
-        (0.01 + s.turbulence * 0.02 + this.hatchPulse * 0.04);
+      const jitter = this.isVRT
+        ? 0
+        : (this.rng.random() - 0.5) *
+          (0.01 + s.turbulence * 0.02 + this.hatchPulse * 0.04);
+
       this.ctx.orbGroup.position.y =
         this.baseYOffset + s.orbYOffset + breath + jitter;
       this.ctx.orbGroup.position.z = s.orbZOffset;
 
-      this.ctx.orbGroup.rotation.y += (s.spinSpeed + s.turbulence * 0.15) * dt;
+      if (this.isVRT) {
+        this.ctx.orbGroup.rotation.y =
+          (s.spinSpeed + s.turbulence * 0.15) * time;
+      } else {
+        this.ctx.orbGroup.rotation.y +=
+          (s.spinSpeed + s.turbulence * 0.15) * dt;
+      }
+
       this.ctx.orbGroup.rotation.x =
         Math.sin(time * 0.45) * (s.wobble + s.turbulence * 0.35);
     }
@@ -1130,6 +1269,22 @@ export class RitualOrchestrator {
     const wireOpacity = s.wireOpacity;
     this.ctx._wireVisibilityMul = this._climateWireOpacityMul ?? 1.0;
 
+    // THÈME E : L'opacité solide est pilotée par la nature Élémentaire de l'Orbe
+    // [FIX] Utilisation de setValues() pour respecter le linter applyMaterials
+    const solidOpacity = g?.geometry?.colors?.solidOpacity ?? 1.0;
+    if (this.ctx.orbGroup) {
+      this.ctx.orbGroup.children.forEach((child) => {
+        if (child.material && child.name === 'orbMesh') {
+          const finalOpacity =
+            solidOpacity * (this._climateWireOpacityMul ?? 1.0);
+          child.material.setValues({
+            opacity: finalOpacity,
+            transparent: finalOpacity < 1.0,
+          });
+        }
+      });
+    }
+
     orbGeometry.updateWireframeStyle(
       this.ctx,
       s.wireColor,
@@ -1137,11 +1292,9 @@ export class RitualOrchestrator {
       time,
       this.ctx.ritualGenome?.geometry?.turbulence ?? 0.2,
     );
-
     orbPoly.updatePolyDeformation?.(this.ctx, time);
 
     const drift = g?.lighting?.drift ?? 0.2;
-
     const p = this.progress || 0;
     const finalPhase = smoothstep01(0.88, 1.0, p);
     const orbScale = this.ctx.orbGroup?.scale?.x ?? s.orbScale ?? 1.0;
@@ -1176,14 +1329,15 @@ export class RitualOrchestrator {
         this._renderMapOpts,
         prevParams,
       );
-
       this.ctx.renderParams = rp;
 
       const materialsRuntimeFlags = this.ctx?.runtimeFlags?.materials ?? null;
       applyMaterials(this.ctx, rp, dtMs, materialsRuntimeFlags);
 
       if (this.ctx?.runtimeFlags?.emergencyMode) {
-        if (this.foregroundMesh) this.foregroundMesh.visible = false;
+        if (this.foregroundMesh) {
+          this.foregroundMesh.visible = false;
+        }
       } else {
         if (this.foregroundMesh) {
           this.foregroundMesh.visible = rp.opacity.foregroundOpacity > 0.01;
@@ -1215,7 +1369,6 @@ export class RitualOrchestrator {
         }
       }
 
-      // FIX AST: Assignation unique (Single Writer)
       if (finalExposure !== null) {
         this.ctx.renderer.toneMappingExposure = finalExposure;
       }
@@ -1282,18 +1435,36 @@ export class RitualOrchestrator {
         this.ritualDNA.noiseScale;
       orbParticles.animateParticles(this.ctx, time, turb);
     }
+
     orbParticles.updateParticleLinks?.(this.ctx);
     orbParticles.updateParticleTrails?.(this.ctx);
+
+    if (this.isVRT && !this._vrtWarmedUp) {
+      this._vrtWarmedUp = true;
+      for (let i = 0; i < 150; i++) {
+        orbFluidParticles.updateFluidParticles?.(this.ctx, 0.016);
+      }
+    }
 
     orbFluidParticles.updateFluidParticles?.(this.ctx, dt);
 
     if (this.foregroundMesh) {
       this.foregroundMesh.rotation.z = time * 0.02;
+      if (this.foregroundMesh.material.userData?.shader) {
+        this.foregroundMesh.material.userData.shader.uniforms.uTime.value =
+          time;
+        this.foregroundMesh.material.userData.shader.uniforms.uChaos.value =
+          s.veilChaos;
+        if (this.foregroundMesh.material.userData.shader.uniforms.uColor) {
+          this.foregroundMesh.material.userData.shader.uniforms.uColor.value.copy(
+            s.lightColor,
+          );
+        }
+      }
     }
 
     orbGround?.updateGroundDeformation?.(this.ctx, time);
 
-    // INJECTION DU PONT D'AUDIT
     if (
       typeof window !== 'undefined' &&
       typeof OrbAuditBridge !== 'undefined'
