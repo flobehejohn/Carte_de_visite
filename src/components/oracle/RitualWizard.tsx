@@ -386,8 +386,9 @@ export default function RitualWizard() {
   );
 
   return (
-    <div className="orbital-container relative isolate min-h-screen bg-black overflow-hidden">
-      <div className="zone-oracle-bg absolute inset-0 z-0 pointer-events-none">
+    <div className="relative w-full h-screen min-h-screen bg-black overflow-hidden isolate">
+      {/* SCÈNE 3D (Arrière-plan total) */}
+      <div className="absolute inset-0 z-0 pointer-events-none">
         <Oracle3DSceneMemo
           formData={sceneData}
           stage={stage}
@@ -396,294 +397,301 @@ export default function RitualWizard() {
         />
       </div>
 
-      <div className="orbital-top relative z-10">
-        <div className="orbital-content contrast-guard">
-          <AnimatePresence mode="wait">
-            {lastResult ? (
-              <motion.div
-                key="result-top"
-                initial={{ opacity: 0, y: -20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex flex-col items-center gap-4"
-              >
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="px-6 py-2 border border-amber-500/50 text-amber-500 hover:bg-amber-500 hover:text-black uppercase tracking-widest text-xs transition-all pointer-events-auto"
+      {/* SURCOUCHE UI (Premier plan interactif) */}
+      <div className="absolute inset-0 z-10 pointer-events-none flex flex-col justify-between px-4 pt-8 pb-12 md:pt-12 md:px-8">
+        {/* EN-TÊTE */}
+        <div className="w-full flex justify-center flex-shrink-0">
+          <div className="pointer-events-auto w-full max-w-4xl flex flex-col items-center">
+            <AnimatePresence mode="wait">
+              {lastResult ? (
+                <motion.div
+                  key="result-top"
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex flex-col items-center gap-4"
                 >
-                  Fermer le Cercle
-                </button>
+                  <button
+                    type="button"
+                    onClick={handleReset}
+                    className="px-6 py-2 border border-amber-500/50 text-amber-500 hover:bg-amber-500 hover:text-black uppercase tracking-widest text-xs transition-all"
+                  >
+                    Fermer le Cercle
+                  </button>
 
-                <div className="max-w-4xl text-center">
-                  <p className="text-[11px] font-mono uppercase tracking-[0.35em] text-amber-400/70 mb-3">
-                    Parole oracle
-                  </p>
-                  <div className="text-2xl md:text-3xl font-oracle italic text-white drop-shadow-lg px-4">
-                    “<Typewriter text={lastResult.quote} />”
-                  </div>
-                </div>
-              </motion.div>
-            ) : error ? (
-              <motion.div
-                key={`error-top-${stage}`}
-                initial={{ opacity: 0, y: -20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="glass-clear inline-block max-w-xl"
-              >
-                <p className="text-[11px] font-mono uppercase tracking-[0.35em] text-red-200/70 mb-3">
-                  Oracle indisponible
-                </p>
-                <p className="text-lg md:text-xl text-red-100 italic font-oracle leading-relaxed">
-                  {error}
-                </p>
-              </motion.div>
-            ) : (
-              <motion.div
-                key={`top-${stage}-${viewState}`}
-                initial={{ opacity: 0, y: -20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="w-full"
-              >
-                {viewState === 'INPUT' && currentStep && (
-                  <div className="max-w-3xl mx-auto text-center">
-                    <p className="text-amber-500/60 text-xs font-mono uppercase tracking-[0.3em] mb-2">
-                      {currentStep.label}
+                  <div className="max-w-4xl text-center">
+                    <p className="text-[11px] font-mono uppercase tracking-[0.35em] text-amber-400/70 mb-3">
+                      Parole oracle
                     </p>
-                    <h1 className="text-3xl md:text-4xl font-oracle text-white leading-tight drop-shadow-md">
-                      {currentStep.q}
-                    </h1>
+                    <div className="text-2xl md:text-3xl font-oracle italic text-white drop-shadow-lg px-4">
+                      “<Typewriter text={lastResult.quote} />”
+                    </div>
                   </div>
-                )}
-
-                {viewState === 'GUIDANCE' && currentStep && (
-                  <div className="glass-clear inline-block max-w-3xl text-left">
-                    <p className="text-[11px] font-mono uppercase tracking-[0.35em] text-amber-300/70 mb-3">
-                      Écho du seuil · {currentStep.label}
-                    </p>
-
-                    <h2 className="text-xl md:text-2xl font-oracle text-white leading-snug mb-4">
-                      {currentStep.q}
-                    </h2>
-
-                    {currentValuePreview && (
-                      <p className="text-sm md:text-base text-white/65 italic mb-4 font-oracle">
-                        {currentValuePreview}
-                      </p>
-                    )}
-
-                    {guidanceLoading ? (
-                      <p className="text-amber-300 animate-pulse italic font-oracle">
-                        Le seuil écoute...
-                      </p>
-                    ) : (
-                      <div className="max-w-2xl">
-                        <p className="text-lg md:text-xl text-amber-100 font-oracle leading-relaxed">
-                          {guidanceEcho ? (
-                            <Typewriter
-                              text={guidanceEcho}
-                              speed={14}
-                              onComplete={() => {
-                                setGuidanceEchoDone(true);
-                                setCanProceed(true);
-                              }}
-                            />
-                          ) : (
-                            'Le seuil reste ouvert.'
-                          )}
-                        </p>
-
-                        {guidanceSubcomment && (
-                          <motion.p
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{
-                              opacity:
-                                guidanceEchoDone || !guidanceEcho ? 1 : 0.45,
-                              y: 0,
-                            }}
-                            className="mt-4 text-sm md:text-base text-white/72 leading-relaxed font-hud border-l border-amber-400/25 pl-4"
-                          >
-                            {guidanceSubcomment}
-                          </motion.p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      </div>
-
-      <div className="orbital-bottom relative z-10">
-        <div className="orbital-content contrast-guard">
-          <AnimatePresence mode="wait">
-            {lastResult && (
-              <motion.div
-                key="result-bottom"
-                initial={{ opacity: 0, y: 50 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="glass-clear w-full max-h-[45vh] overflow-y-auto custom-scrollbar text-left shadow-2xl"
-                ref={textRef}
-              >
-                <div className="prose prose-invert max-w-none prose-p:text-slate-200 prose-p:font-hud prose-p:leading-relaxed">
-                  <p>
-                    <Typewriter text={oraclePrimaryProse} speed={5} />
+                </motion.div>
+              ) : error ? (
+                <motion.div
+                  key={`error-top-${stage}`}
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="glass-clear inline-block max-w-xl p-6 rounded"
+                >
+                  <p className="text-[11px] font-mono uppercase tracking-[0.35em] text-red-200/70 mb-3">
+                    Oracle indisponible
                   </p>
-                </div>
-
-                {Array.isArray(lastResult.keywords) &&
-                  lastResult.keywords.length > 0 && (
-                    <div className="mt-5 flex flex-wrap gap-2">
-                      {lastResult.keywords.map((keyword) => (
-                        <span
-                          key={keyword}
-                          className="px-2.5 py-1 rounded-full border border-amber-500/30 text-[11px] uppercase tracking-[0.18em] text-amber-200/90 bg-amber-500/10"
-                        >
-                          {keyword}
-                        </span>
-                      ))}
+                  <p className="text-lg md:text-xl text-red-100 italic font-oracle leading-relaxed">
+                    {error}
+                  </p>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key={`top-${stage}-${viewState}`}
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="w-full"
+                >
+                  {viewState === 'INPUT' && currentStep && (
+                    <div className="max-w-3xl mx-auto text-center mt-4">
+                      <p className="text-amber-500/60 text-xs font-mono uppercase tracking-[0.3em] mb-2">
+                        {currentStep.label}
+                      </p>
+                      <h1 className="text-3xl md:text-4xl font-oracle text-white leading-tight drop-shadow-md">
+                        {currentStep.q}
+                      </h1>
                     </div>
                   )}
 
-                <div className="mt-5 pt-4 border-t border-white/10 text-[11px] uppercase tracking-[0.22em] text-white/45 font-mono">
-                  <div>
-                    Ancrage : {lastResult.sentence.part_title} ·{' '}
-                    {lastResult.sentence.section_title}
-                  </div>
-                  <div className="mt-1">Citation #{lastResult.sentence.id}</div>
-                </div>
-              </motion.div>
-            )}
+                  {viewState === 'GUIDANCE' && currentStep && (
+                    <div className="glass-clear inline-block max-w-3xl text-left p-6 rounded">
+                      <p className="text-[11px] font-mono uppercase tracking-[0.35em] text-amber-300/70 mb-3">
+                        Écho du seuil · {currentStep.label}
+                      </p>
 
-            {!lastResult && !loading && error && (
-              <motion.div
-                key={`error-bottom-${stage}`}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="w-full flex flex-col items-center gap-4"
-              >
-                <button
-                  type="button"
-                  onClick={handleFinalDraw}
-                  className="mt-2 px-8 py-2 bg-white/10 hover:bg-white hover:text-black border border-white/20 text-white transition-all uppercase text-xs tracking-widest rounded shadow-lg pointer-events-auto"
-                >
-                  Réessayer l’invocation
-                </button>
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="px-8 py-2 border border-amber-500/50 text-amber-200 hover:bg-amber-500 hover:text-black uppercase tracking-widest text-xs transition-all pointer-events-auto"
-                >
-                  Recommencer le rituel
-                </button>
-              </motion.div>
-            )}
+                      <h2 className="text-xl md:text-2xl font-oracle text-white leading-snug mb-4">
+                        {currentStep.q}
+                      </h2>
 
-            {!lastResult && !loading && !error && (
-              <motion.div
-                key={`bottom-${stage}-${viewState}`}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 20 }}
-                className="w-full flex flex-col items-center gap-4"
-              >
-                {viewState === 'INPUT' && currentStep && (
-                  <>
-                    {currentStep.type === 'cards' &&
-                      renderCards(
-                        currentStep.id === 'mood'
-                          ? MOODS
-                          : currentStep.id === 'weight'
-                            ? WEIGHTS
-                            : currentStep.id === 'desire'
-                              ? DESIRES
-                              : currentStep.id === 'sacrifice'
-                                ? SACRIFICES
-                                : currentStep.id === 'social'
-                                  ? SOCIALS
-                                  : ETERNITIES,
-                        currentStep.id,
+                      {currentValuePreview && (
+                        <p className="text-sm md:text-base text-white/65 italic mb-4 font-oracle">
+                          {currentValuePreview}
+                        </p>
                       )}
 
-                    {currentStep.type === 'formats' && (
-                      <div className="grid grid-cols-2 gap-2 w-full">
-                        {FORMATS.map((f) => (
-                          <button
-                            key={f.id}
-                            type="button"
-                            onClick={() => updateField('format', f.id)}
-                            className={`p-3 border text-left transition-all rounded backdrop-blur-md hover:bg-white/10 hover:text-white hover:border-white/40
-                              ${
-                                formData.format === f.id
-                                  ? 'bg-amber-500/20 border-amber-400 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.5)]'
-                                  : 'bg-black/60 border-white/20 text-white/70'
-                              }`}
+                      {guidanceLoading ? (
+                        <p className="text-amber-300 animate-pulse italic font-oracle">
+                          Le seuil écoute...
+                        </p>
+                      ) : (
+                        <div className="max-w-2xl">
+                          <p className="text-lg md:text-xl text-amber-100 font-oracle leading-relaxed">
+                            {guidanceEcho ? (
+                              <Typewriter
+                                text={guidanceEcho}
+                                speed={14}
+                                onComplete={() => {
+                                  setGuidanceEchoDone(true);
+                                  setCanProceed(true);
+                                }}
+                              />
+                            ) : (
+                              'Le seuil reste ouvert.'
+                            )}
+                          </p>
+
+                          {guidanceSubcomment && (
+                            <motion.p
+                              initial={{ opacity: 0, y: 8 }}
+                              animate={{
+                                opacity:
+                                  guidanceEchoDone || !guidanceEcho ? 1 : 0.45,
+                                y: 0,
+                              }}
+                              className="mt-4 text-sm md:text-base text-white/72 leading-relaxed font-hud border-l border-amber-400/25 pl-4"
+                            >
+                              {guidanceSubcomment}
+                            </motion.p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
+
+        {/* PIED DE PAGE */}
+        <div className="w-full flex justify-center flex-shrink-0 mt-auto">
+          <div className="pointer-events-auto w-full max-w-4xl flex flex-col items-center">
+            <AnimatePresence mode="wait">
+              {lastResult && (
+                <motion.div
+                  key="result-bottom"
+                  initial={{ opacity: 0, y: 50 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="glass-clear w-full max-h-[45vh] overflow-y-auto custom-scrollbar text-left shadow-2xl p-6 rounded"
+                  ref={textRef}
+                >
+                  <div className="prose prose-invert max-w-none prose-p:text-slate-200 prose-p:font-hud prose-p:leading-relaxed">
+                    <p>
+                      <Typewriter text={oraclePrimaryProse} speed={5} />
+                    </p>
+                  </div>
+
+                  {Array.isArray(lastResult.keywords) &&
+                    lastResult.keywords.length > 0 && (
+                      <div className="mt-5 flex flex-wrap gap-2">
+                        {lastResult.keywords.map((keyword) => (
+                          <span
+                            key={keyword}
+                            className="px-2.5 py-1 rounded-full border border-amber-500/30 text-[11px] uppercase tracking-[0.18em] text-amber-200/90 bg-amber-500/10"
                           >
-                            <div className="font-oracle text-white">
-                              {f.label}
-                            </div>
-                            <div className="text-[10px] text-gray-400 uppercase tracking-tighter">
-                              {f.desc}
-                            </div>
-                          </button>
+                            {keyword}
+                          </span>
                         ))}
                       </div>
                     )}
 
-                    {!currentStep.type && (
-                      <input
-                        autoFocus
-                        type="text"
-                        placeholder={currentStep.placeholder}
-                        value={formData[currentStep.id] || ''}
-                        onChange={(e) =>
-                          updateField(currentStep.id, e.target.value)
-                        }
-                        onKeyDown={(e) =>
-                          e.key === 'Enter' && canValidate && handleValidate()
-                        }
-                        className="oracle-input pointer-events-auto"
-                      />
-                    )}
+                  <div className="mt-5 pt-4 border-t border-white/10 text-[11px] uppercase tracking-[0.22em] text-white/45 font-mono">
+                    <div>
+                      Ancrage : {lastResult.sentence.part_title} ·{' '}
+                      {lastResult.sentence.section_title}
+                    </div>
+                    <div className="mt-1">
+                      Citation #{lastResult.sentence.id}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
 
-                    {canValidate && (
-                      <motion.button
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        type="button"
-                        onClick={handleValidate}
-                        className="mt-2 px-8 py-2 bg-white/10 hover:bg-white hover:text-black border border-white/20 text-white transition-all uppercase text-xs tracking-widest rounded shadow-lg pointer-events-auto"
-                      >
-                        Confirmer
-                      </motion.button>
-                    )}
-                  </>
-                )}
-
-                {viewState === 'GUIDANCE' && canProceed && (
-                  <motion.button
-                    initial={{ scale: 0.9, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
+              {!lastResult && !loading && error && (
+                <motion.div
+                  key={`error-bottom-${stage}`}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="w-full flex flex-col items-center gap-4"
+                >
+                  <button
                     type="button"
-                    onClick={handleNextStep}
-                    className="px-10 py-3 bg-amber-600 hover:bg-amber-500 text-white font-oracle font-bold text-lg shadow-lg shadow-amber-900/50 rounded-sm pointer-events-auto"
+                    onClick={handleFinalDraw}
+                    className="mt-2 px-8 py-2 bg-white/10 hover:bg-white hover:text-black border border-white/20 text-white transition-all uppercase text-xs tracking-widest rounded shadow-lg"
                   >
-                    {stage < 10
-                      ? 'Continuer le voyage'
-                      : 'Invoquer Zarathoustra'}
-                  </motion.button>
-                )}
-              </motion.div>
-            )}
+                    Réessayer l’invocation
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleReset}
+                    className="px-8 py-2 border border-amber-500/50 text-amber-200 hover:bg-amber-500 hover:text-black uppercase tracking-widest text-xs transition-all"
+                  >
+                    Recommencer le rituel
+                  </button>
+                </motion.div>
+              )}
 
-            {loading && (
-              <div className="text-amber-500 text-xs tracking-[0.4em] animate-pulse mb-8 z-50">
-                ALIGNEMENT DES ASTRES...
-              </div>
-            )}
-          </AnimatePresence>
+              {!lastResult && !loading && !error && (
+                <motion.div
+                  key={`bottom-${stage}-${viewState}`}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 20 }}
+                  className="w-full flex flex-col items-center gap-4"
+                >
+                  {viewState === 'INPUT' && currentStep && (
+                    <>
+                      {currentStep.type === 'cards' &&
+                        renderCards(
+                          currentStep.id === 'mood'
+                            ? MOODS
+                            : currentStep.id === 'weight'
+                              ? WEIGHTS
+                              : currentStep.id === 'desire'
+                                ? DESIRES
+                                : currentStep.id === 'sacrifice'
+                                  ? SACRIFICES
+                                  : currentStep.id === 'social'
+                                    ? SOCIALS
+                                    : ETERNITIES,
+                          currentStep.id,
+                        )}
+
+                      {currentStep.type === 'formats' && (
+                        <div className="grid grid-cols-2 gap-2 w-full">
+                          {FORMATS.map((f) => (
+                            <button
+                              key={f.id}
+                              type="button"
+                              onClick={() => updateField('format', f.id)}
+                              className={`p-3 border text-left transition-all rounded backdrop-blur-md hover:bg-white/10 hover:text-white hover:border-white/40
+                                ${
+                                  formData.format === f.id
+                                    ? 'bg-amber-500/20 border-amber-400 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.5)]'
+                                    : 'bg-black/60 border-white/20 text-white/70'
+                                }`}
+                            >
+                              <div className="font-oracle text-white">
+                                {f.label}
+                              </div>
+                              <div className="text-[10px] text-gray-400 uppercase tracking-tighter">
+                                {f.desc}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {!currentStep.type && (
+                        <input
+                          autoFocus
+                          type="text"
+                          placeholder={currentStep.placeholder}
+                          value={formData[currentStep.id] || ''}
+                          onChange={(e) =>
+                            updateField(currentStep.id, e.target.value)
+                          }
+                          onKeyDown={(e) =>
+                            e.key === 'Enter' && canValidate && handleValidate()
+                          }
+                          className="oracle-input w-full max-w-md p-4 text-center bg-black/50 border border-white/30 text-white rounded focus:outline-none focus:border-amber-500"
+                        />
+                      )}
+
+                      {canValidate && (
+                        <motion.button
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          type="button"
+                          onClick={handleValidate}
+                          className="mt-4 px-8 py-2 bg-white/10 hover:bg-white hover:text-black border border-white/20 text-white transition-all uppercase text-xs tracking-widest rounded shadow-lg"
+                        >
+                          Confirmer
+                        </motion.button>
+                      )}
+                    </>
+                  )}
+
+                  {viewState === 'GUIDANCE' && canProceed && (
+                    <motion.button
+                      initial={{ scale: 0.9, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      type="button"
+                      onClick={handleNextStep}
+                      className="px-10 py-3 mt-4 bg-amber-600 hover:bg-amber-500 text-white font-oracle font-bold text-lg shadow-lg shadow-amber-900/50 rounded-sm"
+                    >
+                      {stage < 10
+                        ? 'Continuer le voyage'
+                        : 'Invoquer Zarathoustra'}
+                    </motion.button>
+                  )}
+                </motion.div>
+              )}
+
+              {loading && (
+                <div className="text-amber-500 text-xs tracking-[0.4em] animate-pulse mb-8 z-50">
+                  ALIGNEMENT DES ASTRES...
+                </div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
     </div>

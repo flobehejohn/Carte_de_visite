@@ -113,6 +113,16 @@ type SceneStats = {
   hasRenderableContent: boolean;
 };
 
+type EmergencyVisualState = {
+  active: boolean;
+  fog: THREE.FogExp2 | null;
+  toneMappingExposure: number | null;
+  cameraPosition: THREE.Vector3 | null;
+  volumeBackgroundVisible: boolean | null;
+  volumeGlowVisible: boolean | null;
+  foregroundVisible: boolean | null;
+};
+
 const MATERIAL_TEXTURE_KEYS = [
   'map',
   'alphaMap',
@@ -429,15 +439,6 @@ function snapshotCandidateSignature(candidates: FeedbackCandidate[]): string {
   );
 }
 
-function getViewportSize(container: HTMLDivElement | null) {
-  const width = Math.max(1, container?.clientWidth || window.innerWidth || 1);
-  const height = Math.max(
-    1,
-    container?.clientHeight || window.innerHeight || 1,
-  );
-  return { width, height };
-}
-
 function isDrawableObject(
   obj: THREE.Object3D | null | undefined,
 ): obj is DrawableObject {
@@ -446,16 +447,18 @@ function isDrawableObject(
 
   return Boolean(
     drawable.isMesh ||
-      drawable.isPoints ||
-      drawable.isLine ||
-      drawable.isLineSegments ||
-      drawable.isLineLoop ||
-      drawable.isSprite ||
-      drawable.isInstancedMesh,
+    drawable.isPoints ||
+    drawable.isLine ||
+    drawable.isLineSegments ||
+    drawable.isLineLoop ||
+    drawable.isSprite ||
+    drawable.isInstancedMesh,
   );
 }
 
-function countVisibleDrawables(root: THREE.Object3D | null | undefined): number {
+function countVisibleDrawables(
+  root: THREE.Object3D | null | undefined,
+): number {
   if (!root) return 0;
 
   let count = 0;
@@ -468,7 +471,9 @@ function countVisibleDrawables(root: THREE.Object3D | null | undefined): number 
   return count;
 }
 
-function readRendererTelemetry(renderer: THREE.WebGLRenderer): RenderTelemetryInfo {
+function readRendererTelemetry(
+  renderer: THREE.WebGLRenderer,
+): RenderTelemetryInfo {
   const renderInfo = renderer.info.render as Record<string, unknown>;
   return {
     calls: Number(renderInfo.calls || 0),
@@ -636,13 +641,13 @@ function createVisibleSafeMaterial(
   sourceMaterial: THREE.Material,
 ): THREE.Material {
   const fallbackColor = materialColor(sourceMaterial);
-  const brightMeshColor = 0xff4dff;
-  const brightLineColor = 0x7df9ff;
+  const brightMeshColor = 0xff00ff;
+  const brightLineColor = 0x00ffff;
 
   if (obj.isPoints) {
     return new THREE.PointsMaterial({
       color: 0xffffff,
-      size: 0.24,
+      size: 0.4,
       sizeAttenuation: true,
       transparent: false,
       opacity: 1,
@@ -664,11 +669,8 @@ function createVisibleSafeMaterial(
   }
 
   return new THREE.MeshBasicMaterial({
-    color:
-      typeof fallbackColor === 'number' && fallbackColor !== 0x000000
-        ? fallbackColor
-        : brightMeshColor,
-    wireframe: false,
+    color: brightMeshColor,
+    wireframe: true,
     transparent: false,
     opacity: 1,
     depthTest: true,
@@ -715,21 +717,37 @@ function parseCssZIndex(value: string | null | undefined): number | null {
 }
 
 function mountDevVisibleProbe(scene: THREE.Scene) {
-  const probe = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(0.8, 0),
-    new THREE.MeshBasicMaterial({ color: 0xff00ff }),
-  );
+  const geometry = new THREE.IcosahedronGeometry(1.45, 1);
+  const material = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    fog: false,
+    transparent: false,
+    opacity: 1,
+    depthTest: false,
+    depthWrite: false,
+  });
 
+  const probe = new THREE.Mesh(geometry, material);
   probe.name = '__DEV_VISIBLE_PROBE__';
-  probe.position.set(0, 0, 0);
+  probe.position.set(0, 0, 2.5);
+  probe.scale.setScalar(2.2);
+  probe.renderOrder = 9999;
+  probe.frustumCulled = false;
   probe.layers.set(ORB_BASE_RENDER_LAYER);
   scene.add(probe);
 
   return () => {
     scene.remove(probe);
-    probe.geometry.dispose();
-    (probe.material as THREE.Material).dispose();
+    geometry.dispose();
+    material.dispose();
   };
+}
+
+function cloneFogExp2(
+  fog: THREE.FogExp2 | null | undefined,
+): THREE.FogExp2 | null {
+  if (!fog || !fog.isFogExp2) return null;
+  return new THREE.FogExp2(fog.color.clone(), fog.density);
 }
 
 const AUDIT_RUNTIME_ENABLED =
@@ -757,6 +775,15 @@ export function Oracle3DScene({
     WeakMap<object, THREE.Material | THREE.Material[]>
   >(new WeakMap());
   const emergencyProbeDisposeRef = useRef<(() => void) | null>(null);
+  const emergencyVisualStateRef = useRef<EmergencyVisualState>({
+    active: false,
+    fog: null,
+    toneMappingExposure: null,
+    cameraPosition: null,
+    volumeBackgroundVisible: null,
+    volumeGlowVisible: null,
+    foregroundVisible: null,
+  });
   const scanFeedbackCandidatesRef = useRef<
     (reason?: string) => FeedbackCandidate[]
   >(() => []);
@@ -825,43 +852,43 @@ export function Oracle3DScene({
     let disposeProbe: (() => void) | null = null;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000000);
-    scene.fog = new THREE.FogExp2(0x000000, 0.02);
+    scene.background = null;
+    scene.fog = new THREE.FogExp2(0x111624, 0.003);
 
-    const { width: initialWidth, height: initialHeight } = getViewportSize(
-      containerRef.current,
-    );
-
-    const camera = new THREE.PerspectiveCamera(
-      45,
-      initialWidth / initialHeight,
-      0.1,
-      100,
-    );
-    camera.position.set(0, 0, 12);
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+    camera.position.set(0, 0, 8);
     camera.layers.set(ORB_BASE_RENDER_LAYER);
 
     const renderer = new THREE.WebGLRenderer({
-      antialias: false,
+      antialias: true,
       alpha: true,
+      premultipliedAlpha: false,
       powerPreference: 'high-performance',
     });
 
-    renderer.setSize(initialWidth, initialHeight);
+    renderer.setClearColor(0x111624, 1.0);
+    renderer.autoClear = false;
+    renderer.localClippingEnabled = false;
+
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.toneMapping = THREE.ReinhardToneMapping;
-    renderer.toneMappingExposure = 1.0;
+    renderer.toneMappingExposure = 1.6;
     const baseExposure = renderer.toneMappingExposure;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.localClippingEnabled = true;
-    renderer.autoClear = true;
 
     if ('outputColorSpace' in renderer) {
       (renderer as any).outputColorSpace = THREE.SRGBColorSpace;
     }
 
     containerRef.current.appendChild(renderer.domElement);
+    Object.assign(renderer.domElement.style, {
+      display: 'block',
+      width: '100%',
+      height: '100%',
+      position: 'absolute',
+      inset: '0',
+    });
 
     let contextLost = false;
     const handleContextLost = (event: Event) => {
@@ -879,13 +906,21 @@ export function Oracle3DScene({
 
     const renderScene = new RenderPass(scene, camera);
     const bloomPass = new UnrealBloomPass(
-      new THREE.Vector2(initialWidth, initialHeight),
+      new THREE.Vector2(256, 256),
       0.9,
       0.4,
       0.85,
     );
 
-    const composer = new EffectComposer(renderer);
+    const renderTarget = new THREE.WebGLRenderTarget(256, 256, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      format: THREE.RGBAFormat,
+      type: THREE.HalfFloatType,
+    });
+
+    const composer = new EffectComposer(renderer, renderTarget);
+    composer.renderToScreen = true;
     composer.addPass(renderScene);
     composer.addPass(bloomPass);
 
@@ -919,15 +954,18 @@ export function Oracle3DScene({
       clipPlanes: [new THREE.Plane(new THREE.Vector3(0, -1, 0), 0.8)],
       ensureOrbMaterial: () =>
         new THREE.MeshStandardMaterial({
-          color: 0x111111,
+          color: 0x8a9ba8,
           roughness: 0.4,
-          metalness: 0.8,
+          metalness: 0.6,
           side: THREE.DoubleSide,
         }),
       baseExposure,
       contextLostFlag: () => contextLost,
       renderModeRef,
       feedbackCandidatesRef,
+      runtimeFlags: {
+        emergencyMode: false,
+      },
     };
 
     ensureOverlayFluidIsolationConfig(ctx);
@@ -1001,6 +1039,107 @@ export function Oracle3DScene({
 
     applyVisibleSafeModeRef.current = applyVisibleSafeMode;
 
+    const rememberEmergencyVisualState = (localCtx: any) => {
+      if (!localCtx?.scene || emergencyVisualStateRef.current.active) return;
+
+      const volumeState = localCtx.volumeState || {};
+      emergencyVisualStateRef.current = {
+        active: true,
+        fog: cloneFogExp2(localCtx.scene.fog as THREE.FogExp2 | null),
+        toneMappingExposure:
+          typeof localCtx.renderer?.toneMappingExposure === 'number'
+            ? localCtx.renderer.toneMappingExposure
+            : null,
+        cameraPosition: localCtx.camera?.position?.clone?.() ?? null,
+        volumeBackgroundVisible:
+          typeof volumeState.backgroundMesh?.visible === 'boolean'
+            ? volumeState.backgroundMesh.visible
+            : null,
+        volumeGlowVisible:
+          typeof volumeState.glowMesh?.visible === 'boolean'
+            ? volumeState.glowMesh.visible
+            : null,
+        foregroundVisible:
+          typeof orchestratorRef.current?.foregroundMesh?.visible === 'boolean'
+            ? orchestratorRef.current.foregroundMesh.visible
+            : null,
+      };
+    };
+
+    const applyEmergencyVisualMode = (localCtx: any) => {
+      if (!localCtx?.scene) return;
+
+      rememberEmergencyVisualState(localCtx);
+
+      localCtx.runtimeFlags.emergencyMode = true;
+
+      if (localCtx.renderer) {
+        localCtx.renderer.setClearColor(0x334455, 1.0);
+        localCtx.renderer.toneMappingExposure = 2.2;
+      }
+      localCtx.scene.fog = null;
+
+      const volumeState = localCtx.volumeState || {};
+      if (volumeState.backgroundMesh)
+        volumeState.backgroundMesh.visible = false;
+      if (volumeState.glowMesh) volumeState.glowMesh.visible = false;
+
+      if (orchestratorRef.current?.foregroundMesh) {
+        orchestratorRef.current.foregroundMesh.visible = false;
+      }
+    };
+
+    const restoreEmergencyVisualMode = (localCtx: any) => {
+      const previous = emergencyVisualStateRef.current;
+      if (!localCtx?.scene || !previous.active) return;
+
+      localCtx.runtimeFlags.emergencyMode = false;
+
+      if (localCtx.renderer) {
+        localCtx.renderer.setClearColor(0x111624, 1.0);
+        if (typeof previous.toneMappingExposure === 'number') {
+          localCtx.renderer.toneMappingExposure = previous.toneMappingExposure;
+        }
+      }
+
+      localCtx.scene.fog = previous.fog ? cloneFogExp2(previous.fog) : null;
+
+      const volumeState = localCtx.volumeState || {};
+      if (
+        volumeState.backgroundMesh &&
+        previous.volumeBackgroundVisible !== null
+      ) {
+        volumeState.backgroundMesh.visible = previous.volumeBackgroundVisible;
+      }
+      if (volumeState.glowMesh && previous.volumeGlowVisible !== null) {
+        volumeState.glowMesh.visible = previous.volumeGlowVisible;
+      }
+
+      if (
+        orchestratorRef.current?.foregroundMesh &&
+        previous.foregroundVisible !== null
+      ) {
+        orchestratorRef.current.foregroundMesh.visible =
+          previous.foregroundVisible;
+      }
+
+      if (localCtx.camera?.position && previous.cameraPosition) {
+        localCtx.camera.position.copy(previous.cameraPosition);
+        localCtx.camera.lookAt?.(0, 0, 0);
+        localCtx.camera.updateProjectionMatrix?.();
+      }
+
+      emergencyVisualStateRef.current = {
+        active: false,
+        fog: null,
+        toneMappingExposure: null,
+        cameraPosition: null,
+        volumeBackgroundVisible: null,
+        volumeGlowVisible: null,
+        foregroundVisible: null,
+      };
+    };
+
     if (!initRitualRef.current) {
       orchestrator.initRitual('');
       initRitualRef.current = true;
@@ -1023,6 +1162,12 @@ export function Oracle3DScene({
       ensureOverlayFluidIsolationConfig(localCtx);
       resetFluidParticles(localCtx);
       setOverlayMessage(null);
+
+      if (emergencyVisualStateRef.current.active) {
+        applyEmergencyVisualMode(localCtx);
+      } else {
+        restoreEmergencyVisualMode(localCtx);
+      }
 
       localCtx.camera?.layers?.set?.(ORB_BASE_RENDER_LAYER);
 
@@ -1192,6 +1337,41 @@ export function Oracle3DScene({
 
           const localCtx = (orch as any).ctx || {};
           ensureFluidParticlesConfig(localCtx);
+
+          // PHASE 3 : ENRICHISSEMENT DE L'AUDIT SHELL
+          const orbShell = {
+            present: !!localCtx.orbMesh,
+            visible: !!localCtx.orbMesh?.visible,
+            frustumCulled: localCtx.orbMesh?.frustumCulled ?? null,
+            renderOrder: localCtx.orbMesh?.renderOrder ?? null,
+            layerMask: localCtx.orbMesh?.layers?.mask ?? null,
+            materialType: localCtx.orbMesh?.material?.type ?? null,
+            auditCategory:
+              localCtx.orbMesh?.userData?.renderAuditCategory ?? null,
+            wireframeCount: localCtx.wireFrames?.length ?? 0,
+            visibleWireframeCount:
+              localCtx.wireFrames?.filter((w: any) => w.visible).length ?? 0,
+          };
+
+          if (orbShell.present) {
+            if (orbShell.auditCategory !== 'orb-solid')
+              warnings.push('orb-shell-missing-audit-category');
+            if (orbShell.layerMask !== 1)
+              warnings.push('orb-shell-invalid-layer');
+            if (orbShell.frustumCulled !== false)
+              warnings.push('orb-shell-invalid-culling');
+          } else {
+            warnings.push('orb-shell-missing');
+          }
+
+          if (emergencyVisualStateRef.current.active) {
+            if (
+              orbShell.wireframeCount > 0 &&
+              orbShell.visibleWireframeCount === 0
+            ) {
+              warnings.push('emergency-mode-no-visible-wireframes');
+            }
+          }
 
           const lights = getLightsSnapshot ? getLightsSnapshot(localCtx) : [];
           const volumeConfig = localCtx.volumeConfig
@@ -1406,6 +1586,8 @@ export function Oracle3DScene({
           uiWindow.renderMode = renderModeRef.current;
           uiWindow.autoFallbackOnFeedback = autoFallbackOnFeedbackRef.current;
           uiWindow.visibleSafeMode = visibleSafeModeRef.current;
+          uiWindow.emergencyVisibleMode =
+            emergencyVisualStateRef.current.active;
           uiWindow.feedbackCandidates = feedbackCandidatesRef.current;
           uiWindow.layers = {
             composerBase: ORB_BASE_RENDER_LAYER,
@@ -1527,11 +1709,27 @@ export function Oracle3DScene({
             warnings.push('render-target-feedback-risk');
           }
 
+          if (emergencyVisualStateRef.current.active) {
+            if (scene.fog) warnings.push('emergency-mode-fog-restored');
+            if (localCtx.volumeState?.backgroundMesh?.visible) {
+              warnings.push('emergency-mode-bg-restored');
+            }
+            if (localCtx.volumeState?.glowMesh?.visible) {
+              warnings.push('emergency-mode-glow-restored');
+            }
+            if (orchestratorRef.current?.foregroundMesh?.visible) {
+              warnings.push('emergency-mode-foreground-restored');
+            }
+          }
+
           const sceneStats = collectSceneStats(scene, localCtx, rendererInfo);
           if (sceneStats.rendererCalls <= 0) {
             warnings.push('rendererCalls<=0');
           }
-          if (sceneStats.triangles + sceneStats.points + sceneStats.lines <= 0) {
+          if (
+            sceneStats.triangles + sceneStats.points + sceneStats.lines <=
+            0
+          ) {
             warnings.push('no rendered primitives yet');
           }
           if (
@@ -1598,7 +1796,8 @@ export function Oracle3DScene({
               canvasWidth: renderer.domElement?.width ?? null,
               canvasHeight: renderer.domElement?.height ?? null,
               canvasAttached: Boolean(
-                renderer.domElement && containerEl?.contains(renderer.domElement),
+                renderer.domElement &&
+                containerEl?.contains(renderer.domElement),
               ),
             };
           })();
@@ -1609,11 +1808,13 @@ export function Oracle3DScene({
             progress: (orch as any)?.progress ?? null,
             renderMode: renderModeRef.current,
             visibleSafeMode: visibleSafeModeRef.current,
+            emergencyVisibleMode: emergencyVisualStateRef.current.active,
             ritualDNA: (orch as any)?.ritualDNA
               ? serializeColors((orch as any).ritualDNA)
               : null,
             ritualGenome: genome,
             state,
+            orbShell,
             particlesConfig,
             fluidParticlesConfig,
             particlesRuntime,
@@ -1685,13 +1886,27 @@ export function Oracle3DScene({
           setRenderMode('direct');
           setFluidParticlesVisible(false);
           applyVisibleSafeModeRef.current(true);
+          applyEmergencyVisualMode(localCtx);
 
           if (localCtx?.scene && !emergencyProbeDisposeRef.current) {
-            emergencyProbeDisposeRef.current = mountDevVisibleProbe(localCtx.scene);
+            emergencyProbeDisposeRef.current = mountDevVisibleProbe(
+              localCtx.scene,
+            );
+          }
+
+          const probe = localCtx?.scene?.getObjectByName?.(
+            '__DEV_VISIBLE_PROBE__',
+          ) as THREE.Mesh | null;
+          if (probe) {
+            probe.position.set(0, 0, 2.25);
+            probe.scale.setScalar(2.4);
+            (probe.material as any)?.color?.set?.(0xffffff);
           }
 
           if (localCtx?.camera?.position) {
-            localCtx.camera.position.set(0, 0, 8);
+            localCtx.camera.position.set(0, 0, 6.6);
+            localCtx.camera.lookAt?.(0, 0, 0);
+            localCtx.camera.layers?.set?.(ORB_BASE_RENDER_LAYER);
             localCtx.camera.updateProjectionMatrix?.();
           }
 
@@ -1701,6 +1916,7 @@ export function Oracle3DScene({
 
         emergencyProbeDisposeRef.current?.();
         emergencyProbeDisposeRef.current = null;
+        restoreEmergencyVisualMode(localCtx);
         applyVisibleSafeModeRef.current(false);
         setFluidParticlesVisible(true);
         setRenderMode('composer-bloom');
@@ -1745,28 +1961,37 @@ export function Oracle3DScene({
     scanFeedbackCandidates('init');
 
     const renderBaseWithComposer = () => {
+      renderer.clear(true, true, true);
+
       camera.layers.set(ORB_BASE_RENDER_LAYER);
       bloomPass.enabled = renderModeRef.current === 'composer-bloom';
       composer.render();
       baseRenderTelemetryRef.current = readRendererTelemetry(renderer);
+
       renderer.clearDepth();
       camera.layers.set(ORB_OVERLAY_RENDER_LAYER);
       renderer.render(scene, camera);
       overlayRenderTelemetryRef.current = readRendererTelemetry(renderer);
+
       lastFrameModeRef.current = renderModeRef.current;
       renderedFramesRef.current += 1;
       camera.layers.set(ORB_BASE_RENDER_LAYER);
     };
 
     const renderDirectLayers = () => {
+      renderer.setRenderTarget(null);
+      renderer.clear(true, true, true);
+
       bloomPass.enabled = false;
       camera.layers.set(ORB_BASE_RENDER_LAYER);
       renderer.render(scene, camera);
       baseRenderTelemetryRef.current = readRendererTelemetry(renderer);
+
       renderer.clearDepth();
       camera.layers.set(ORB_OVERLAY_RENDER_LAYER);
       renderer.render(scene, camera);
       overlayRenderTelemetryRef.current = readRendererTelemetry(renderer);
+
       lastFrameModeRef.current = renderModeRef.current;
       renderedFramesRef.current += 1;
       camera.layers.set(ORB_BASE_RENDER_LAYER);
@@ -1780,12 +2005,23 @@ export function Oracle3DScene({
           orchestratorRef.current.update(t);
         }
 
+        // PHASE 3 : FORCER LE PLANCHER DE VISIBILITÉ EN URGENCE APRES L'ORCHESTRATEUR
+        if (emergencyVisualStateRef.current.active) {
+          const localCtx = (orchestratorRef.current as any)?.ctx;
+          if (localCtx) {
+            if (localCtx.orbMesh) localCtx.orbMesh.visible = true;
+            if (localCtx.wireFrames) {
+              localCtx.wireFrames.forEach((w: any) => {
+                w.visible = true;
+              });
+            }
+          }
+        }
+
         frameCountRef.current += 1;
         if (frameCountRef.current % 120 === 0) {
           scanFeedbackCandidates('periodic');
         }
-
-        renderer.setRenderTarget(null);
 
         if (renderModeRef.current === 'direct') {
           renderDirectLayers();
@@ -1805,7 +2041,10 @@ export function Oracle3DScene({
     frameIdRef.current = requestAnimationFrame(animate);
 
     const handleResize = () => {
-      const { width, height } = getViewportSize(containerRef.current);
+      if (!containerRef.current) return;
+
+      const width = Math.max(1, containerRef.current.clientWidth);
+      const height = Math.max(1, containerRef.current.clientHeight);
 
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
@@ -1815,10 +2054,29 @@ export function Oracle3DScene({
       bloomPass.setSize(width, height);
     };
 
-    window.addEventListener('resize', handleResize);
+    if (containerRef.current) {
+      containerRef.current.className = 'relative w-full h-full overflow-hidden';
+    }
+
+    handleResize();
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (containerRef.current && typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => handleResize());
+      resizeObserver.observe(containerRef.current);
+    } else {
+      window.addEventListener('resize', handleResize);
+    }
+
     if (activeRefs) activeRefs.handleResize = handleResize;
 
     return () => {
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      } else {
+        window.removeEventListener('resize', handleResize);
+      }
+
       resetSceneView('unmount');
       applyVisibleSafeModeRef.current(false);
       disposeSceneResources(activeRefs);
@@ -1834,6 +2092,15 @@ export function Oracle3DScene({
       visibleSafeModeRef.current = false;
       originalMaterialsRef.current = new WeakMap();
       emergencyProbeDisposeRef.current = null;
+      emergencyVisualStateRef.current = {
+        active: false,
+        fog: null,
+        toneMappingExposure: null,
+        cameraPosition: null,
+        volumeBackgroundVisible: null,
+        volumeGlowVisible: null,
+        foregroundVisible: null,
+      };
       lastRitualSeedRef.current = '';
       baseRenderTelemetryRef.current = null;
       overlayRenderTelemetryRef.current = null;

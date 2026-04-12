@@ -9,98 +9,202 @@
   --gold-dim: rgba(212, 175, 55, 0.6);
   --gold-bright: #ffd700;
   --glass-blur: blur(20px);
+  --bg-deep: #04070d;
+  --bg-mid: #0b1120;
+  --bg-soft: rgba(15, 23, 42, 0.72);
+  --panel-bg: rgba(7, 11, 20, 0.62);
+  --panel-border: rgba(255, 255, 255, 0.12);
+  --panel-shadow: rgba(0, 0, 0, 0.48);
+  --text-primary: #e2e8f0;
+  --text-muted: rgba(226, 232, 240, 0.72);
 }
 
-html, body, #root {
-  margin: 0; padding: 0; width: 100%; height: 100%;
-  background-color: #000; overflow: hidden; color: #e2e8f0;
+/* GARANTIE DU VIEWPORT */
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 100vh;
+  overflow: hidden;
+  background-color: var(--bg-deep); /* Fond très profond de secours */
+  color: var(--text-primary);
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 /* STRUCTURE ORBITALE */
+/* Nettoyée des backgrounds opaques pour laisser transparaître le WebGL */
 .orbital-container {
-  position: relative; 
-  width: 100vw; 
-  height: 100vh;
-  display: flex; 
-  flex-direction: column; 
+  position: relative;
+  width: 100vw;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
   justify-content: space-between;
-  z-index: 10; 
-  padding: 3rem 1.5rem;
-  pointer-events: none; /* Laisse passer vers la 3D */
+  padding: clamp(18px, 3vh, 32px) clamp(16px, 4vw, 48px);
+  pointer-events: none;
+  isolation: isolate;
+  overflow: hidden;
 }
 
+/* Sert uniquement au positionnement absolu désormais, le background WebGL gère l'atmosphère */
 .zone-oracle-bg {
-  position: absolute; 
-  inset: 0; 
-  z-index: 0; 
-  pointer-events: all; /* La 3D réagit au clic */
-  background: radial-gradient(circle at center, #0a0a0a 0%, #000000 100%);
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
 }
 
-.orbital-top, .orbital-bottom {
+.orbital-top,
+.orbital-bottom {
   position: relative;
   display: flex;
   justify-content: center;
   width: 100%;
-  pointer-events: none; /* Traverse les zones flex */
+  pointer-events: none;
+  z-index: 10;
 }
 
-/* LISIBILITÉ DU TEXTE : Triple contour pour contrer le blanc/bloom */
+.orbital-top {
+  align-items: flex-start;
+}
+
+.orbital-bottom {
+  align-items: flex-end;
+  min-height: 45vh;
+}
+
+/* LISIBILITÉ DU TEXTE */
 .orbital-content {
-  pointer-events: auto; /* REDONNE LE CLIC AUX INPUTS */
-  width: 100%; 
-  max-width: 640px; 
+  pointer-events: auto;
+  width: 100%;
+  max-width: 1120px;
   text-align: center;
-  z-index: 100;
-  text-shadow: 
-    0 0 35px rgba(0,0,0,1), 
-    0 0 15px rgba(0,0,0,0.9),
-    1px 1px 3px rgba(0,0,0,1);
 }
 
-/* PANNEAU GLASS-MORPHE ADAPTATIF */
+.contrast-guard {
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.42),
+    0 0 18px rgba(0, 0, 0, 0.28),
+    0 0 42px rgba(0, 0, 0, 0.24);
+}
+
+/* PANNEAU GLASS-MORPHE */
 .glass-clear {
-  background: rgba(0, 0, 0, 0.55); /* Fond sombre pour protéger du Bloom */
-  backdrop-filter: var(--glass-blur) saturate(150%);
-  -webkit-backdrop-filter: var(--glass-blur) saturate(150%);
-  border: 1px solid rgba(255, 215, 0, 0.15);
-  box-shadow: 0 15px 60px rgba(0, 0, 0, 0.9);
-  border-radius: 12px;
-  padding: 2rem;
+  background: linear-gradient(
+    180deg,
+    rgba(9, 13, 23, 0.6) 0%,
+    rgba(7, 11, 20, 0.7) 100%
+  );
+  backdrop-filter: var(--glass-blur) saturate(135%);
+  -webkit-backdrop-filter: var(--glass-blur) saturate(135%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 18px 60px var(--panel-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  border-radius: 20px;
+  padding: clamp(16px, 2.4vw, 28px);
 }
 
-.font-oracle { font-family: 'Spectral', serif; }
-.font-hud { font-family: 'Inter', sans-serif; }
+.font-oracle {
+  font-family: 'Spectral', serif;
+}
+
+.font-hud {
+  font-family: 'Inter', sans-serif;
+}
 
 /* CHAMP TEXTE VISIBLE ET ACCESSIBLE */
 .oracle-input {
-  background: rgba(0, 0, 0, 0.45) !important;
-  border: none;
-  border-bottom: 2px solid rgba(255, 255, 255, 0.3);
-  color: var(--gold-bright);
+  width: min(760px, 100%);
+  min-height: 54px;
+  padding: 1rem 1.1rem;
+  background: rgba(6, 10, 18, 0.72) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  color: #f8fafc;
   font-family: 'Spectral', serif;
-  font-size: 1.8rem;
+  font-size: 1.35rem;
   text-align: center;
-  width: 100%;
-  padding: 1.2rem;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  backdrop-filter: blur(5px);
+  transition: all 0.25s ease;
+  backdrop-filter: blur(8px);
   pointer-events: auto !important;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.24);
 }
 
 .oracle-input:focus {
   outline: none;
-  border-bottom-color: var(--gold-bright);
-  background: rgba(0, 0, 0, 0.65) !important;
-  box-shadow: 0 10px 40px -15px rgba(255, 215, 0, 0.2);
+  border-color: rgba(245, 158, 11, 0.55);
+  background: rgba(8, 12, 22, 0.82) !important;
+  box-shadow:
+    0 0 0 4px rgba(245, 158, 11, 0.12),
+    0 12px 34px rgba(0, 0, 0, 0.28);
 }
 
 .oracle-input::placeholder {
-  color: rgba(255, 255, 255, 0.2);
+  color: rgba(226, 232, 240, 0.42);
   font-style: italic;
 }
 
-.custom-scrollbar::-webkit-scrollbar { width: 4px; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background: var(--gold-dim); border-radius: 2px; }
-.cursor-blink { color: var(--gold-bright); animation: blink 1s infinite; }
-@keyframes blink { 50% { opacity: 0; } }
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(245, 158, 11, 0.42) rgba(255, 255, 255, 0.06);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(245, 158, 11, 0.42);
+  border-radius: 999px;
+}
+
+.cursor-blink {
+  color: var(--gold-bright);
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .orbital-container {
+    padding: 16px;
+  }
+
+  .orbital-bottom {
+    min-height: 50vh;
+  }
+
+  .glass-clear {
+    border-radius: 18px;
+    padding: 16px;
+  }
+
+  .oracle-input {
+    font-size: 1.1rem;
+  }
+}
