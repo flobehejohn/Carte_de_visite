@@ -58,7 +58,7 @@ function pickCtor(mod) {
 
 describe("RitualOrchestrator — order lock (Climate → Safety)", () => {
   it("applique d'abord ClimateTargets, puis SafetyFactor, puis ré-applique avec clamp", async () => {
-    const mod = await import("./RitualOrchestrator");
+    const mod = await import("./RitualOrchestrator.js");
     const RitualOrchestrator = pickCtor(mod);
     const o = new RitualOrchestrator({});
 

@@ -1,23 +1,22 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ESNext",
     "useDefineForClassFields": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "noEmit": true,
     "jsx": "react-jsx",
     "strict": true,
     "forceConsistentCasingInFileNames": true,
     "esModuleInterop": true,
-    "skipLibCheck": true,
-    "noEmit": true,
-    "types": ["vite/client"],
-    "incremental": true,
-    "tsBuildInfoFile": "./node_modules/.cache/ts/tsconfig.app.tsbuildinfo"
+    "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"],
-  "exclude": ["node_modules", "dist", "audit", "node_modules/.cache"]
+  "include": ["src"],
+  "references": [
+    { "path": "./tsconfig.node.json" }
+  ]
 }
