@@ -115,6 +115,19 @@ function isJsonRepairAllowed(): boolean {
   return v === '1' || v === 'true' || v === 'yes';
 }
 
+function pickThinkingConfig(model: string):
+  | { thinkingBudget: number; includeThoughts: boolean }
+  | undefined {
+  const normalized = String(model ?? '').trim().toLowerCase();
+  if (!normalized.includes('gemini-2.5')) return undefined;
+  return {
+    // Structured JSON is more reliable when hidden reasoning does not consume
+    // the output budget.
+    thinkingBudget: 0,
+    includeThoughts: false,
+  };
+}
+
 function withTimeout<T>(p: Promise<T>, timeoutMs: number): Promise<T> {
   return Promise.race([
     p,
@@ -477,6 +490,7 @@ export async function callGeminiStructured(
           maxOutputTokens: Math.max(64, args.maxOutputTokens),
           responseMimeType: 'application/json',
           responseJsonSchema: nativeSchema as any,
+          thinkingConfig: pickThinkingConfig(args.model),
         },
       }),
       args.timeoutMs,
