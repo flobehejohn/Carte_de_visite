@@ -85,7 +85,7 @@ try {
     $steps = @()
 
     $steps += Invoke-Step -State $log -Name "typecheck" -LogPath (Join-Path $dirs.typecheck "typecheck.log") -Quiet:$Quiet -Command {
-        npx --no-install tsc -p tsconfig.json --noEmit
+        npm run -s typecheck
     }
 
     $junitPath = Join-Path $dirs.tests "junit.xml"
