@@ -1,18 +1,11 @@
-import type { Citation } from './contracts/oracleContracts.js';
-import { retrieveZaraCitations } from './retriever/zarathoustraRetriever.js';
-
-const OUT_OF_CORPUS_RE =
-  /(wikipedia|wiki|google|web|internet|browser|source|sources|reference|refs|liens?|links?)/i;
+import type { Citation } from './contracts/oracle.types.js';
+import { isOutOfCorpusRequest, retrieveZaraCitations } from './retriever/zarathoustraRetriever.js';
 
 export type ZarathoustraContext = {
   citations: Citation[];
   outOfCorpus: boolean;
   policy: 'OK' | 'HORS_CORPUS';
 };
-
-export function isOutOfCorpusRequest(input: string): boolean {
-  return OUT_OF_CORPUS_RE.test(String(input ?? ''));
-}
 
 export function buildZarathoustraContext(
   query: string,

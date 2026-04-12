@@ -8,7 +8,11 @@ param(
     [string]$Mode = "",
     [switch]$Archive,
     [switch]$NoCleanLatest,
-    [switch]$Quiet
+    [switch]$Quiet,
+    [switch]$Strict,
+    [string]$DirtyPolicy = "",
+    [string]$LintPolicy = "",
+    [string]$AuditPolicy = ""
 )
 
 Set-StrictMode -Version Latest
@@ -21,6 +25,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $log = New-LogState
 if (-not $PSBoundParameters.ContainsKey("Quiet")) { $Quiet = $true }
 if ($Quiet) { $VerbosePreference = "SilentlyContinue" }
+if (-not $PSBoundParameters.ContainsKey("Strict")) { $Strict = $true }
 
 $runDir = $null
 $tempLog = $null
@@ -45,7 +50,8 @@ try {
     $step = Invoke-Step -State $log -Name "validate-full" -LogPath $tempLog -Quiet:$Quiet -Command {
         pwsh -NoProfile -ExecutionPolicy Bypass -File $validateScript `
           -RepoRoot $RepoRoot -OutDir $OutDirAbs -RunStamp $RunStamp `
-          -Strict -Mode $audit.Mode -Archive:$audit.Archive -NoCleanLatest:$NoCleanLatest -Quiet:$Quiet
+          -Strict:$Strict -Mode $audit.Mode -Archive:$audit.Archive -NoCleanLatest:$NoCleanLatest -Quiet:$Quiet `
+          -DirtyPolicy $DirtyPolicy -LintPolicy $LintPolicy -AuditPolicy $AuditPolicy
     }
 
     $gateDir = Join-Path $runDir "gate"
