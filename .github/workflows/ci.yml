@@ -12,21 +12,36 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  CI: 'true'
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
   typecheck:
     name: typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      CI: 'true'
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup npm 11
+        run: |
+          set -eo pipefail
+          npm install -g npm@11.3.0
+          node --version
+          npm --version
 
       - name: npm ci
         run: |
@@ -55,16 +70,24 @@ jobs:
     name: tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      CI: 'true'
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup npm 11
+        run: |
+          set -eo pipefail
+          npm install -g npm@11.3.0
+          node --version
+          npm --version
 
       - name: npm ci
         run: |
@@ -96,16 +119,24 @@ jobs:
     needs:
       - typecheck
       - tests
-    env:
-      CI: 'true'
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup npm 11
+        run: |
+          set -eo pipefail
+          npm install -g npm@11.3.0
+          node --version
+          npm --version
 
       - name: npm ci
         run: |
