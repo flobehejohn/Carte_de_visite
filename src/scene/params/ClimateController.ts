@@ -1,3 +1,5 @@
+import { SAFE_RANGES, buildPresetVariants } from './presetLibrary';
+
 export type ClimateTargets = {
   presetName: string;
   fog: { enabled: boolean; density: number; color: string | number };
@@ -30,21 +32,11 @@ type ClimatePresetDef = {
   softness: { low: number; mid: number; peak: number; end: number };
   wireOpacityMul: { low: number; mid: number; peak: number; end: number };
   particlesOpacityMul: { low: number; mid: number; peak: number; end: number };
+  foregroundOpacityMul: { low: number; mid: number; peak: number; end: number };
   vignette: number;
 };
 
-const SAFE_RANGES = {
-  fogDensity: { min: 0.005, max: 0.06 },
-  bloomStrength: { min: 0.0, max: 1.35 },
-  bloomRadius: { min: 0.0, max: 0.55 },
-  bloomThreshold: { min: 0.65, max: 0.95 },
-  glowIntensity: { min: 0.1, max: 0.9 },
-  backgroundStrength: { min: 0.1, max: 1.1 },
-  softness: { min: 0.1, max: 1.25 },
-  opacityMul: { min: 0.4, max: 1.25 },
-};
-
-const PRESETS: Record<string, ClimatePresetDef> = {
+const PRESETS_BASE: Record<string, ClimatePresetDef> = {
   Cendre: {
     name: 'Cendre',
     colors: { fog: 0x1a1a1a, glow: 0x5a5146, bg: 0x0b0b0b },
@@ -57,6 +49,7 @@ const PRESETS: Record<string, ClimatePresetDef> = {
     softness: { low: 0.35, mid: 0.4, peak: 0.45, end: 0.38 },
     wireOpacityMul: { low: 0.7, mid: 0.75, peak: 0.85, end: 0.75 },
     particlesOpacityMul: { low: 0.7, mid: 0.8, peak: 0.9, end: 0.75 },
+    foregroundOpacityMul: { low: 0.95, mid: 1.05, peak: 1.2, end: 1.0 },
     vignette: 1.1,
   },
   "Brume d'or": {
@@ -71,6 +64,7 @@ const PRESETS: Record<string, ClimatePresetDef> = {
     softness: { low: 0.45, mid: 0.55, peak: 0.65, end: 0.5 },
     wireOpacityMul: { low: 0.8, mid: 0.9, peak: 1.05, end: 0.85 },
     particlesOpacityMul: { low: 0.8, mid: 0.95, peak: 1.1, end: 0.9 },
+    foregroundOpacityMul: { low: 0.35, mid: 0.5, peak: 0.7, end: 0.4 },
     vignette: 1.05,
   },
   "Nuit froide": {
@@ -85,6 +79,7 @@ const PRESETS: Record<string, ClimatePresetDef> = {
     softness: { low: 0.4, mid: 0.45, peak: 0.5, end: 0.42 },
     wireOpacityMul: { low: 0.7, mid: 0.8, peak: 0.9, end: 0.75 },
     particlesOpacityMul: { low: 0.65, mid: 0.75, peak: 0.85, end: 0.7 },
+    foregroundOpacityMul: { low: 0.45, mid: 0.6, peak: 0.8, end: 0.5 },
     vignette: 1.1,
   },
   Aurore: {
@@ -99,12 +94,17 @@ const PRESETS: Record<string, ClimatePresetDef> = {
     softness: { low: 0.45, mid: 0.55, peak: 0.7, end: 0.5 },
     wireOpacityMul: { low: 0.8, mid: 0.95, peak: 1.15, end: 0.85 },
     particlesOpacityMul: { low: 0.8, mid: 1.0, peak: 1.2, end: 0.9 },
+    foregroundOpacityMul: { low: 0.05, mid: 0.1, peak: 0.22, end: 0.08 },
     vignette: 1.05,
   },
 };
 
-const PRESET_NAMES = Object.keys(PRESETS);
-const DEFAULT_PRESET = PRESETS.Cendre;
+const VARIANTS = buildPresetVariants(PRESETS_BASE, { perBase: 12, seed: 'preset-v1' });
+const PRESETS: Record<string, ClimatePresetDef> = { ...PRESETS_BASE, ...VARIANTS };
+
+export const CLIMATE_PRESET_NAMES = Object.freeze(Object.keys(PRESETS));
+const PRESET_NAMES = CLIMATE_PRESET_NAMES;
+const DEFAULT_PRESET = PRESETS_BASE.Cendre;
 
 function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Number(v) || 0));
@@ -409,6 +409,18 @@ export class ClimateController {
       SAFE_RANGES.opacityMul.max
     );
 
+    const foregroundOpacity = clamp(
+      curve4(
+        t,
+        preset.foregroundOpacityMul.low,
+        preset.foregroundOpacityMul.mid,
+        preset.foregroundOpacityMul.peak,
+        preset.foregroundOpacityMul.end
+      ),
+      SAFE_RANGES.foregroundOpacityMul.min,
+      SAFE_RANGES.foregroundOpacityMul.max
+    );
+
     let fogColor = preset.colors.fog;
     let glowColor = preset.colors.glow;
     const bgColor = preset.colors.bg;
@@ -431,7 +443,7 @@ export class ClimateController {
         bgColor,
         glowColor,
       },
-      opacity: { wireOpacityMul, particlesOpacityMul },
+      opacity: { wireOpacityMul, particlesOpacityMul, foregroundOpacity },
     };
   }
 
@@ -440,6 +452,12 @@ export class ClimateController {
     const bloomAlpha = alphaForSeconds(this.transitionSec.bloom, dtSec);
     const volumeAlpha = alphaForSeconds(this.transitionSec.volume, dtSec);
     const opacityAlpha = alphaForSeconds(this.transitionSec.opacity, dtSec);
+    const currentForegroundOpacity = (typeof current.opacity.foregroundOpacity === 'number' && Number.isFinite(current.opacity.foregroundOpacity))
+      ? current.opacity.foregroundOpacity
+      : 1.0;
+    const nextForegroundOpacity = (typeof next.opacity.foregroundOpacity === 'number' && Number.isFinite(next.opacity.foregroundOpacity)) ? next.opacity.foregroundOpacity : 1.0;
+    const hasForegroundOpacity =
+      typeof current.opacity.foregroundOpacity === 'number' || typeof next.opacity.foregroundOpacity === 'number';
 
     return {
       presetName: next.presetName,
@@ -464,15 +482,23 @@ export class ClimateController {
       opacity: {
         wireOpacityMul: lerp(current.opacity.wireOpacityMul, next.opacity.wireOpacityMul, opacityAlpha),
         particlesOpacityMul: lerp(current.opacity.particlesOpacityMul, next.opacity.particlesOpacityMul, opacityAlpha),
-        foregroundOpacity:
-          typeof current.opacity.foregroundOpacity === 'number' && typeof next.opacity.foregroundOpacity === 'number'
-            ? lerp(current.opacity.foregroundOpacity, next.opacity.foregroundOpacity, opacityAlpha)
-            : next.opacity.foregroundOpacity,
+        foregroundOpacity: hasForegroundOpacity
+          ? lerp(currentForegroundOpacity, nextForegroundOpacity, opacityAlpha)
+          : undefined,
       },
     };
   }
 
   private clampTargets(targets: ClimateTargets): ClimateTargets {
+    const foregroundOpacity =
+      typeof targets.opacity.foregroundOpacity === 'number'
+        ? clamp(
+            targets.opacity.foregroundOpacity,
+            SAFE_RANGES.foregroundOpacityMul.min,
+            SAFE_RANGES.foregroundOpacityMul.max
+          )
+        : undefined;
+
     return {
       presetName: targets.presetName,
       fog: {
@@ -504,7 +530,7 @@ export class ClimateController {
           SAFE_RANGES.opacityMul.min,
           SAFE_RANGES.opacityMul.max
         ),
-        foregroundOpacity: targets.opacity.foregroundOpacity,
+        ...(typeof foregroundOpacity === 'number' ? { foregroundOpacity } : {}),
       },
     };
   }
