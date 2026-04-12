@@ -52,6 +52,22 @@ const stubRawOk = async () => {
   };
 };
 
+const stubGuardianOk = async () => {
+  const payload = {
+    comment: 'Le prénom "Jeanne" est acceptable.',
+    isSafe: true,
+    confidence: 0.88,
+  };
+
+  return {
+    ok: true,
+    status: 200,
+    text: JSON.stringify(payload),
+    raw: { structured: false },
+    ms: 5,
+  };
+};
+
 describe('api/gemini handler contract', () => {
   const prevEnv = { ...process.env };
 
@@ -159,6 +175,36 @@ describe('api/gemini handler contract', () => {
     expect(Array.isArray(res.body.citationsUsed)).toBe(true);
     expect(res.body.citationsUsed.length).toBeGreaterThanOrEqual(2);
     expect(res.body.jsonError).toBe(null);
+  });
+
+  it('A4: guardian success returns deterministic guidance while keeping json.comment', async () => {
+    const handler = createHandler({ callGeminiImpl: stubGuardianOk as any });
+
+    const req: any = {
+      method: 'POST',
+      headers: {},
+      body: {
+        mode: 'guardian',
+        prompt: 'Gardien: test',
+        expectJson: true,
+        wantCitations: true,
+        minCitations: 2,
+        step: 'identity',
+        value: 'Jeanne',
+      },
+    };
+
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.mode).toBe('guardian');
+    expect(res.body.guidance?.echo).toContain('Jeanne');
+    expect(res.body.guidance?.echo.length).toBeGreaterThan(18);
+    expect(res.body.guidance?.subcomment.length).toBeGreaterThan(30);
+    expect(res.body.json?.comment).toBe('Le prénom "Jeanne" est acceptable.');
+    expect(res.body.guidance?.echo).not.toBe(res.body.json?.comment);
   });
 
   it('B: contract inconsistency returns 500 JSON error when guard on (force invalid timing)', async () => {

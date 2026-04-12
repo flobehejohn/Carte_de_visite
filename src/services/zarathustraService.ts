@@ -1,4 +1,13 @@
 import { OracleResult, RitualInput } from '../domain/types';
+import {
+  composeGuardianGuidanceFromPayload as composeDeterministicGuardianGuidance,
+  getGuardianStepDefaults,
+  type GuardianGuidanceBlock,
+  type GuardianMovement,
+  type GuardianPayloadLike,
+  type GuardianSymbolicFocus,
+  type GuardianTone,
+} from '../shared/guardian/composeGuidance';
 import { geminiGenerate } from '../lib/geminiClient';
 import { extractFirstJsonObject } from './jsonExtract';
 import { normalizeVisualParams, VisualParams } from './visualParams';
@@ -24,53 +33,16 @@ type OracleOptions = {
   debug?: boolean;
 };
 
-export type GuardianSymbolicFocus =
-  | 'threshold'
-  | 'climate'
-  | 'burden'
-  | 'fracture'
-  | 'desire'
-  | 'renunciation'
-  | 'circle'
-  | 'return'
-  | 'form'
-  | 'question'
-  | 'unknown';
+export type { GuardianMovement, GuardianSymbolicFocus, GuardianTone };
 
-export type GuardianMovement =
-  | 'opening'
-  | 'deepening'
-  | 'clarifying'
-  | 'crossing'
-  | 'naming'
-  | 'orienting'
-  | 'releasing'
-  | 'holding'
-  | 'receiving';
-
-export type GuardianTone = 'calm' | 'grave' | 'ardent' | 'clear';
-
-export type GuardianGuidance = {
+export type GuardianGuidance = GuardianGuidanceBlock & {
   comment: string;
-  echo: string;
-  subcomment: string;
   isSafe: boolean;
   confidence: number;
   symbolic_focus: GuardianSymbolicFocus;
   movement: GuardianMovement;
   tone: GuardianTone;
   rewrite_hint: string;
-};
-
-type GuardianPayloadLike = {
-  comment?: unknown;
-  isSafe?: unknown;
-  is_safe?: unknown;
-  confidence?: unknown;
-  symbolic_focus?: unknown;
-  movement?: unknown;
-  tone?: unknown;
-  rewrite_hint?: unknown;
 };
 
 const SAFE_FALLBACK_VISUAL: Required<
@@ -86,77 +58,6 @@ const SAFE_FALLBACK_VISUAL: Required<
 };
 
 const LOG_THROTTLE_MS = 1200;
-
-const GUARDIAN_STEP_DEFAULTS: Record<
-  string,
-  {
-    symbolic_focus: GuardianSymbolicFocus;
-    movement: GuardianMovement;
-    tone: GuardianTone;
-    rewrite_hint: string;
-  }
-> = {
-  name: {
-    symbolic_focus: 'threshold',
-    movement: 'opening',
-    tone: 'calm',
-    rewrite_hint: 'name-opens-threshold',
-  },
-  mood: {
-    symbolic_focus: 'climate',
-    movement: 'deepening',
-    tone: 'calm',
-    rewrite_hint: 'mood-colors-climate',
-  },
-  weight: {
-    symbolic_focus: 'burden',
-    movement: 'holding',
-    tone: 'grave',
-    rewrite_hint: 'weight-gives-gravity',
-  },
-  fear: {
-    symbolic_focus: 'fracture',
-    movement: 'clarifying',
-    tone: 'grave',
-    rewrite_hint: 'fear-becomes-visible-threshold',
-  },
-  desire: {
-    symbolic_focus: 'desire',
-    movement: 'orienting',
-    tone: 'ardent',
-    rewrite_hint: 'desire-points-direction',
-  },
-  sacrifice: {
-    symbolic_focus: 'renunciation',
-    movement: 'releasing',
-    tone: 'grave',
-    rewrite_hint: 'sacrifice-opens-passage',
-  },
-  social: {
-    symbolic_focus: 'circle',
-    movement: 'clarifying',
-    tone: 'clear',
-    rewrite_hint: 'social-place-clarifies-circle',
-  },
-  eternity: {
-    symbolic_focus: 'return',
-    movement: 'deepening',
-    tone: 'grave',
-    rewrite_hint: 'eternity-opens-return',
-  },
-  format: {
-    symbolic_focus: 'form',
-    movement: 'receiving',
-    tone: 'clear',
-    rewrite_hint: 'format-shapes-truth',
-  },
-  question: {
-    symbolic_focus: 'question',
-    movement: 'naming',
-    tone: 'ardent',
-    rewrite_hint: 'question-forms-living-knot',
-  },
-};
 
 const GENERIC_GUARDIAN_PATTERNS = [
   /\bacceptable\b/i,
@@ -222,22 +123,11 @@ function stripDiacritics(input: string): string {
   }
 }
 
-function clip(input: string, max = 84): string {
-  const clean = normalizeWhitespace(input);
-  if (clean.length <= max) return clean;
-  return `${clean.slice(0, max - 1).trimEnd()}…`;
-}
-
 function sanitizeRitualForPrompt(ritual: RitualInput): Record<string, string> {
   const out: Record<string, string> = {};
   if (!ritual) return out;
   for (const [k, v] of Object.entries(ritual)) out[k] = toAscii(v);
   return out;
-}
-
-function quoted(value: string, fallback = 'cette parole'): string {
-  const clean = clip(value, 72);
-  return clean ? `« ${clean} »` : fallback;
 }
 
 function composeGuardianComment(echo: string, subcomment: string): string {
@@ -367,14 +257,7 @@ function normalizeGuardianTone(
 }
 
 function defaultGuardianConfig(step: string) {
-  return (
-    GUARDIAN_STEP_DEFAULTS[step] ?? {
-      symbolic_focus: 'unknown' as GuardianSymbolicFocus,
-      movement: 'opening' as GuardianMovement,
-      tone: 'calm' as GuardianTone,
-      rewrite_hint: 'generic-threshold-guidance',
-    }
-  );
+  return getGuardianStepDefaults(step);
 }
 
 function looksGuardianGeneric(comment: string): boolean {
@@ -385,150 +268,6 @@ function looksGuardianGeneric(comment: string): boolean {
   if (clean.length < 28) return true;
 
   return GENERIC_GUARDIAN_PATTERNS.some((pattern) => pattern.test(ascii));
-}
-
-function sanitizeGuardianOutputPart(text: string): string {
-  return normalizeWhitespace(text)
-    .replace(/\bacceptable\b/gi, 'recevable')
-    .replace(/\bsans signal de danger\b/gi, 'sans obstacle immédiat')
-    .replace(/\baucun signal de danger\b/gi, 'sans obstacle immédiat')
-    .replace(/\bvalid\w*\b/gi, 'mettre à l’épreuve')
-    .replace(/\bok\b/gi, 'admis')
-    .replace(
-      /\bn apporte pas de sens\b/gi,
-      'demande encore une forme plus vive',
-    )
-    .replace(/\bnom ou prenom simple\b/gi, 'nom premier');
-}
-
-function buildUnsafeGuardianEcho(step: string, value: string): string {
-  const clean = normalizeWhitespace(value);
-  switch (step) {
-    case 'name':
-      return `${quoted(clean, 'ce nom')} peut entrer dans le rite, mais demande une présence un peu plus incarnée.`;
-    case 'question':
-      return 'La question touche quelque chose, mais sa pointe doit être encore resserrée.';
-    default:
-      return 'Le seuil reste ouvert, mais cette étape demande encore une formulation plus juste.';
-  }
-}
-
-function buildUnsafeGuardianSubcomment(
-  step: string,
-  _value: string,
-  movement: GuardianMovement,
-): string {
-  switch (step) {
-    case 'name':
-      return `Il ne s’agit pas d’ajouter beaucoup, seulement de donner au nom une chair plus sensible pour que le passage gagne en netteté et en ${movement === 'clarifying' ? 'éclaircissement' : 'justesse'}.`;
-    case 'question':
-      return 'Le rite recevra mieux une question moins diffuse, plus tendue entre ce qui manque et ce qui appelle.';
-    default:
-      return 'Une reformulation simple, plus concrète ou plus tendue, suffira pour redonner au passage sa forme exacte.';
-  }
-}
-
-function buildGuardianEcho(
-  step: string,
-  value: string,
-  isSafe: boolean,
-  symbolicFocus: GuardianSymbolicFocus,
-  movement: GuardianMovement,
-  tone: GuardianTone,
-): string {
-  if (!isSafe) return buildUnsafeGuardianEcho(step, value);
-
-  const clean = normalizeWhitespace(value);
-  const toneWord =
-    tone === 'grave'
-      ? 'grave'
-      : tone === 'ardent'
-        ? 'ardente'
-        : tone === 'clear'
-          ? 'claire'
-          : 'sobre';
-
-  switch (step) {
-    case 'name':
-      return `${quoted(clean, 'ce nom')} ouvre un seuil ${toneWord} ; tu peux entrer sans te justifier.`;
-    case 'mood':
-      return `Sous le signe de ${quoted(clean, 'cette humeur')}, le rite reçoit déjà son climat intérieur.`;
-    case 'format':
-      return `${quoted(clean, 'cette forme')} peut désormais porter la manière dont la vérité va frapper.`;
-    case 'question':
-      return `Dans ${quoted(clean, 'cette question')}, on entend déjà un nœud vivant capable d’appeler l’oracle.`;
-    case 'weight':
-      return `En nommant ${quoted(clean, 'ce poids')}, tu donnes au rite une gravité qu’il peut réellement traverser.`;
-    case 'fear':
-      return `La peur dite, ${quoted(clean, 'cette peur')}, cesse d’être une brume et devient un bord visible.`;
-    case 'desire':
-      return `Ton désir, ${quoted(clean, 'ce désir')}, trace déjà une direction plus haute que le simple manque.`;
-    case 'sacrifice':
-      return `Ce que tu consens à quitter, ${quoted(clean, 'ce sacrifice')}, ouvre un passage réel dans le rite.`;
-    case 'social':
-      return `La place que tu nommes parmi les autres donne déjà au cercle une figure lisible.`;
-    case 'eternity':
-      return `Cette parole ouvre un horizon de retour ; elle donne au rite une durée intérieure.`;
-    default:
-      return `Cette parole trouve un ${symbolicFocus === 'unknown' ? 'seuil' : symbolicFocus} et peut poursuivre son ${movement}.`;
-  }
-}
-
-function buildGuardianSubcomment(
-  step: string,
-  value: string,
-  isSafe: boolean,
-  symbolicFocus: GuardianSymbolicFocus,
-  movement: GuardianMovement,
-  tone: GuardianTone,
-): string {
-  if (!isSafe) {
-    return buildUnsafeGuardianSubcomment(step, value, movement);
-  }
-
-  const movementNoun =
-    movement === 'opening'
-      ? 'ouverture'
-      : movement === 'deepening'
-        ? 'approfondissement'
-        : movement === 'clarifying'
-          ? 'éclaircissement'
-          : movement === 'crossing'
-            ? 'franchissement'
-            : movement === 'naming'
-              ? 'nomination'
-              : movement === 'orienting'
-                ? 'orientation'
-                : movement === 'releasing'
-                  ? 'déliaison'
-                  : movement === 'holding'
-                    ? 'tenue'
-                    : 'accueil';
-
-  switch (step) {
-    case 'name':
-      return `Ici, le nom n’est pas une pièce à produire : il devient présence, apparition et premier passage, dans une ouverture claire du seuil.`;
-    case 'mood':
-      return `Cette humeur ne sert pas à classer l’âme ; elle règle la lumière intérieure de ce qui va se dire et donne au rite une qualité de climat immédiatement sensible.`;
-    case 'format':
-      return `La forme choisie ne décore pas la vérité : elle décide de sa coupe, de sa vitesse et de la manière dont elle pourra être reçue sans se disperser.`;
-    case 'question':
-      return `Une question n’a pas besoin d’être parfaite pour être digne ; il suffit qu’elle porte une tension juste entre manque, appel et pensée pour nourrir l’invocation.`;
-    case 'weight':
-      return `Le poids nommé retire au rite toute abstraction inutile : il lui donne une matière contre laquelle mesurer la traversée, la tenue et le possible dépassement.`;
-    case 'fear':
-      return `Quand la peur reçoit des mots, elle cesse de commander depuis l’ombre ; elle devient une ligne de fracture qu’on peut regarder sans détour et franchir avec plus de lucidité.`;
-    case 'desire':
-      return `Le désir formulé n’est pas seulement une envie ; il devient un axe d’orientation, une poussée de hauteur, quelque chose qui attire déjà l’interprétation hors de l’inertie.`;
-    case 'sacrifice':
-      return `Le sacrifice nommé donne au passage sa perte féconde : quelque chose devra tomber, non pour mutiler le vivant, mais pour lui rendre une force plus exacte.`;
-    case 'social':
-      return `Dire sa place parmi les autres donne au rite un cercle concret : proximité, retrait, guide, solitude ou partage cessent d’être flous et deviennent lisibles.`;
-    case 'eternity':
-      return `L’éternité n’est pas ici un grand mot abstrait ; elle devient la forme intérieure du retour, une manière d’éprouver ce qui pourrait revenir et ce qui mérite d’être recommencé.`;
-    default:
-      return `Le rite reçoit ici un ${symbolicFocus}, un mouvement d’${movementNoun} et une tonalité ${tone} ; cela suffit pour poursuivre sans retomber dans une approbation bureaucratique.`;
-  }
 }
 
 export function buildGuardianGuidanceFromPayload(
@@ -557,27 +296,26 @@ export function buildGuardianGuidanceFromPayload(
   const rewrite_hint =
     normalizeWhitespace(payload?.rewrite_hint) || defaults.rewrite_hint;
 
-  const echo = sanitizeGuardianOutputPart(
-    buildGuardianEcho(step, value, isSafe, symbolic_focus, movement, tone),
-  );
-  const subcomment = sanitizeGuardianOutputPart(
-    buildGuardianSubcomment(
-      step,
-      value,
+  const deterministicGuidance = composeDeterministicGuardianGuidance(
+    step,
+    value,
+    {
       isSafe,
       symbolic_focus,
       movement,
       tone,
-    ),
+    },
   );
 
-  const deterministicComment = composeGuardianComment(echo, subcomment);
+  const deterministicComment = composeGuardianComment(
+    deterministicGuidance.echo,
+    deterministicGuidance.subcomment,
+  );
 
   if (!rawComment || looksGuardianGeneric(rawComment)) {
     return {
       comment: deterministicComment,
-      echo,
-      subcomment,
+      ...deterministicGuidance,
       isSafe,
       confidence,
       symbolic_focus,
@@ -589,8 +327,7 @@ export function buildGuardianGuidanceFromPayload(
 
   return {
     comment: deterministicComment,
-    echo,
-    subcomment,
+    ...deterministicGuidance,
     isSafe,
     confidence,
     symbolic_focus,

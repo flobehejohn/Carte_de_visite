@@ -47,6 +47,7 @@ import {
   makeTraceId,
   safeLog,
 } from '../src/server/observability/trace.js';
+import { composeGuardianGuidanceFromPayload } from '../src/shared/guardian/composeGuidance.js';
 import { GeminiEnvelopeSchema } from '../src/shared/contracts/gemini.response.contracts.js';
 
 type HandlerDeps = {
@@ -101,6 +102,10 @@ function extractCitationSource(c: any): string {
     .toLowerCase();
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function normalizeModelName(v?: string): string {
   const s = String(v ?? '').trim();
   if (!s) return '';
@@ -131,6 +136,25 @@ function normalizeMode(v?: string): GeminiMode {
     .toLowerCase();
   if (m === 'oracle' || m === 'guardian') return m as GeminiMode;
   return 'raw';
+}
+
+function buildGuardianApiGuidance(
+  body: OracleRequest,
+  finalJson: unknown,
+): ReturnType<typeof composeGuardianGuidanceFromPayload> | null {
+  if (!isRecord(finalJson)) return null;
+
+  return composeGuardianGuidanceFromPayload(
+    String((body as any).step ?? ''),
+    String((body as any).value ?? ''),
+    {
+      isSafe: finalJson.isSafe,
+      is_safe: finalJson.is_safe,
+      symbolic_focus: finalJson.symbolic_focus,
+      movement: finalJson.movement,
+      tone: finalJson.tone,
+    },
+  );
 }
 
 function buildRetrievalQuery(body: OracleRequest, mode: GeminiMode): string {
@@ -1175,6 +1199,10 @@ export function createHandler(deps: HandlerDeps = {}) {
       const sources = Array.from(
         new Set(citations.map(extractCitationSource).filter(Boolean)),
       );
+      const guidance =
+        reqMode === 'guardian'
+          ? buildGuardianApiGuidance(body, finalState.finalJson)
+          : null;
 
       const payload = {
         ok: violations.length === 0,
@@ -1193,6 +1221,7 @@ export function createHandler(deps: HandlerDeps = {}) {
           llmMs: result.llmMs,
           retrieveMs: result.retrieveMs,
         },
+        guidance,
         raw: {
           ...(baseResponse?.raw && typeof baseResponse.raw === 'object'
             ? baseResponse.raw
