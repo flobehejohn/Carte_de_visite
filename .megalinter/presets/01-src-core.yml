@@ -1,11 +1,15 @@
 # .megalinter/presets/01-src-core.yml
-# Code applicatif (ESLint sur TS/TSX/JS)
+# Code applicatif (ESLint sur TS / TSX / JS)
+
 EXTENDS:
   - '.megalinter/presets/_base.yml'
 
 FILTER_REGEX_INCLUDE: '^src/'
 
 ENABLE_LINTERS:
-  - TYPESCRIPT_ESLINT
+  # TS (eslint) -> clé MegaLinter: TYPESCRIPT_ES
+  - TYPESCRIPT_ES
+  # TSX (eslint) -> clé MegaLinter: TSX_ESLINT
   - TSX_ESLINT
-  - JAVASCRIPT_ESLINT
+  # JS (eslint) -> clé MegaLinter: JAVASCRIPT_ES
+  - JAVASCRIPT_ES

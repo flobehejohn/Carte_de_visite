@@ -1,19 +1,5 @@
 # scripts/ci-megalint.ps1
 # Lancement MegaLinter (Docker) avec presets modulaires + ledger d'artefacts
-# Usage (recommandé) :
-#   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\ci-megalint.ps1 -Preset 00-hygiene
-#   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\ci-megalint.ps1 -Preset 04-full -Mode local -RunStamp MEGALINT_20260125_120000
-#   # Full ciblé (valide la chaîne SARIF) — IMPORTANT: -Files doit être le DERNIER argument
-#   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\ci-megalint.ps1 `
-#     -Preset 04-full -Mode local -RunStamp $stamp `
-#     -Files src/scene/safety/LightSafetyGovernor.ts src/components/App.tsx
-#
-# Notes :
-# - En Phase 0 (DISABLE_ERRORS=true), MegaLinter renvoie exit=0 même s'il trouve des erreurs.
-# - Si tu fournis -Files, on injecte MEGALINTER_FILES_TO_LINT (liste CSV) pour un run ciblé.
-
-Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
 
 [CmdletBinding()]
 param(
@@ -28,12 +14,18 @@ param(
     [Parameter()]
     [string]$RunStamp,
 
-    # IMPORTANT: quand tu appelles via "pwsh -File ...", un @('a','b') est EXPANSÉ
-    # en plusieurs arguments. ValueFromRemainingArguments permet de récupérer tout le lot.
-    # => mets -Files en dernier.
-    [Parameter(ValueFromRemainingArguments = $true)]
+    # Si true: un fichier manquant dans -Files => warning + continue
+    # Sinon (par défaut): throw (fail fast)
+    [Parameter()]
+    [switch]$AllowMissingFiles,
+
+    # Liste explicite de fichiers (relatifs au repo) à linter.
+    [Parameter()]
     [string[]]$Files
 )
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
 
 function Now-Stamp { (Get-Date).ToString("yyyyMMdd_HHmmss") }
 
@@ -44,9 +36,9 @@ function Write-Log {
     )
     $prefix = "[ci-megalint][$Level]"
     switch ($Level) {
-        "ERR" { Write-Error "$prefix $Message" }
-        "WARN" { Write-Warning "$prefix $Message" }
-        default { Write-Output "$prefix $Message" }
+        "ERR" { Write-Error    "$prefix $Message" }
+        "WARN" { Write-Warning  "$prefix $Message" }
+        default { Write-Output  "$prefix $Message" }
     }
 }
 
@@ -62,15 +54,11 @@ function Ensure-Dir {
 }
 
 function Normalize-PresetName([string]$p) {
-    $p2 = ($p ?? "").Trim()
+    $p2 = if ($null -eq $p) { "" } else { $p }
+    $p2 = $p2.Trim()
     if ($p2.EndsWith(".yml")) { return $p2.Substring(0, $p2.Length - 4) }
     if ($p2.EndsWith(".yaml")) { return $p2.Substring(0, $p2.Length - 5) }
     return $p2
-}
-
-function Split-CsvParts([string]$s) {
-    if ([string]::IsNullOrWhiteSpace($s)) { return @() }
-    return @($s.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
 function Resolve-RepoRoot {
@@ -78,40 +66,9 @@ function Resolve-RepoRoot {
     return $root.Path
 }
 
-function Resolve-FilesToLint {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$RepoRoot,
-        [Parameter()][string[]]$Raw
-    )
-
-    if (-not $Raw -or $Raw.Count -eq 0) { return @() }
-
-    $acc = New-Object System.Collections.Generic.List[string]
-    foreach ($item in $Raw) {
-        foreach ($part in (Split-CsvParts $item)) {
-            $p = $part.Trim('"').Trim("'")
-            if ([string]::IsNullOrWhiteSpace($p)) { continue }
-
-            # Accepte / et \, relatif ou absolu
-            $candidate = $p.Replace("/", "\")
-            $full = $candidate
-            if (-not [System.IO.Path]::IsPathRooted($candidate)) {
-                $full = Join-Path $RepoRoot $candidate
-            }
-
-            if (-not (Test-Path -LiteralPath $full)) {
-                throw "Fichier introuvable (repo-root relatif attendu) : $p"
-            }
-
-            $resolved = (Resolve-Path -LiteralPath $full).Path
-            $rel = [System.IO.Path]::GetRelativePath($RepoRoot, $resolved)
-            $relPosix = $rel.Replace("\", "/")
-            $acc.Add($relPosix)
-        }
-    }
-
-    return $acc.ToArray() | Sort-Object -Unique
+function Sanitize-PathPart([string]$s) {
+    if ([string]::IsNullOrWhiteSpace($s)) { return "" }
+    return (($s.Trim()) -replace '[\\/:*?"<>|]', '_')
 }
 
 function Assert-Command([string]$name) {
@@ -120,97 +77,165 @@ function Assert-Command([string]$name) {
     }
 }
 
-# ----------------------------
-# Main
-# ----------------------------
-Assert-Command "docker"
-
-$repoRoot = Resolve-RepoRoot
-if ([string]::IsNullOrWhiteSpace($RunStamp)) {
-    $RunStamp = ("MEGALINT_{0}" -f (Now-Stamp))
-}
-$presetName = Normalize-PresetName $Preset
-
-$presetHostPath = Join-Path $repoRoot (".megalinter\presets\{0}.yml" -f $presetName)
-if (-not (Test-Path -LiteralPath $presetHostPath)) {
-    throw "Preset introuvable: $presetHostPath"
+function To-DockerHostPath([string]$windowsPath) {
+    return ($windowsPath -replace '\\', '/')
 }
 
-$outHost = Ensure-Dir (Join-Path $repoRoot (Join-Path "audit\megalinter" $RunStamp))
+function Normalize-FilesToLint {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter()][string[]]$RawFiles,
+        [Parameter()][switch]$AllowMissing
+    )
 
-$filesToLint = Resolve-FilesToLint -RepoRoot $repoRoot -Raw $Files
-if ($filesToLint.Count -gt 0) {
-    Write-Log INFO ("Run ciblé: {0} fichier(s)" -f $filesToLint.Count)
-    $filesCsv = ($filesToLint -join ",")
-}
-else {
-    $filesCsv = ""
-}
+    $acc = New-Object System.Collections.Generic.List[string]
 
-# Image MegaLinter (pin v9 pour stabilité ; override via env si besoin)
-$image = $env:MEGALINTER_IMAGE
-if ([string]::IsNullOrWhiteSpace($image)) { $image = "oxsecurity/megalinter:v9" }
+    foreach ($f in @($RawFiles)) {
+        if ([string]::IsNullOrWhiteSpace($f)) { continue }
 
-Write-Log INFO "RepoRoot  : $repoRoot"
-Write-Log INFO "Preset    : $presetName"
-Write-Log INFO "PresetPath: $presetHostPath"
-Write-Log INFO "RunStamp  : $RunStamp"
-Write-Log INFO "Reports   : $outHost"
-Write-Log INFO "Image     : $image"
+        # Le param peut arriver sous plusieurs formes:
+        # - vrai tableau: "a","b"
+        # - 1 string: '"a","b"' ou 'a,b'
+        $raw = $f.Trim()
 
-# Construit docker args en tableau (évite les soucis de quoting)
-$dockerArgs = @(
-    "run", "--rm",
-    "-v", "$repoRoot:/tmp/lint",
-    "-v", "$outHost:/tmp/lint/megalinter-reports",
-    "-w", "/tmp/lint",
-    "-e", "MEGALINTER_CONFIG=/tmp/lint/.megalinter/presets/$presetName.yml",
-    "-e", "REPORT_OUTPUT_FOLDER=megalinter-reports",
-    "-e", "LOG_LEVEL=INFO"
-)
+        # Split puis nettoyage PAR ELEMENT (clé pour virer les guillemets traînants)
+        $parts = $raw.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ }
 
-if ($Mode -eq "ci") {
-    $dockerArgs += @("-e", "CI=true")
-}
-else {
-    $dockerArgs += @("-e", "CI=false")
-}
+        foreach ($part in $parts) {
+            $clean = $part.Trim().Trim('"').Trim("'").Trim()
+            if ([string]::IsNullOrWhiteSpace($clean)) { continue }
 
-if (-not [string]::IsNullOrWhiteSpace($filesCsv)) {
-    # Variable standard MegaLinter pour forcer la liste de fichiers à analyser (CSV)
-    # (MegaLinter: MEGALINTER_FILES_TO_LINT) :contentReference[oaicite:2]{index=2}
-    $dockerArgs += @("-e", ("MEGALINTER_FILES_TO_LINT={0}" -f $filesCsv))
-}
+            $rel = $clean.Replace('\', '/')
+            if ($rel.StartsWith("./")) { $rel = $rel.Substring(2) }
 
-$dockerArgs += $image
+            # Interdit les chemins absolus
+            if ([System.IO.Path]::IsPathRooted($rel)) {
+                if ($AllowMissing) {
+                    Write-Log WARN "Chemin absolu ignoré (AllowMissingFiles): $rel"
+                    continue
+                }
+                throw "Chemin absolu interdit dans -Files (attendu: relatif repo): $rel"
+            }
 
-Write-Log DBG ("docker {0}" -f ($dockerArgs -join " "))
+            $abs = Join-Path $RepoRoot ($rel -replace '/', '\')
+            if (-not (Test-Path -LiteralPath $abs)) {
+                if ($AllowMissing) {
+                    Write-Log WARN "Fichier introuvable ignoré (AllowMissingFiles): $rel"
+                    continue
+                }
+                throw "Fichier introuvable (relatif repo attendu) : $rel"
+            }
 
-& docker @dockerArgs
-$exit = $LASTEXITCODE
+            $acc.Add($rel)
+        }
+    }
 
-# Vérifie la présence des rapports (observabilité)
-$expected = @(
-    (Join-Path $outHost "megalinter-report.sarif"),
-    (Join-Path $outHost "mega-linter-report.json"),
-    (Join-Path $outHost "megalinter-report.html")
-)
-
-$found = @()
-foreach ($p in $expected) {
-    if (Test-Path -LiteralPath $p) { $found += $p }
+    return @($acc.ToArray() | Sort-Object -Unique)
 }
 
-if ($found.Count -gt 0) {
-    Write-Log INFO "Rapports détectés :"
-    $found | ForEach-Object { Write-Output ("  - " + $_) }
-}
-else {
-    Write-Log WARN "Aucun rapport attendu trouvé dans $outHost (vérifie REPORT_OUTPUT_FOLDER et les reporters)."
-}
+try {
+    Assert-Command "docker"
 
-if ($exit -ne 0) {
-    Write-Log WARN "Docker/MegaLinter exit=$exit (en Phase 0, un 0 est attendu sauf crash Docker)."
-}
+    $repoRoot = Resolve-RepoRoot
 
-exit $exit
+    $presetName = Normalize-PresetName $Preset
+    $presetHostPath = Join-Path $repoRoot (".megalinter\presets\{0}.yml" -f $presetName)
+    if (-not (Test-Path -LiteralPath $presetHostPath)) {
+        throw "Preset introuvable: $presetHostPath"
+    }
+
+    # RunStamp stable (safe pour dossier)
+    if ([string]::IsNullOrWhiteSpace($RunStamp)) {
+        $RunStamp = ("MEGALINT_{0}" -f (Now-Stamp))
+    }
+    $runStampSafe = Sanitize-PathPart $RunStamp
+    if ([string]::IsNullOrWhiteSpace($runStampSafe)) {
+        $runStampSafe = ("MEGALINT_{0}" -f (Now-Stamp))
+    }
+
+    # Ledger root
+    $outHost = Ensure-Dir (Join-Path $repoRoot (Join-Path "audit\megalinter" $runStampSafe))
+    $outHostPreset = Ensure-Dir (Join-Path $outHost (Sanitize-PathPart $presetName))
+
+    $repoRootDocker = To-DockerHostPath $repoRoot
+    $outHostPresetDocker = To-DockerHostPath $outHostPreset
+
+    # Files => FORCER tableau au point d'appel (évite les surprises sur .Count)
+    $filesToLint = @(Normalize-FilesToLint -RepoRoot $repoRoot -RawFiles $Files -AllowMissing:$AllowMissingFiles)
+    $filesCount = @($filesToLint).Count
+
+    $filesCsv = $null
+    if ($filesCount -gt 0) {
+        $filesCsv = ($filesToLint -join ",")
+        Write-Log INFO ("Run ciblé: {0} fichier(s)" -f $filesCount)
+        Write-Log DBG  ("FilesToLint: {0}" -f ($filesToLint -join " | "))
+        Write-Log DBG  ("MEGALINTER_FILES_TO_LINT={0}" -f $filesCsv)
+    }
+    else {
+        Write-Log DBG "Aucun -Files fourni => run sur le périmètre du preset"
+    }
+
+    $image = $env:MEGALINTER_IMAGE
+    if ([string]::IsNullOrWhiteSpace($image)) { $image = "oxsecurity/megalinter:v9" }
+
+    Write-Log INFO "RepoRoot  : $repoRoot"
+    Write-Log INFO "Preset    : $presetName"
+    Write-Log INFO "PresetPath: $presetHostPath"
+    Write-Log INFO "RunStamp  : $RunStamp"
+    Write-Log INFO "Reports   : $outHostPreset"
+    Write-Log INFO "Image     : $image"
+
+    $dockerArgs = @(
+        "run", "--rm",
+        "-v", "${repoRootDocker}:/tmp/lint",
+        "-v", "${outHostPresetDocker}:/tmp/lint/megalinter-reports",
+        "-w", "/tmp/lint",
+        "-e", "MEGALINTER_CONFIG=/tmp/lint/.megalinter/presets/$presetName.yml",
+        "-e", "REPORT_OUTPUT_FOLDER=megalinter-reports",
+        "-e", "LOG_LEVEL=INFO"
+    )
+
+    if ($Mode -eq "ci") { $dockerArgs += @("-e", "CI=true") }
+    else { $dockerArgs += @("-e", "CI=false") }
+
+    if (-not [string]::IsNullOrWhiteSpace($filesCsv)) {
+        $dockerArgs += @("-e", "MEGALINTER_FILES_TO_LINT=$filesCsv")
+    }
+
+    $dockerArgs += $image
+
+    Write-Log DBG ("docker {0}" -f ($dockerArgs -join " "))
+
+    & docker @dockerArgs
+    $exit = $LASTEXITCODE
+
+    # Observabilité: rapports
+    $reports = @()
+    if (Test-Path -LiteralPath $outHostPreset) {
+        $reports = @(
+            Get-ChildItem -LiteralPath $outHostPreset -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '\.(sarif|html|json)$' } |
+            Sort-Object FullName
+        )
+    }
+
+    $reportsCount = @($reports).Count
+    if ($reportsCount -gt 0) {
+        Write-Log INFO "Rapports détectés :"
+        @($reports) | ForEach-Object { Write-Output ("  - " + $_.FullName) }
+    }
+    else {
+        Write-Log WARN "Aucun rapport .sarif/.html/.json trouvé dans $outHostPreset (vérifie reporters + REPORT_OUTPUT_FOLDER)."
+    }
+
+    if ($exit -ne 0) {
+        Write-Log WARN "Docker/MegaLinter exit=$exit (Phase 0 attend plutôt 0 sauf crash/config)."
+    }
+
+    exit $exit
+}
+catch {
+    Write-Log ERR $_.Exception.Message
+    exit 1
+}

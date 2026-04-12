@@ -16,7 +16,6 @@
     "function-no-unknown": [true, { "ignoreFunctions": ["theme"] }],
 
     "color-function-notation": null,
-    "alpha-value-notation": null,
-    "no-missing-end-of-source-newline": null
+    "alpha-value-notation": null
   }
 }
