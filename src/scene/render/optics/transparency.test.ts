@@ -18,7 +18,12 @@ const OPTS: TransparencyOptions = {
 describe('transparency helpers', () => {
   it('clamps alpha to configured range', () => {
     const prev: TransparencyState = { stableAlpha: 0.2, smoothedAlpha: 0.2 };
-    const result = computeAlpha(2, 2, 2, prev, 50, { ...OPTS, minAlpha: 0.1, maxAlpha: 0.9 });
+    const result = computeAlpha(2, 2, 2, prev, 50, {
+      ...OPTS,
+      minAlpha: 0.1,
+      maxAlpha: 0.9,
+    });
+
     expect(result.alpha).toBeGreaterThanOrEqual(0.1);
     expect(result.alpha).toBeLessThanOrEqual(0.9);
   });
@@ -49,6 +54,7 @@ describe('transparency helpers', () => {
       depthTestTransparent: true,
       alphaTest: 0.1,
     };
+
     const opaque = computeTransparencyPolicy(1, config);
     expect(opaque.depthWrite).toBe(true);
     expect(opaque.renderOrder).toBe(0);

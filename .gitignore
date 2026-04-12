@@ -33,7 +33,9 @@ lerna-debug.log*
 *.local
 scripts/diag/secrets.local.ps1
 
+# =========================
 # Keys / certs / sensitive
+# =========================
 *.pem
 *.key
 *.pfx
@@ -83,12 +85,19 @@ ci_map.json
 megalinter-reports/
 
 # =========================
+# Proof pack versioned on purpose
+# =========================
+!docs/
+!docs/audit/
+docs/audit/*
+!docs/audit/governed-oracle-guardian/
+!docs/audit/governed-oracle-guardian/**
+!docs/audit/governed-oracle-guardian/**/*.log
+
+# =========================
 # OPTIONAL: si ces fichiers sont vraiment générés chez toi
-# (Si ce sont tes VRAIES configs Vite/Vitest, supprime ces 4 lignes)
+# (Si ce sont tes VRAIES configs Vite/Vitest, supprime ces 3 lignes)
 # =========================
 vite.config.d.ts
 vitest.config.d.ts
 .vercel
-.env*.local
-
-.ci-local/

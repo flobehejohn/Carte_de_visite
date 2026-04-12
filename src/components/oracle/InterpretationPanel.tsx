@@ -1,4 +1,5 @@
 import { OracleResult } from '../../domain/types';
+import { getOraclePrimaryProse } from '../../services/zarathustraService';
 
 interface InterpretationPanelProps {
   loading?: boolean;
@@ -16,6 +17,7 @@ function InterpretationPanel({ loading, result }: InterpretationPanelProps) {
 
   const { ritual, keywords } = result;
   const themeLabel = keywords.length > 0 ? keywords.join(' · ') : 'Lecture de Zarathoustra';
+  const prose = getOraclePrimaryProse(result);
 
   return (
     <div className="card">
@@ -26,7 +28,7 @@ function InterpretationPanel({ loading, result }: InterpretationPanelProps) {
         <div>Format du tirage : {ritual.format}</div>
         {ritual.questionText && <div>Question : « {ritual.questionText} »</div>}
       </div>
-      <div className="interpretation">{result.interpretation}</div>
+      <div className="interpretation">{prose}</div>
     </div>
   );
 }

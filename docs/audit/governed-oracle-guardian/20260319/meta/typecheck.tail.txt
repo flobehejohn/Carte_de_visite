@@ -1,0 +1,11 @@
+
+> oracle-zarathustra-llmed@0.1.0 typecheck
+> npm run typecheck:client && npm run typecheck:server
+
+
+> oracle-zarathustra-llmed@0.1.0 typecheck:client
+> tsc -p tsconfig.client.json --noEmit --pretty false
+
+
+> oracle-zarathustra-llmed@0.1.0 typecheck:server
+> tsc -p tsconfig.server.json --noEmit --pretty false

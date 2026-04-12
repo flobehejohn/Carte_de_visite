@@ -41,6 +41,12 @@ function makeOracleHermeneuticPayload(citationIds: string[]) {
       },
       {
         citation_id: citationIds[1],
+        role: 'tension',
+        motif: 'seuil',
+        claim: 'Le sens reste suspendu dans sa propre exigence.',
+      },
+      {
+        citation_id: citationIds[2],
         role: 'turn',
         motif: 'passage',
         claim: 'Le retournement se noue dans la citation.',
@@ -169,7 +175,7 @@ describe('citation snapshot contract', () => {
       buildOracleRetrievalQuery(prompt, nameOrNickname),
       { k: 6 },
     )
-      .slice(0, 2)
+      .slice(0, 3)
       .map((citation) => String(citation.id));
 
     const a = await handleGeminiRequest(req, {

@@ -69,6 +69,51 @@ describe('guardian guidance service', () => {
     expect(result.comment).not.toMatch(BANNED_GENERIC);
   });
 
+  it('prefers governed guidance echo and subcomment over json.comment when both are present', async () => {
+    geminiGenerateMock.mockResolvedValue({
+      mode: 'guardian',
+      guidance: {
+        echo: '« Jeanne » ouvre un seuil sobre ; tu peux entrer sans te justifier.',
+        subcomment:
+          'Ici, le nom n est pas une piece a produire : il devient presence, apparition et premier passage.',
+      },
+      json: {
+        comment: 'Le prenom "Jeanne" est acceptable.',
+        isSafe: true,
+        confidence: 0.91,
+      },
+    });
+
+    const result = await getStepGuidance('name', 'Jeanne');
+    const parts = extractGuidanceParts(result.comment);
+
+    expect(parts.echo).toContain('Jeanne');
+    expect(parts.subcomment).toContain('presence');
+    expect(result.comment).not.toContain('acceptable');
+  });
+
+  it('falls back to json.comment when governed guidance is absent or incomplete', async () => {
+    geminiGenerateMock.mockResolvedValue({
+      mode: 'guardian',
+      guidance: {
+        echo: '« Jeanne » ouvre un seuil sobre ; tu peux entrer sans te justifier.',
+      },
+      json: {
+        comment:
+          'Jeanne ouvre un passage plus net ; le seuil peut maintenant recevoir ta parole.',
+        isSafe: true,
+        confidence: 0.87,
+      },
+    });
+
+    const result = await getStepGuidance('name', 'Jeanne');
+    const parts = extractGuidanceParts(result.comment);
+
+    expect(parts.echo).toContain('Jeanne');
+    expect(parts.subcomment).toBe('');
+    expect(result.comment).toContain('le seuil peut maintenant recevoir');
+  });
+
   it('keeps a reformulation path when a step is flagged as unsafe', () => {
     const result = buildGuardianGuidanceFromPayload('question', '', {
       isSafe: false,

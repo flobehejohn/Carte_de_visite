@@ -1,6 +1,11 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useOracle } from '../../hooks/useOracle';
+import {
+  extractGuidanceParts,
+  getOraclePrimaryProse,
+  getOracleTextLength,
+} from '../../services/zarathustraService';
 import { Oracle3DScene } from './Oracle3DScene';
 
 const Oracle3DSceneMemo = memo(Oracle3DScene);
@@ -189,6 +194,7 @@ export default function RitualWizard() {
   const [sceneData, setSceneData] = useState<any>(INITIAL_FORM);
   const [viewState, setViewState] = useState<'INPUT' | 'GUIDANCE'>('INPUT');
   const [canProceed, setCanProceed] = useState(false);
+  const [guidanceEchoDone, setGuidanceEchoDone] = useState(false);
   const textRef = useRef<HTMLDivElement | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
@@ -200,6 +206,15 @@ export default function RitualWizard() {
   );
   const canValidate = Boolean(String(currentValue ?? '').trim().length > 0);
 
+  const { echo: guidanceEcho, subcomment: guidanceSubcomment } = useMemo(
+    () => extractGuidanceParts(lastGuidance),
+    [lastGuidance],
+  );
+  const oraclePrimaryProse = useMemo(
+    () => getOraclePrimaryProse(lastResult),
+    [lastResult],
+  );
+
   const updateField = (fieldKey: string, value: string) => {
     setFormData((prev: any) => ({ ...prev, [fieldKey]: value }));
   };
@@ -209,6 +224,7 @@ export default function RitualWizard() {
     clearGuidance();
     setViewState('GUIDANCE');
     setCanProceed(false);
+    setGuidanceEchoDone(false);
     setSceneData((prev: any) => ({ ...prev, [currentStep.id]: currentValue }));
     await checkStep(currentStep.id, currentValue);
   };
@@ -216,6 +232,7 @@ export default function RitualWizard() {
   const handleNextStep = () => {
     clearGuidance();
     setCanProceed(false);
+    setGuidanceEchoDone(false);
     if (stage < 10) {
       setStage((prev) => prev + 1);
       setViewState('INPUT');
@@ -228,6 +245,8 @@ export default function RitualWizard() {
     clearGuidance();
     setStage(11);
     setViewState('INPUT');
+    setCanProceed(false);
+    setGuidanceEchoDone(false);
     setSceneData((prev: any) => ({ ...prev, ...formData }));
 
     const fallbackProgress = Math.max(0, Math.min(1, (stage - 1) / 9));
@@ -278,14 +297,22 @@ export default function RitualWizard() {
     setSceneData(INITIAL_FORM);
     setViewState('INPUT');
     setCanProceed(false);
+    setGuidanceEchoDone(false);
     clearGuidance();
   };
 
   useEffect(() => {
-    if (viewState === 'GUIDANCE' && !guidanceLoading && !lastGuidance) {
+    if (viewState !== 'GUIDANCE') return;
+    if (guidanceLoading) {
+      setCanProceed(false);
+      setGuidanceEchoDone(false);
+      return;
+    }
+    if (!guidanceEcho) {
+      setGuidanceEchoDone(true);
       setCanProceed(true);
     }
-  }, [viewState, guidanceLoading, lastGuidance]);
+  }, [viewState, guidanceLoading, guidanceEcho]);
 
   useEffect(() => {
     if (!textRef.current) return;
@@ -303,8 +330,7 @@ export default function RitualWizard() {
       );
       const linesApprox = Math.max(1, Math.round(rect.height / 18));
       const metrics = {
-        textLength:
-          lastResult?.interpretation?.length ?? formData.question?.length ?? 0,
+        textLength: oraclePrimaryProse.length || formData.question?.length || 0,
         boxW: rect.width,
         boxH: rect.height,
         linesApprox,
@@ -324,18 +350,15 @@ export default function RitualWizard() {
       ro.disconnect();
       window.removeEventListener('resize', computeMetrics);
     };
-  }, [lastResult, formData.question]);
+  }, [oraclePrimaryProse, formData.question]);
 
   useEffect(() => {
     if (!lastResult) return;
-    const quoteLen = lastResult.quote?.length ?? 0;
-    const interpLen = lastResult.interpretation?.length ?? 0;
-    const textLength = quoteLen + interpLen;
     setSceneData((prev: any) => ({
       ...prev,
       visualParams: lastResult.visualParams,
       seed: lastResult.seed ?? lastResult.visualParams?.seed,
-      textLength,
+      textLength: getOracleTextLength(lastResult),
     }));
   }, [lastResult]);
 
@@ -444,7 +467,7 @@ export default function RitualWizard() {
                     </h2>
 
                     {currentValuePreview && (
-                      <p className="text-sm md:text-base text-white/70 italic mb-4 font-oracle">
+                      <p className="text-sm md:text-base text-white/65 italic mb-4 font-oracle">
                         {currentValuePreview}
                       </p>
                     )}
@@ -454,17 +477,36 @@ export default function RitualWizard() {
                         Le seuil écoute...
                       </p>
                     ) : (
-                      <p className="text-lg md:text-xl text-amber-100 font-oracle leading-relaxed max-w-2xl">
-                        {lastGuidance ? (
-                          <Typewriter
-                            text={lastGuidance}
-                            speed={14}
-                            onComplete={() => setCanProceed(true)}
-                          />
-                        ) : (
-                          'Le seuil reste ouvert.'
+                      <div className="max-w-2xl">
+                        <p className="text-lg md:text-xl text-amber-100 font-oracle leading-relaxed">
+                          {guidanceEcho ? (
+                            <Typewriter
+                              text={guidanceEcho}
+                              speed={14}
+                              onComplete={() => {
+                                setGuidanceEchoDone(true);
+                                setCanProceed(true);
+                              }}
+                            />
+                          ) : (
+                            'Le seuil reste ouvert.'
+                          )}
+                        </p>
+
+                        {guidanceSubcomment && (
+                          <motion.p
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{
+                              opacity:
+                                guidanceEchoDone || !guidanceEcho ? 1 : 0.45,
+                              y: 0,
+                            }}
+                            className="mt-4 text-sm md:text-base text-white/72 leading-relaxed font-hud border-l border-amber-400/25 pl-4"
+                          >
+                            {guidanceSubcomment}
+                          </motion.p>
                         )}
-                      </p>
+                      </div>
                     )}
                   </div>
                 )}
@@ -487,7 +529,7 @@ export default function RitualWizard() {
               >
                 <div className="prose prose-invert max-w-none prose-p:text-slate-200 prose-p:font-hud prose-p:leading-relaxed">
                   <p>
-                    <Typewriter text={lastResult.interpretation} speed={5} />
+                    <Typewriter text={oraclePrimaryProse} speed={5} />
                   </p>
                 </div>
 

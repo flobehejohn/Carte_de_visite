@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { validateOracleHermeneuticAnchors } from './oracle-hermeneutic.js';
+import {
+  collectOracleAnchorRoles,
+  validateOracleHermeneuticAnchors,
+} from './oracle-hermeneutic.js';
 
 const citation = (id: string) => ({
   id,
@@ -74,5 +77,34 @@ describe('validateOracleHermeneuticAnchors', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.missingRoles).toEqual(['tension']);
+  });
+
+  it('normalizes anchor role aliases through the shared helper', () => {
+    const hermeneutic = makeHermeneutic() as any;
+
+    hermeneutic.anchors = [
+      {
+        citation_id: '5190',
+        role: 'opening',
+        motif: 'flamme dansante',
+        claim: 'Le nom prend figure de légèreté active.',
+      },
+      {
+        citation_id: '3421',
+        role: 'pivot',
+        motif: 'dépassement',
+        claim: 'Le rite transforme le nom en passage.',
+      },
+      {
+        citation_id: '28',
+        role: 'tension',
+        motif: 'poids',
+        claim: 'Le poids demande une forme plus haute.',
+      },
+    ];
+
+    const roles = collectOracleAnchorRoles(hermeneutic);
+
+    expect(Array.from(roles).sort()).toEqual(['anchor', 'tension', 'turn']);
   });
 });

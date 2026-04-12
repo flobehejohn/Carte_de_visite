@@ -1,0 +1,286 @@
+
+> oracle-zarathustra-llmed@0.1.0 test
+> vitest run
+
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mC:/ATLAS/INBOX/dev/R_D/carte_de_visite/test_unitaire/app_llmed_wt_fix[39m
+
+[90mstdout[2m | src/server/contracts/gemini.failclosed.strict.test.ts[2m > [22m[2mfail-closed strict invariants (handler)[2m > [22m[2mreturns HTTP 422 when structured outputs are disabled for oracle
+[22m[39m[api/gemini] level=INFO traceId=srv_c5619f12-4969-4524-a8bb-e7fb9d3e6950 start mode=oracle model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=3 minCit=2 out=0 structured=0 strict=1 maxOutputTokens=1200 temperature=0.1
+[api/gemini] level=INFO traceId=srv_c5619f12-4969-4524-a8bb-e7fb9d3e6950 done ms=5 json=true rawStructured=0 repaired=0 retryCount=0 fallback=0 reason=RAW_OK parseError=undefined rawJsonError=undefined
+[api/gemini] level=ERR traceId=srv_c5619f12-4969-4524-a8bb-e7fb9d3e6950 strict_invariant_violation mode=oracle rawJsonError=null finalJsonError=null structuredUsed=true violations=STRUCTURED_OUTPUTS_DISABLED,COMPOSITION_EMPTY
+
+[90mstdout[2m | src/server/contracts/gemini.failclosed.strict.test.ts[2m > [22m[2mfail-closed strict invariants (handler)[2m > [22m[2mreturns HTTP 422 when minCitations is not satisfied (within contract range)
+[22m[39m[api/gemini] level=ERR traceId=srv_5708c392-01a3-421e-bd24-233ccb434a8e knowledge_error code=KNOWLEDGE_EMPTY
+[api/gemini] level=ERR traceId=srv_5708c392-01a3-421e-bd24-233ccb434a8e strict_invariant_violation mode=oracle rawJsonError=null finalJsonError=null structuredUsed=true violations=CITATIONS_TOO_LOW,COMPOSITION_EMPTY
+
+[90mstdout[2m | src/server/contracts/gemini.failclosed.strict.test.ts[2m > [22m[2mfail-closed strict invariants (handler)[2m > [22m[2mreturns HTTP 200 when strict invariants are satisfied natively
+[22m[39m[api/gemini] level=INFO traceId=srv_2c416f03-a1d9-406a-b6a3-7c52048d1cf6 start mode=oracle model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=6 minCit=2 out=0 structured=1 strict=1 maxOutputTokens=1200 temperature=0.1
+[api/gemini] level=INFO traceId=srv_2c416f03-a1d9-406a-b6a3-7c52048d1cf6 done ms=5 json=true rawStructured=1 repaired=0 retryCount=0 fallback=0 reason=NATIVE_OK parseError=undefined rawJsonError=undefined
+
+[90mstdout[2m | src/server/contracts/gemini.failclosed.strict.test.ts[2m > [22m[2mfail-closed strict invariants (handler)[2m > [22m[2mreturns HTTP 200 when the structured oracle uses the observed live anchor role synonyms
+[22m[39m[api/gemini] level=INFO traceId=srv_c90e2600-6b6b-4ca4-9db8-70b377e27aa0 start mode=oracle model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=6 minCit=2 out=0 structured=1 strict=1 maxOutputTokens=1200 temperature=0.1
+[api/gemini] level=INFO traceId=srv_c90e2600-6b6b-4ca4-9db8-70b377e27aa0 done ms=5 json=true rawStructured=1 repaired=0 retryCount=0 fallback=0 reason=NATIVE_OK parseError=undefined rawJsonError=undefined
+
+[90mstdout[2m | src/server/contracts/gemini.failclosed.strict.test.ts[2m > [22m[2mfail-closed strict invariants (handler)[2m > [22m[2mreturns HTTP 200 for raw KO / final OK and keeps the raw error only in audit fields (Option B)
+[22m[39m[api/gemini] level=INFO traceId=srv_d2b570a8-4de5-4158-9485-d53e79cefe09 start mode=oracle model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=6 minCit=2 out=0 structured=1 strict=1 maxOutputTokens=1200 temperature=0.1
+[api/gemini] level=INFO traceId=srv_d2b570a8-4de5-4158-9485-d53e79cefe09 done ms=5 json=true rawStructured=0 repaired=1 retryCount=0 fallback=0 reason=NATIVE_REPAIR_OK parseError=initial invalid json repaired rawJsonError=INVALID_JSON_FROM_LLM
+
+[90mstdout[2m | src/server/contracts/gemini.failclosed.strict.test.ts[2m > [22m[2mfail-closed strict invariants (handler)[2m > [22m[2mreturns HTTP 422 when a structured oracle anchor points to an unresolved citation
+[22m[39m[api/gemini] level=INFO traceId=srv_61b7f0df-88db-4857-8e57-a04e4b6453de start mode=oracle model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=6 minCit=2 out=0 structured=1 strict=1 maxOutputTokens=1200 temperature=0.1
+[api/gemini] level=WARN traceId=srv_61b7f0df-88db-4857-8e57-a04e4b6453de oracle_anchor_validation_failed missingCitationIds=9999 missingRoles=
+[api/gemini] level=INFO traceId=srv_61b7f0df-88db-4857-8e57-a04e4b6453de done ms=5 json=true rawStructured=1 repaired=0 retryCount=0 fallback=0 reason=ORACLE_ANCHOR_CITATION_MISSING parseError=undefined rawJsonError=SCHEMA_VALIDATION_FAILED
+[api/gemini] level=ERR traceId=srv_61b7f0df-88db-4857-8e57-a04e4b6453de strict_invariant_violation mode=oracle rawJsonError=SCHEMA_VALIDATION_FAILED finalJsonError=SCHEMA_VALIDATION_FAILED structuredUsed=false violations=JSON_EMPTY,JSON_ERROR,STRUCTURED_NOT_USED
+
+[90mstdout[2m | src/server/contracts/gemini.failclosed.strict.test.ts[2m > [22m[2mfail-closed strict invariants (handler)[2m > [22m[2mreturns HTTP 422 when a structured oracle anchor role is truly unknown
+[22m[39m[api/gemini] level=INFO traceId=srv_59e020f4-456b-4877-aed1-87c2439ccae7 start mode=oracle model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=6 minCit=2 out=0 structured=1 strict=1 maxOutputTokens=1200 temperature=0.1
+[api/gemini] level=INFO traceId=srv_59e020f4-456b-4877-aed1-87c2439ccae7 done ms=5 json=true rawStructured=1 repaired=0 retryCount=0 fallback=0 reason=SCHEMA_VALIDATION_FAILED parseError=undefined rawJsonError=SCHEMA_VALIDATION_FAILED
+[api/gemini] level=ERR traceId=srv_59e020f4-456b-4877-aed1-87c2439ccae7 strict_invariant_violation mode=oracle rawJsonError=SCHEMA_VALIDATION_FAILED finalJsonError=SCHEMA_VALIDATION_FAILED structuredUsed=false violations=JSON_EMPTY,JSON_ERROR,STRUCTURED_NOT_USED
+
+[90mstdout[2m | src/server/contracts/gemini.failclosed.strict.test.ts[2m > [22m[2mfail-closed strict invariants (handler)[2m > [22m[2mreturns HTTP 422 when oracle anchors do not cover anchor, tension and turn in the final governed state
+[22m[39m[api/gemini] level=INFO traceId=srv_be995bc3-a5e0-48bf-ab88-34a6fd38cce9 start mode=oracle model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=6 minCit=2 out=0 structured=1 strict=1 maxOutputTokens=1200 temperature=0.1
+[api/gemini] level=INFO traceId=srv_be995bc3-a5e0-48bf-ab88-34a6fd38cce9 done ms=5 json=true rawStructured=1 repaired=0 retryCount=0 fallback=0 reason=NATIVE_OK parseError=undefined rawJsonError=undefined
+[api/gemini] level=ERR traceId=srv_be995bc3-a5e0-48bf-ab88-34a6fd38cce9 strict_invariant_violation mode=oracle rawJsonError=null finalJsonError=null structuredUsed=true violations=ANCHOR_ROLE_COVERAGE_MISSING
+
+[90mstdout[2m | src/server/contracts/gemini.failclosed.strict.test.ts[2m > [22m[2mfail-closed strict invariants (handler)[2m > [22m[2mreturns HTTP 200 for guardian when final governed guidance is present
+[22m[39m[api/gemini] level=INFO traceId=srv_d8eeb06f-71ca-4b1e-af9a-25d7c15b3b73 start mode=guardian model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=3 minCit=2 out=0 structured=1 strict=1 maxOutputTokens=600 temperature=0.1
+[api/gemini] level=INFO traceId=srv_d8eeb06f-71ca-4b1e-af9a-25d7c15b3b73 done ms=5 json=true rawStructured=1 repaired=0 retryCount=0 fallback=0 reason=NATIVE_OK parseError=undefined rawJsonError=undefined
+
+[90mstdout[2m | src/server/contracts/gemini.failclosed.strict.test.ts[2m > [22m[2mfail-closed strict invariants (handler)[2m > [22m[2mreturns HTTP 422 when oracle JSON is invalid instead of accepting a synthetic fallback as final state
+[22m[39m[api/gemini] level=INFO traceId=srv_e4662739-3e68-4110-bb5e-9e19d3018cc4 start mode=oracle model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=6 minCit=2 out=0 structured=1 strict=1 maxOutputTokens=1200 temperature=0.1
+[api/gemini] level=WARN traceId=srv_e4662739-3e68-4110-bb5e-9e19d3018cc4 structured_retry retryCount=0 reason=INVALID_JSON_FROM_LLM parseError=JSON.parse failed (repair disabled)
+[api/gemini] level=WARN traceId=srv_e4662739-3e68-4110-bb5e-9e19d3018cc4 structured_retry retryCount=1 reason=INVALID_JSON_FROM_LLM parseError=JSON.parse failed (repair disabled)
+[api/gemini] level=WARN traceId=srv_e4662739-3e68-4110-bb5e-9e19d3018cc4 llm_call_failed status=422 reason=INVALID_JSON_FROM_LLM msg={"quote":"Florian, ton nom repond parseError=JSON.parse failed (repair disabled) parseStage=undefined
+[api/gemini] level=ERR traceId=srv_e4662739-3e68-4110-bb5e-9e19d3018cc4 strict_invariant_violation mode=oracle rawJsonError=INVALID_JSON_FROM_LLM finalJsonError=INVALID_JSON_FROM_LLM structuredUsed=false violations=JSON_EMPTY,JSON_ERROR,STRUCTURED_NOT_USED
+
+ [32m✓[39m src/server/contracts/gemini.failclosed.strict.test.ts [2m([22m[2m10 tests[22m[2m)[22m[90m 146[2mms[22m[39m
+[90mstdout[2m | src/server/knowledge/citationMapping.contract.test.ts[2m > [22m[2mcitation mapping contract[2m > [22m[2mserver citations map to real corpus excerpts
+[22m[39m[api/gemini] level=INFO traceId=srv_2dad32eb-fc72-473d-941f-4b69f7b65285 start mode=oracle model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=6 minCit=2 out=0 structured=1 strict=1 maxOutputTokens=1200 temperature=0.1
+[api/gemini] level=INFO traceId=srv_2dad32eb-fc72-473d-941f-4b69f7b65285 done ms=5 json=true rawStructured=1 repaired=0 retryCount=0 fallback=0 reason=NATIVE_OK parseError=undefined rawJsonError=undefined
+
+ [32m✓[39m src/server/knowledge/citationMapping.contract.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 453[2mms[22m[39m
+   [33m[2m✓[22m[39m citation mapping contract[2m > [22mserver citations map to real corpus excerpts [33m451[2mms[22m[39m
+[90mstdout[2m | src/server/contracts/gemini.handler.contract.test.ts[2m > [22m[2mapi/gemini handler contract[2m > [22m[2mA3: valid body returns 200 JSON success
+[22m[39m[api/gemini] level=INFO traceId=srv_d4c1c961-e9ed-4d3a-8930-d27b835a11b2 start mode=oracle model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=6 minCit=2 out=0 structured=0 strict=0 maxOutputTokens=1200 temperature=0.1
+[api/gemini] level=INFO traceId=srv_d4c1c961-e9ed-4d3a-8930-d27b835a11b2 done ms=5 json=true rawStructured=0 repaired=0 retryCount=0 fallback=0 reason=undefined parseError=undefined rawJsonError=undefined
+
+[90mstdout[2m | src/server/contracts/gemini.handler.contract.test.ts[2m > [22m[2mapi/gemini handler contract[2m > [22m[2mA3bis: oracle structured success returns hermeneutic and composition while keeping json/raw/meta/debug
+[22m[39m[api/gemini] level=INFO traceId=srv_19812774-90e0-4738-900b-1ff8d0f084f3 start mode=oracle model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=6 minCit=2 out=0 structured=1 strict=0 maxOutputTokens=1200 temperature=0.1
+[api/gemini] level=INFO traceId=srv_19812774-90e0-4738-900b-1ff8d0f084f3 done ms=5 json=true rawStructured=1 repaired=0 retryCount=0 fallback=0 reason=NATIVE_OK parseError=undefined rawJsonError=undefined
+
+[90mstdout[2m | src/server/contracts/gemini.handler.contract.test.ts[2m > [22m[2mapi/gemini handler contract[2m > [22m[2mA4: guardian success returns deterministic guidance while keeping json.comment
+[22m[39m[api/gemini] level=INFO traceId=srv_098d445c-039b-4012-a884-fb19125306c8 start mode=guardian model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=4 minCit=2 out=0 structured=0 strict=0 maxOutputTokens=600 temperature=0.1
+[api/gemini] level=INFO traceId=srv_098d445c-039b-4012-a884-fb19125306c8 done ms=5 json=true rawStructured=0 repaired=0 retryCount=0 fallback=0 reason=undefined parseError=undefined rawJsonError=undefined
+
+[90mstdout[2m | src/server/contracts/gemini.handler.contract.test.ts[2m > [22m[2mapi/gemini handler contract[2m > [22m[2mB: contract inconsistency returns 500 JSON error when guard on (force invalid timing)
+[22m[39m[api/gemini] level=INFO traceId=srv_ec1098aa-4f89-4011-ac80-dc51acbd9130 start mode=oracle model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=6 minCit=2 out=0 structured=0 strict=0 maxOutputTokens=1200 temperature=0.1
+[api/gemini] level=INFO traceId=srv_ec1098aa-4f89-4011-ac80-dc51acbd9130 done ms=5 json=true rawStructured=0 repaired=0 retryCount=0 fallback=0 reason=undefined parseError=undefined rawJsonError=undefined
+[api/gemini] level=ERR traceId=srv_ec1098aa-4f89-4011-ac80-dc51acbd9130 contract_internal_inconsistency details=[object Object]
+
+ [32m✓[39m src/server/contracts/gemini.handler.contract.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 883[2mms[22m[39m
+   [33m[2m✓[22m[39m api/gemini handler contract[2m > [22mA3: valid body returns 200 JSON success [33m327[2mms[22m[39m
+ [32m✓[39m src/server/gemini/evaluate-strict-invariants.test.ts [2m([22m[2m8 tests[22m[2m)[22m[90m 21[2mms[22m[39m
+[90mstdout[2m | src/services/zarathustraService.oracle.test.ts[2m > [22m[2mconsultOracle[2m > [22m[2mreturns the canonical oracle JSON payload instead of the envelope text
+[22m[39m[Zarathoustra] Invocation for: florian
+
+ [32m✓[39m src/services/zarathustraService.oracle.test.ts [2m([22m[2m4 tests[22m[2m)[22m[90m 24[2mms[22m[39m
+[90mstdout[2m | src/server/knowledge/citationSnapshot.contract.test.ts[2m > [22m[2mcitation snapshot contract[2m > [22m[2msame request -> same citation snapshot within a run
+[22m[39m[api/gemini] level=INFO traceId=srv_f725dda0-6386-495d-81df-109e1809a27a start mode=oracle model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=6 minCit=2 out=0 structured=1 strict=1 maxOutputTokens=1200 temperature=0.1
+[api/gemini] level=INFO traceId=srv_f725dda0-6386-495d-81df-109e1809a27a done ms=5 json=true rawStructured=1 repaired=0 retryCount=0 fallback=0 reason=NATIVE_OK parseError=undefined rawJsonError=undefined
+[api/gemini] level=INFO traceId=srv_b0d90ca7-4d79-4e02-94c7-809627088981 start mode=oracle model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=6 minCit=2 out=0 structured=1 strict=1 maxOutputTokens=1200 temperature=0.1
+[api/gemini] level=INFO traceId=srv_b0d90ca7-4d79-4e02-94c7-809627088981 done ms=5 json=true rawStructured=1 repaired=0 retryCount=0 fallback=0 reason=NATIVE_OK parseError=undefined rawJsonError=undefined
+
+ [32m✓[39m src/server/knowledge/citationSnapshot.contract.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 583[2mms[22m[39m
+   [33m[2m✓[22m[39m citation snapshot contract[2m > [22msame request -> same citation snapshot within a run [33m579[2mms[22m[39m
+[90mstdout[2m | src/server/knowledge/knowledgeLayer.contract.test.ts[2m > [22m[2mknowledge layer contract[2m > [22m[2mreturns citationsUsed (>=2), locks corpus, and exposes hermeneutic plus composition with audit json
+[22m[39m[api/gemini] level=INFO traceId=srv_de3d2b8c-2955-486b-b515-117b32796cb8 start mode=oracle model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=6 minCit=2 out=0 structured=1 strict=1 maxOutputTokens=1200 temperature=0.1
+[api/gemini] level=INFO traceId=srv_de3d2b8c-2955-486b-b515-117b32796cb8 done ms=5 json=true rawStructured=1 repaired=0 retryCount=0 fallback=0 reason=NATIVE_OK parseError=undefined rawJsonError=undefined
+
+[90mstdout[2m | src/server/knowledge/knowledgeLayer.contract.test.ts[2m > [22m[2mknowledge layer contract[2m > [22m[2mkeeps citation ids stable for the same request (within a run)
+[22m[39m[api/gemini] level=INFO traceId=srv_520dad3b-b8ce-4317-a931-5c2868914f6b start mode=oracle model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=6 minCit=2 out=0 structured=1 strict=1 maxOutputTokens=1200 temperature=0.1
+[api/gemini] level=INFO traceId=srv_520dad3b-b8ce-4317-a931-5c2868914f6b done ms=5 json=true rawStructured=1 repaired=0 retryCount=0 fallback=0 reason=NATIVE_OK parseError=undefined rawJsonError=undefined
+[api/gemini] level=INFO traceId=srv_cba28091-23d5-4962-a2fc-f5e011bcc53f start mode=oracle model=gemini-2.5-flash keySource=GEMINI_API_KEY cit=6 minCit=2 out=0 structured=1 strict=1 maxOutputTokens=1200 temperature=0.1
+[api/gemini] level=INFO traceId=srv_cba28091-23d5-4962-a2fc-f5e011bcc53f done ms=5 json=true rawStructured=1 repaired=0 retryCount=0 fallback=0 reason=NATIVE_OK parseError=undefined rawJsonError=undefined
+
+ [32m✓[39m src/server/knowledge/knowledgeLayer.contract.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 784[2mms[22m[39m
+   [33m[2m✓[22m[39m knowledge layer contract[2m > [22mreturns citationsUsed (>=2), locks corpus, and exposes hermeneutic plus composition with audit json [33m394[2mms[22m[39m
+   [33m[2m✓[22m[39m knowledge layer contract[2m > [22mkeeps citation ids stable for the same request (within a run) [33m387[2mms[22m[39m
+ [32m✓[39m src/scene/RitualOrchestrator.orderLock.test.js [2m([22m[2m1 test[22m[2m)[22m[33m 360[2mms[22m[39m
+   [33m[2m✓[22m[39m RitualOrchestrator — order lock (Climate → Safety)[2m > [22mapplique d'abord ClimateTargets, puis SafetyFactor, puis ré-applique avec clamp [33m356[2mms[22m[39m
+ [32m✓[39m src/services/zarathustraService.guardian.test.ts [2m([22m[2m5 tests[22m[2m)[22m[90m 26[2mms[22m[39m
+ [32m✓[39m src/server/gemini/oracle-hermeneutic.test.ts [2m([22m[2m6 tests[22m[2m)[22m[90m 16[2mms[22m[39m
+ [32m✓[39m src/scene/render/materials/mapClimateToRenderParams.test.ts [2m([22m[2m4 tests[22m[2m)[22m[90m 15[2mms[22m[39m
+ [32m✓[39m src/scene/params/ClimatePresets.library.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 43[2mms[22m[39m
+ [32m✓[39m src/scene/params/ClimatePresets.variants.unit.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 41[2mms[22m[39m
+ [32m✓[39m src/scene/render/materials/applyMaterials.integration.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 27[2mms[22m[39m
+ [32m✓[39m src/server/gemini/compose-oracle-composition.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 19[2mms[22m[39m
+[90mstdout[2m | src/scene/params/ClimateController.test.ts[2m > [22m[2mClimateController[2m > [22m[2mkeeps targets inside safe ranges
+[22m[39m[Climate] preset=Aurore__V07 fog=0.0201 bloom=(0.38,0.20,0.85) glow=0.35 bg=0.66
+
+[90mstdout[2m | src/scene/params/ClimateController.test.ts[2m > [22m[2mClimateController[2m > [22m[2mmaps fog_density to FogExp2 density range
+[22m[39m[Climate] preset=Cendre__V08 fog=0.0080 bloom=(0.19,0.15,0.85) glow=0.22 bg=0.59
+[Climate] preset=Aurore__V01 fog=0.0450 bloom=(0.28,0.17,0.84) glow=0.32 bg=0.62
+
+[90mstdout[2m | src/scene/params/ClimateController.test.ts[2m > [22m[2mClimateController[2m > [22m[2mraises bloom and glow during rise then eases down at the end
+[22m[39m[Climate] preset=Aurore__V07 fog=0.0242 bloom=(0.19,0.12,0.85) glow=0.23 bg=0.52
+
+ [32m✓[39m src/scene/params/ClimateController.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 17[2mms[22m[39m
+ [32m✓[39m src/server/gemini/gemini.response.contracts.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 46[2mms[22m[39m
+[90mstdout[2m | src/scene/params/ClimateController.foregroundOpacityMul.test.ts[2m > [22m[2mClimateController foregroundOpacityMul[2m > [22m[2mAurore vs Cendre - foregroundOpacityMul diff significatif
+[22m[39m[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore fog=0.0220 bloom=(0.20,0.12,0.86) glow=0.25 bg=0.55
+[Climate] preset=Aurore fog=0.0220 bloom=(0.20,0.12,0.86) glow=0.25 bg=0.55
+[Climate] preset=Cendre fog=0.0450 bloom=(0.15,0.12,0.90) glow=0.18 bg=0.55
+[Climate] preset=Aurore fog=0.0219 bloom=(0.21,0.12,0.86) glow=0.26 bg=0.55
+[Climate] preset=Cendre fog=0.0448 bloom=(0.15,0.12,0.90) glow=0.18 bg=0.55
+
+[90mstdout[2m | src/scene/params/ClimateController.foregroundOpacityMul.test.ts[2m > [22m[2mClimateController foregroundOpacityMul[2m > [22m[2mCLIMATE_PRESET_NAMES - foregroundOpacity finite et dans range
+[22m[39m[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore fog=0.0220 bloom=(0.20,0.12,0.86) glow=0.25 bg=0.55
+[Climate] preset=Cendre fog=0.0448 bloom=(0.15,0.12,0.90) glow=0.18 bg=0.55
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Brume d'or fog=0.0278 bloom=(0.31,0.18,0.82) glow=0.35 bg=0.60
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Nuit froide fog=0.0149 bloom=(0.12,0.10,0.90) glow=0.20 bg=0.50
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore fog=0.0219 bloom=(0.21,0.12,0.86) glow=0.26 bg=0.55
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Cendre__V00 fog=0.0415 bloom=(0.16,0.13,0.82) glow=0.18 bg=0.56
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore fog=0.0220 bloom=(0.20,0.12,0.86) glow=0.25 bg=0.55
+[Climate] preset=Cendre__V01 fog=0.0487 bloom=(0.17,0.12,0.93) glow=0.18 bg=0.55
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Cendre__V02 fog=0.0469 bloom=(0.15,0.13,0.90) glow=0.19 bg=0.58
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Cendre__V03 fog=0.0476 bloom=(0.15,0.12,0.83) glow=0.18 bg=0.59
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Cendre__V04 fog=0.0452 bloom=(0.16,0.12,0.83) glow=0.17 bg=0.54
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Cendre__V05 fog=0.0474 bloom=(0.15,0.13,0.85) glow=0.18 bg=0.55
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Cendre__V06 fog=0.0447 bloom=(0.15,0.11,0.98) glow=0.17 bg=0.53
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Cendre__V07 fog=0.0485 bloom=(0.16,0.12,0.82) glow=0.19 bg=0.58
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Cendre__V08 fog=0.0437 bloom=(0.16,0.12,0.84) glow=0.20 bg=0.57
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore fog=0.0220 bloom=(0.20,0.12,0.86) glow=0.25 bg=0.55
+[Climate] preset=Cendre__V09 fog=0.0453 bloom=(0.15,0.12,0.93) glow=0.18 bg=0.59
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Cendre__V10 fog=0.0457 bloom=(0.16,0.12,0.99) glow=0.18 bg=0.55
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Cendre__V11 fog=0.0479 bloom=(0.15,0.13,0.82) glow=0.19 bg=0.58
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Brume d'or__V00 fog=0.0290 bloom=(0.30,0.18,0.74) glow=0.33 bg=0.59
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Brume d'or__V01 fog=0.0256 bloom=(0.32,0.18,0.79) glow=0.36 bg=0.60
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Brume d'or__V02 fog=0.0289 bloom=(0.30,0.19,0.80) glow=0.33 bg=0.61
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore fog=0.0220 bloom=(0.20,0.12,0.86) glow=0.25 bg=0.55
+[Climate] preset=Brume d'or__V03 fog=0.0278 bloom=(0.33,0.18,0.85) glow=0.34 bg=0.61
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore fog=0.0220 bloom=(0.20,0.12,0.86) glow=0.25 bg=0.55
+[Climate] preset=Brume d'or__V04 fog=0.0263 bloom=(0.28,0.18,0.87) glow=0.33 bg=0.59
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Brume d'or__V05 fog=0.0268 bloom=(0.31,0.18,0.84) glow=0.34 bg=0.63
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Brume d'or__V06 fog=0.0296 bloom=(0.33,0.19,0.87) glow=0.39 bg=0.64
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Brume d'or__V07 fog=0.0263 bloom=(0.28,0.17,0.76) glow=0.34 bg=0.63
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore fog=0.0220 bloom=(0.20,0.12,0.86) glow=0.25 bg=0.55
+[Climate] preset=Brume d'or__V08 fog=0.0268 bloom=(0.32,0.19,0.79) glow=0.35 bg=0.60
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Brume d'or__V09 fog=0.0299 bloom=(0.32,0.19,0.90) glow=0.37 bg=0.62
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Brume d'or__V10 fog=0.0275 bloom=(0.30,0.17,0.80) glow=0.32 bg=0.63
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Brume d'or__V11 fog=0.0255 bloom=(0.33,0.18,0.85) glow=0.32 bg=0.61
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Nuit froide__V00 fog=0.0162 bloom=(0.13,0.10,0.88) glow=0.21 bg=0.54
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore fog=0.0220 bloom=(0.20,0.12,0.86) glow=0.25 bg=0.55
+[Climate] preset=Nuit froide__V01 fog=0.0147 bloom=(0.11,0.10,0.86) glow=0.20 bg=0.51
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore fog=0.0220 bloom=(0.20,0.12,0.86) glow=0.25 bg=0.55
+[Climate] preset=Nuit froide__V02 fog=0.0144 bloom=(0.12,0.11,0.83) glow=0.19 bg=0.51
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Nuit froide__V03 fog=0.0161 bloom=(0.12,0.10,0.94) glow=0.19 bg=0.52
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Nuit froide__V04 fog=0.0139 bloom=(0.12,0.10,0.86) glow=0.20 bg=0.48
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Nuit froide__V05 fog=0.0154 bloom=(0.12,0.10,0.93) glow=0.21 bg=0.47
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Nuit froide__V06 fog=0.0147 bloom=(0.13,0.10,0.90) glow=0.20 bg=0.50
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Nuit froide__V07 fog=0.0155 bloom=(0.12,0.11,0.94) glow=0.19 bg=0.52
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Nuit froide__V08 fog=0.0158 bloom=(0.13,0.09,0.97) glow=0.18 bg=0.47
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Nuit froide__V09 fog=0.0139 bloom=(0.13,0.10,0.94) glow=0.21 bg=0.50
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Nuit froide__V10 fog=0.0142 bloom=(0.13,0.10,0.82) glow=0.22 bg=0.48
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore fog=0.0220 bloom=(0.20,0.12,0.86) glow=0.25 bg=0.55
+[Climate] preset=Aurore__V06 fog=0.0230 bloom=(0.21,0.13,0.77) glow=0.24 bg=0.58
+[Climate] preset=Nuit froide__V11 fog=0.0158 bloom=(0.11,0.11,0.99) glow=0.21 bg=0.47
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore__V00 fog=0.0200 bloom=(0.21,0.12,0.85) glow=0.24 bg=0.52
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore__V01 fog=0.0227 bloom=(0.21,0.13,0.88) glow=0.27 bg=0.58
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore__V02 fog=0.0235 bloom=(0.19,0.13,0.81) glow=0.25 bg=0.59
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore__V03 fog=0.0228 bloom=(0.20,0.12,0.87) glow=0.25 bg=0.57
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore__V04 fog=0.0231 bloom=(0.22,0.13,0.81) glow=0.25 bg=0.59
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore__V05 fog=0.0231 bloom=(0.20,0.12,0.82) glow=0.27 bg=0.58
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore__V06 fog=0.0229 bloom=(0.22,0.13,0.78) glow=0.25 bg=0.58
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore__V07 fog=0.0240 bloom=(0.20,0.12,0.85) glow=0.24 bg=0.53
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore__V08 fog=0.0236 bloom=(0.21,0.12,0.85) glow=0.26 bg=0.59
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore__V09 fog=0.0217 bloom=(0.21,0.11,0.90) glow=0.26 bg=0.55
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore__V10 fog=0.0201 bloom=(0.19,0.13,0.89) glow=0.27 bg=0.55
+[Climate] preset=Aurore__V08 fog=0.0238 bloom=(0.21,0.11,0.85) glow=0.25 bg=0.59
+[Climate] preset=Aurore fog=0.0220 bloom=(0.20,0.12,0.86) glow=0.25 bg=0.55
+[Climate] preset=Aurore__V06 fog=0.0230 bloom=(0.21,0.13,0.77) glow=0.24 bg=0.58
+[Climate] preset=Aurore__V11 fog=0.0235 bloom=(0.23,0.12,0.88) glow=0.28 bg=0.54
+
+ [32m✓[39m src/scene/params/ClimateController.foregroundOpacityMul.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 151[2mms[22m[39m
+ [32m✓[39m src/server/contracts/guardian.microcopy.contract.test.ts [2m([22m[2m11 tests[22m[2m)[22m[90m 34[2mms[22m[39m
+ [32m✓[39m src/server/gemini/enrich-oracle-motifs.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 13[2mms[22m[39m
+ [32m✓[39m src/scene/render/optics/transparency.test.ts [2m([22m[2m4 tests[22m[2m)[22m[90m 13[2mms[22m[39m
+[90mstdout[2m | src/scene/safety/LightSafetyGovernor.test.ts[2m > [22m[2mLightSafetyGovernor[2m > [22m[2mclamps after max over duration
+[22m[39m[LightSafety] active=false reason=bloom overMs=100 cooldownMs=0 factor=1.00
+
+[90mstdout[2m | src/scene/safety/LightSafetyGovernor.test.ts[2m > [22m[2mLightSafetyGovernor[2m > [22m[2mresets over timer when signal falls under low threshold
+[22m[39m[LightSafety] active=false reason=bloom overMs=100 cooldownMs=0 factor=1.00
+
+[90mstdout[2m | src/scene/safety/LightSafetyGovernor.test.ts[2m > [22m[2mLightSafetyGovernor[2m > [22m[2mkeeps factor capped during cooldown even if signal drops
+[22m[39m[LightSafety] active=false reason=bloom overMs=100 cooldownMs=0 factor=1.00
+
+ [32m✓[39m src/scene/safety/LightSafetyGovernor.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 15[2mms[22m[39m
+ [32m✓[39m src/server/contracts/oracle.hermeneutic.schema.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 15[2mms[22m[39m
+ [32m✓[39m src/server/knowledge/knowledgeIntegrity.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 287[2mms[22m[39m
+ [32m✓[39m src/services/visualParams.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 11[2mms[22m[39m
+ [32m✓[39m src/server/gemini/guardian-guidance.test.ts [2m([22m[2m4 tests[22m[2m)[22m[90m 16[2mms[22m[39m
+ [32m✓[39m src/ci/fiesta.discovery.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 31[2mms[22m[39m
+ [32m✓[39m src/server/knowledge/retriever.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 37[2mms[22m[39m
+ [32m✓[39m src/services/jsonExtract.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 9[2mms[22m[39m
+ [32m✓[39m src/server/contracts/oracle.wire.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 22[2mms[22m[39m
+ [32m✓[39m src/scene/RitualOrchestrator.opacityWiring.test.js [2m([22m[2m1 test[22m[2m)[22m[90m 8[2mms[22m[39m
+ [32m✓[39m src/services/zaraLangGuard.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 16[2mms[22m[39m
+ [32m✓[39m src/test/network.hermetic.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 28[2mms[22m[39m
+ [32m✓[39m src/components/oracle/RitualWizard.result.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[90m 255[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m34 passed[39m[22m[90m (34)[39m
+[2m      Tests [22m [1m[32m114 passed[39m[22m[90m (114)[39m
+[2m   Start at [22m 21:08:51
+[2m   Duration [22m 20.59s[2m (transform 2.90s, setup 443ms, collect 11.11s, tests 4.46s, environment 2.36s, prepare 14.57s)[22m

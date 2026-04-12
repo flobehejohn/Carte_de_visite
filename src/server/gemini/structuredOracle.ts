@@ -1,11 +1,11 @@
-// src/server/gemini/structuredOracle.ts
 import { GoogleGenAI, Schema, Type } from '@google/genai';
 import { z } from 'zod';
-import type { JsonErrorCode, RawContractMeta } from './contract-types.js';
 import {
   GuardianStructuredSchema,
   OracleStructuredSchema,
 } from '../../shared/contracts/gemini.contracts.js';
+import type { JsonErrorCode, RawContractMeta } from './contract-types.js';
+import { normalizeOracleAnchorRole } from './oracle-anchor-role.js';
 
 export type GeminiMode = 'raw' | 'oracle' | 'guardian';
 
@@ -65,7 +65,13 @@ const NATIVE_ORACLE_SCHEMA: Schema = {
         type: Type.OBJECT,
         properties: {
           citation_id: { type: Type.STRING } as any,
-          role: { type: Type.STRING } as any,
+          role: {
+            type: Type.STRING,
+            format: 'enum',
+            enum: ['anchor', 'tension', 'turn'],
+            description:
+              'Canonical oracle anchor role. Use only anchor, tension, or turn.',
+          } as any,
           motif: { type: Type.STRING } as any,
           claim: { type: Type.STRING } as any,
         },
@@ -131,14 +137,14 @@ function isJsonRepairAllowed(): boolean {
   return v === '1' || v === 'true' || v === 'yes';
 }
 
-function pickThinkingConfig(model: string):
-  | { thinkingBudget: number; includeThoughts: boolean }
-  | undefined {
-  const normalized = String(model ?? '').trim().toLowerCase();
+function pickThinkingConfig(
+  model: string,
+): { thinkingBudget: number; includeThoughts: boolean } | undefined {
+  const normalized = String(model ?? '')
+    .trim()
+    .toLowerCase();
   if (!normalized.includes('gemini-2.5')) return undefined;
   return {
-    // Structured JSON is more reliable when hidden reasoning does not consume
-    // the output budget.
     thinkingBudget: 0,
     includeThoughts: false,
   };
@@ -385,25 +391,31 @@ function strictNormalizeOracle(input: any): any {
       o[field] = String(o[field] ?? '');
     }
   }
+
   if (Array.isArray(o.keywords)) {
     o.keywords = o.keywords
       .map((x: any) => String(x ?? ''))
       .filter(Boolean)
       .slice(0, 10);
   }
+
   if (Array.isArray(o.anchors)) {
     o.anchors = o.anchors.slice(0, 4).map((anchor: any) => ({
       citation_id: String(anchor?.citation_id ?? ''),
-      role: String(anchor?.role ?? ''),
+      role:
+        normalizeOracleAnchorRole(anchor?.role) ??
+        String(anchor?.role ?? '').trim(),
       motif: String(anchor?.motif ?? ''),
       claim: String(anchor?.claim ?? ''),
     }));
   }
+
   if (Object.prototype.hasOwnProperty.call(o, 'confidence')) {
     const n =
       typeof o.confidence === 'number' ? o.confidence : Number(o.confidence);
     o.confidence = Number.isFinite(n) ? n : o.confidence;
   }
+
   return o;
 }
 
@@ -428,6 +440,7 @@ function strictNormalizeGuardian(input: any): any {
       .filter(Boolean)
       .slice(0, 64);
   }
+
   return o;
 }
 
