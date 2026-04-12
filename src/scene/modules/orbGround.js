@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import * as orbTextures from './orbTextures.js';
+import * as orbTextures from './orbTextures';
 
 const REBUILD_KEYS = ['enabled', 'mode', 'width', 'depth', 'segmentsX', 'segmentsZ'];
 const TEXTURE_FILTERING = ['smooth', 'pixelated'];
