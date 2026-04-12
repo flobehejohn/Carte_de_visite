@@ -56,6 +56,63 @@ type SceneResources = {
   disposeCallback?: (() => void) | null;
 };
 
+type DrawableObject = THREE.Object3D & {
+  material?: THREE.Material | THREE.Material[];
+  geometry?: THREE.BufferGeometry;
+  isMesh?: boolean;
+  isPoints?: boolean;
+  isLine?: boolean;
+  isLineSegments?: boolean;
+  isLineLoop?: boolean;
+  isSprite?: boolean;
+  isInstancedMesh?: boolean;
+};
+
+type RenderTelemetryInfo = {
+  calls: number;
+  triangles: number;
+  points: number;
+  lines: number;
+};
+
+type SceneStats = {
+  rendererCalls: number;
+  triangles: number;
+  points: number;
+  lines: number;
+  baseRendererCalls: number;
+  baseTriangles: number;
+  basePoints: number;
+  baseLines: number;
+  overlayRendererCalls: number;
+  overlayTriangles: number;
+  overlayPoints: number;
+  overlayLines: number;
+  lastFrameMode: RenderMode | null;
+  framesRendered: number;
+  baseVisibleDrawables: number;
+  overlayVisibleDrawables: number;
+  totalVisibleDrawables: number;
+  baseVisibleDrawablesExcludingProbe: number;
+  overlayVisibleDrawablesExcludingProbe: number;
+  totalVisibleDrawablesExcludingProbe: number;
+  orbGroupChildren: number;
+  layersGroupChildren: number;
+  orbRootVisibleDrawables: number;
+  layersGroupVisibleDrawables: number;
+  orbGroupVisible: boolean | null;
+  layersGroupVisible: boolean | null;
+  fluidMeshVisible: boolean;
+  particlesPointsVisible: boolean;
+  fluidMeshLayerMask: number | null;
+  particlesPointsLayerMask: number | null;
+  sceneChildren: number;
+  cameraLayerMask: number | null;
+  probePresent: boolean;
+  probeVisible: boolean;
+  hasRenderableContent: boolean;
+};
+
 const MATERIAL_TEXTURE_KEYS = [
   'map',
   'alphaMap',
@@ -372,6 +429,309 @@ function snapshotCandidateSignature(candidates: FeedbackCandidate[]): string {
   );
 }
 
+function getViewportSize(container: HTMLDivElement | null) {
+  const width = Math.max(1, container?.clientWidth || window.innerWidth || 1);
+  const height = Math.max(
+    1,
+    container?.clientHeight || window.innerHeight || 1,
+  );
+  return { width, height };
+}
+
+function isDrawableObject(
+  obj: THREE.Object3D | null | undefined,
+): obj is DrawableObject {
+  const drawable = obj as DrawableObject | null | undefined;
+  if (!drawable || drawable.visible === false) return false;
+
+  return Boolean(
+    drawable.isMesh ||
+      drawable.isPoints ||
+      drawable.isLine ||
+      drawable.isLineSegments ||
+      drawable.isLineLoop ||
+      drawable.isSprite ||
+      drawable.isInstancedMesh,
+  );
+}
+
+function countVisibleDrawables(root: THREE.Object3D | null | undefined): number {
+  if (!root) return 0;
+
+  let count = 0;
+  root.traverse((obj) => {
+    if (!isDrawableObject(obj)) return;
+    if (obj.name === '__DEV_VISIBLE_PROBE__') return;
+    count += 1;
+  });
+
+  return count;
+}
+
+function readRendererTelemetry(renderer: THREE.WebGLRenderer): RenderTelemetryInfo {
+  const renderInfo = renderer.info.render as Record<string, unknown>;
+  return {
+    calls: Number(renderInfo.calls || 0),
+    triangles: Number(renderInfo.triangles || 0),
+    points: Number(renderInfo.points || 0),
+    lines: Number(renderInfo.lines || 0),
+  };
+}
+
+function sumRenderTelemetry(
+  base: RenderTelemetryInfo | null,
+  overlay: RenderTelemetryInfo | null,
+): RenderTelemetryInfo {
+  return {
+    calls: Number(base?.calls || 0) + Number(overlay?.calls || 0),
+    triangles: Number(base?.triangles || 0) + Number(overlay?.triangles || 0),
+    points: Number(base?.points || 0) + Number(overlay?.points || 0),
+    lines: Number(base?.lines || 0) + Number(overlay?.lines || 0),
+  };
+}
+
+function collectSceneStats(
+  scene: THREE.Scene,
+  localCtx: any,
+  renderTelemetry: {
+    base: RenderTelemetryInfo | null;
+    overlay: RenderTelemetryInfo | null;
+    total: RenderTelemetryInfo | null;
+    mode: RenderMode | null;
+    framesRendered: number;
+  },
+): SceneStats {
+  let baseVisibleDrawables = 0;
+  let overlayVisibleDrawables = 0;
+  let totalVisibleDrawables = 0;
+  let baseVisibleDrawablesExcludingProbe = 0;
+  let overlayVisibleDrawablesExcludingProbe = 0;
+  let totalVisibleDrawablesExcludingProbe = 0;
+  let probePresent = false;
+  let probeVisible = false;
+
+  scene.traverse((obj) => {
+    const isProbe = obj.name === '__DEV_VISIBLE_PROBE__';
+    if (isProbe) {
+      probePresent = true;
+      probeVisible = obj.visible !== false;
+    }
+
+    if (!isDrawableObject(obj)) return;
+
+    totalVisibleDrawables += 1;
+    if (!isProbe) {
+      totalVisibleDrawablesExcludingProbe += 1;
+    }
+
+    if (objectUsesLayer(obj, ORB_BASE_RENDER_LAYER)) {
+      baseVisibleDrawables += 1;
+      if (!isProbe) {
+        baseVisibleDrawablesExcludingProbe += 1;
+      }
+    }
+
+    if (objectUsesLayer(obj, ORB_OVERLAY_RENDER_LAYER)) {
+      overlayVisibleDrawables += 1;
+      if (!isProbe) {
+        overlayVisibleDrawablesExcludingProbe += 1;
+      }
+    }
+  });
+
+  const totalTelemetry = renderTelemetry.total || {
+    calls: 0,
+    triangles: 0,
+    points: 0,
+    lines: 0,
+  };
+  const baseTelemetry = renderTelemetry.base || {
+    calls: 0,
+    triangles: 0,
+    points: 0,
+    lines: 0,
+  };
+  const overlayTelemetry = renderTelemetry.overlay || {
+    calls: 0,
+    triangles: 0,
+    points: 0,
+    lines: 0,
+  };
+
+  const rendererCalls = Number(totalTelemetry.calls || 0);
+  const triangles = Number(totalTelemetry.triangles || 0);
+  const points = Number(totalTelemetry.points || 0);
+  const lines = Number(totalTelemetry.lines || 0);
+  const primitiveCount = triangles + points + lines;
+
+  return {
+    rendererCalls,
+    triangles,
+    points,
+    lines,
+    baseRendererCalls: Number(baseTelemetry.calls || 0),
+    baseTriangles: Number(baseTelemetry.triangles || 0),
+    basePoints: Number(baseTelemetry.points || 0),
+    baseLines: Number(baseTelemetry.lines || 0),
+    overlayRendererCalls: Number(overlayTelemetry.calls || 0),
+    overlayTriangles: Number(overlayTelemetry.triangles || 0),
+    overlayPoints: Number(overlayTelemetry.points || 0),
+    overlayLines: Number(overlayTelemetry.lines || 0),
+    lastFrameMode: renderTelemetry.mode,
+    framesRendered: renderTelemetry.framesRendered,
+    baseVisibleDrawables,
+    overlayVisibleDrawables,
+    totalVisibleDrawables,
+    baseVisibleDrawablesExcludingProbe,
+    overlayVisibleDrawablesExcludingProbe,
+    totalVisibleDrawablesExcludingProbe,
+    orbGroupChildren: localCtx.orbGroup?.children?.length ?? 0,
+    layersGroupChildren: localCtx.layersGroup?.children?.length ?? 0,
+    orbRootVisibleDrawables: countVisibleDrawables(localCtx.orbGroup),
+    layersGroupVisibleDrawables: countVisibleDrawables(localCtx.layersGroup),
+    orbGroupVisible:
+      typeof localCtx.orbGroup?.visible === 'boolean'
+        ? localCtx.orbGroup.visible
+        : null,
+    layersGroupVisible:
+      typeof localCtx.layersGroup?.visible === 'boolean'
+        ? localCtx.layersGroup.visible
+        : null,
+    fluidMeshVisible: Boolean(localCtx.fluidParticlesState?.mesh?.visible),
+    particlesPointsVisible: Boolean(localCtx.particlesPoints?.visible),
+    fluidMeshLayerMask:
+      typeof localCtx.fluidParticlesState?.mesh?.layers?.mask === 'number'
+        ? localCtx.fluidParticlesState.mesh.layers.mask
+        : null,
+    particlesPointsLayerMask:
+      typeof localCtx.particlesPoints?.layers?.mask === 'number'
+        ? localCtx.particlesPoints.layers.mask
+        : null,
+    sceneChildren: scene.children.length,
+    cameraLayerMask:
+      typeof localCtx.camera?.layers?.mask === 'number'
+        ? localCtx.camera.layers.mask
+        : null,
+    probePresent,
+    probeVisible,
+    hasRenderableContent:
+      rendererCalls > 0 ||
+      primitiveCount > 0 ||
+      totalVisibleDrawablesExcludingProbe > 0,
+  };
+}
+
+function materialColor(
+  material: THREE.Material | undefined,
+): THREE.ColorRepresentation {
+  const candidate = (material as any)?.color;
+  if (candidate && typeof candidate === 'object' && candidate.isColor) {
+    return candidate.clone();
+  }
+  return 0xffffff;
+}
+
+function createVisibleSafeMaterial(
+  obj: DrawableObject,
+  sourceMaterial: THREE.Material,
+): THREE.Material {
+  const fallbackColor = materialColor(sourceMaterial);
+  const brightMeshColor = 0xff4dff;
+  const brightLineColor = 0x7df9ff;
+
+  if (obj.isPoints) {
+    return new THREE.PointsMaterial({
+      color: 0xffffff,
+      size: 0.24,
+      sizeAttenuation: true,
+      transparent: false,
+      opacity: 1,
+      depthTest: true,
+      depthWrite: false,
+      fog: false,
+    });
+  }
+
+  if (obj.isLine || obj.isLineSegments || obj.isLineLoop) {
+    return new THREE.LineBasicMaterial({
+      color: brightLineColor,
+      transparent: false,
+      opacity: 1,
+      depthTest: true,
+      depthWrite: true,
+      fog: false,
+    });
+  }
+
+  return new THREE.MeshBasicMaterial({
+    color:
+      typeof fallbackColor === 'number' && fallbackColor !== 0x000000
+        ? fallbackColor
+        : brightMeshColor,
+    wireframe: false,
+    transparent: false,
+    opacity: 1,
+    depthTest: true,
+    depthWrite: true,
+    side: THREE.DoubleSide,
+    fog: false,
+  });
+}
+
+function createVisibleSafeMaterialSet(
+  obj: DrawableObject,
+  original: THREE.Material | THREE.Material[],
+): THREE.Material | THREE.Material[] {
+  if (Array.isArray(original)) {
+    return original.map((material) => createVisibleSafeMaterial(obj, material));
+  }
+  return createVisibleSafeMaterial(obj, original);
+}
+
+function disposeTransientMaterials(
+  current: THREE.Material | THREE.Material[] | undefined,
+  original: THREE.Material | THREE.Material[] | undefined,
+): void {
+  const originalSet = new Set(materialArray(original));
+
+  for (const material of materialArray(current)) {
+    if (originalSet.has(material)) continue;
+    disposeMaterial(material);
+  }
+}
+
+function flagMaterialNeedsUpdate(
+  material: THREE.Material | THREE.Material[] | undefined,
+): void {
+  for (const entry of materialArray(material)) {
+    entry.needsUpdate = true;
+  }
+}
+
+function parseCssZIndex(value: string | null | undefined): number | null {
+  if (!value || value === 'auto') return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function mountDevVisibleProbe(scene: THREE.Scene) {
+  const probe = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(0.8, 0),
+    new THREE.MeshBasicMaterial({ color: 0xff00ff }),
+  );
+
+  probe.name = '__DEV_VISIBLE_PROBE__';
+  probe.position.set(0, 0, 0);
+  probe.layers.set(ORB_BASE_RENDER_LAYER);
+  scene.add(probe);
+
+  return () => {
+    scene.remove(probe);
+    probe.geometry.dispose();
+    (probe.material as THREE.Material).dispose();
+  };
+}
+
 const AUDIT_RUNTIME_ENABLED =
   import.meta.env.DEV || import.meta.env.MODE === 'test';
 
@@ -381,6 +741,7 @@ export function Oracle3DScene({
   loading,
   result,
 }: Oracle3DSceneProps) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const orchestratorRef = useRef<RitualOrchestrator | null>(null);
   const frameIdRef = useRef<number>(0);
@@ -391,15 +752,41 @@ export function Oracle3DScene({
   const feedbackCandidatesRef = useRef<FeedbackCandidate[]>([]);
   const feedbackSignatureRef = useRef<string>('');
   const autoFallbackOnFeedbackRef = useRef<boolean>(true);
+  const visibleSafeModeRef = useRef<boolean>(false);
+  const originalMaterialsRef = useRef<
+    WeakMap<object, THREE.Material | THREE.Material[]>
+  >(new WeakMap());
+  const emergencyProbeDisposeRef = useRef<(() => void) | null>(null);
   const scanFeedbackCandidatesRef = useRef<
     (reason?: string) => FeedbackCandidate[]
   >(() => []);
   const resetSceneViewRef = useRef<(reason?: string) => void>(() => {});
+  const applyVisibleSafeModeRef = useRef<(enabled: boolean) => void>(() => {});
   const lastRitualSeedRef = useRef<string>('');
   const busyCycleRef = useRef(false);
+  const baseRenderTelemetryRef = useRef<RenderTelemetryInfo | null>(null);
+  const overlayRenderTelemetryRef = useRef<RenderTelemetryInfo | null>(null);
+  const lastFrameModeRef = useRef<RenderMode | null>(null);
+  const renderedFramesRef = useRef(0);
 
   useEffect(() => {
     if (!containerRef.current) return;
+
+    const setOverlayMessage = (message: string | null) => {
+      const overlay = overlayRef.current;
+      if (!overlay) return;
+
+      if (!message) {
+        overlay.textContent = 'WebGL context lost';
+        overlay.classList.add('hidden');
+        overlay.classList.remove('flex');
+        return;
+      }
+
+      overlay.textContent = message;
+      overlay.classList.remove('hidden');
+      overlay.classList.add('flex');
+    };
 
     const disposeSceneResources = (refs: SceneResources | null | undefined) => {
       if (!refs) return;
@@ -435,14 +822,19 @@ export function Oracle3DScene({
     }
 
     let activeRefs: SceneResources | null = null;
+    let disposeProbe: (() => void) | null = null;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
     scene.fog = new THREE.FogExp2(0x000000, 0.02);
 
+    const { width: initialWidth, height: initialHeight } = getViewportSize(
+      containerRef.current,
+    );
+
     const camera = new THREE.PerspectiveCamera(
       45,
-      window.innerWidth / window.innerHeight,
+      initialWidth / initialHeight,
       0.1,
       100,
     );
@@ -455,8 +847,8 @@ export function Oracle3DScene({
       powerPreference: 'high-performance',
     });
 
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(initialWidth, initialHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.toneMapping = THREE.ReinhardToneMapping;
     renderer.toneMappingExposure = 1.0;
     const baseExposure = renderer.toneMappingExposure;
@@ -476,10 +868,7 @@ export function Oracle3DScene({
       event.preventDefault?.();
       contextLost = true;
       console.warn('[AUDIT] WebGL context lost');
-      if (overlayRef.current) {
-        overlayRef.current.style.display = 'flex';
-        overlayRef.current.textContent = 'WebGL context lost';
-      }
+      setOverlayMessage('WebGL context lost');
     };
 
     renderer.domElement.addEventListener(
@@ -490,7 +879,7 @@ export function Oracle3DScene({
 
     const renderScene = new RenderPass(scene, camera);
     const bloomPass = new UnrealBloomPass(
-      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      new THREE.Vector2(initialWidth, initialHeight),
       0.9,
       0.4,
       0.85,
@@ -571,6 +960,47 @@ export function Oracle3DScene({
     const orchestrator = new RitualOrchestrator(ctx);
     orchestratorRef.current = orchestrator;
 
+    const applyVisibleSafeMode = (enabled: boolean) => {
+      const localCtx = (orchestratorRef.current as any)?.ctx;
+      if (!localCtx?.scene) return;
+
+      localCtx.scene.traverse((obj: THREE.Object3D) => {
+        const drawable = obj as DrawableObject;
+        if (!isDrawableObject(drawable)) return;
+        if (!drawable.material) return;
+        if (drawable.name === '__DEV_VISIBLE_PROBE__') return;
+
+        if (enabled) {
+          if (!originalMaterialsRef.current.has(drawable)) {
+            originalMaterialsRef.current.set(drawable, drawable.material);
+          }
+
+          const originalMaterial = originalMaterialsRef.current.get(drawable);
+          if (!originalMaterial) return;
+
+          disposeTransientMaterials(drawable.material, originalMaterial);
+          drawable.material = createVisibleSafeMaterialSet(
+            drawable,
+            originalMaterial,
+          );
+          flagMaterialNeedsUpdate(drawable.material);
+          return;
+        }
+
+        const originalMaterial = originalMaterialsRef.current.get(drawable);
+        if (!originalMaterial) return;
+
+        disposeTransientMaterials(drawable.material, originalMaterial);
+        drawable.material = originalMaterial;
+        flagMaterialNeedsUpdate(drawable.material);
+      });
+
+      visibleSafeModeRef.current = Boolean(enabled);
+      console.info('[AUDIT] setVisibleSafeMode', visibleSafeModeRef.current);
+    };
+
+    applyVisibleSafeModeRef.current = applyVisibleSafeMode;
+
     if (!initRitualRef.current) {
       orchestrator.initRitual('');
       initRitualRef.current = true;
@@ -585,16 +1015,20 @@ export function Oracle3DScene({
       feedbackSignatureRef.current = '';
       renderModeRef.current = 'composer-bloom';
       autoFallbackOnFeedbackRef.current = true;
+      baseRenderTelemetryRef.current = null;
+      overlayRenderTelemetryRef.current = null;
+      lastFrameModeRef.current = null;
+      renderedFramesRef.current = 0;
 
       ensureOverlayFluidIsolationConfig(localCtx);
       resetFluidParticles(localCtx);
-
-      if (overlayRef.current) {
-        overlayRef.current.style.display = 'none';
-        overlayRef.current.textContent = 'WebGL context lost';
-      }
+      setOverlayMessage(null);
 
       localCtx.camera?.layers?.set?.(ORB_BASE_RENDER_LAYER);
+
+      if (visibleSafeModeRef.current) {
+        applyVisibleSafeModeRef.current(true);
+      }
 
       console.info('[AUDIT] resetSceneView', reason);
       scanFeedbackCandidatesRef.current(`reset:${reason}`);
@@ -655,12 +1089,25 @@ export function Oracle3DScene({
       rendererDom: renderer.domElement,
       container: containerRef.current,
       disposeCallback: () => {
+        emergencyProbeDisposeRef.current?.();
+        emergencyProbeDisposeRef.current = null;
+        applyVisibleSafeModeRef.current(false);
+        disposeProbe?.();
+        disposeProbe = null;
         ctx.lightSafetyGovernor?.dispose?.();
       },
     };
 
     if (AUDIT_RUNTIME_ENABLED) {
       (window as any).__ORB_ACTIVE_SCENE__ = activeRefs;
+    }
+
+    if (
+      import.meta.env.DEV &&
+      typeof window !== 'undefined' &&
+      (window as any).__ORB_DEBUG_VISIBLE_PROBE__ === true
+    ) {
+      disposeProbe = mountDevVisibleProbe(scene);
     }
 
     if (AUDIT_RUNTIME_ENABLED) {
@@ -803,9 +1250,16 @@ export function Oracle3DScene({
                 : null,
           };
 
-          const rendererInfo = localCtx.renderer?.info?.render
-            ? { ...localCtx.renderer.info.render }
-            : null;
+          const rendererInfo = {
+            base: baseRenderTelemetryRef.current,
+            overlay: overlayRenderTelemetryRef.current,
+            total: sumRenderTelemetry(
+              baseRenderTelemetryRef.current,
+              overlayRenderTelemetryRef.current,
+            ),
+            mode: lastFrameModeRef.current,
+            framesRendered: renderedFramesRef.current,
+          };
 
           if (localCtx.contextLostFlag && localCtx.contextLostFlag()) {
             warnings.push('webgl context lost');
@@ -951,6 +1405,7 @@ export function Oracle3DScene({
 
           uiWindow.renderMode = renderModeRef.current;
           uiWindow.autoFallbackOnFeedback = autoFallbackOnFeedbackRef.current;
+          uiWindow.visibleSafeMode = visibleSafeModeRef.current;
           uiWindow.feedbackCandidates = feedbackCandidatesRef.current;
           uiWindow.layers = {
             composerBase: ORB_BASE_RENDER_LAYER,
@@ -1025,7 +1480,7 @@ export function Oracle3DScene({
               maxO = Math.max(maxO, o);
               minTh = Math.min(minTh, th);
               maxTh = Math.max(maxTh, th);
-              count++;
+              count += 1;
 
               if (t > 1 || t < 0) warnings.push('transmission out of range');
               if (o > 1 || o < 0) warnings.push('opacity out of range');
@@ -1072,11 +1527,88 @@ export function Oracle3DScene({
             warnings.push('render-target-feedback-risk');
           }
 
+          const sceneStats = collectSceneStats(scene, localCtx, rendererInfo);
+          if (sceneStats.rendererCalls <= 0) {
+            warnings.push('rendererCalls<=0');
+          }
+          if (sceneStats.triangles + sceneStats.points + sceneStats.lines <= 0) {
+            warnings.push('no rendered primitives yet');
+          }
+          if (
+            sceneStats.baseVisibleDrawablesExcludingProbe +
+              sceneStats.overlayVisibleDrawablesExcludingProbe <=
+            0
+          ) {
+            warnings.push('no visible drawables registered');
+          }
+          if (sceneStats.baseVisibleDrawablesExcludingProbe <= 0) {
+            warnings.push('base layer has no visible drawables');
+          }
+
+          const dom = (() => {
+            const rootEl = rootRef.current;
+            const containerEl = containerRef.current;
+            const parentEl = rootEl?.parentElement ?? null;
+            const rootStyle = rootEl ? window.getComputedStyle(rootEl) : null;
+            const parentStyle = parentEl
+              ? window.getComputedStyle(parentEl)
+              : null;
+            const rootRect = rootEl?.getBoundingClientRect?.();
+            const containerRect = containerEl?.getBoundingClientRect?.();
+            const rootZIndex = parseCssZIndex(rootStyle?.zIndex);
+            const parentZIndex = parseCssZIndex(parentStyle?.zIndex);
+
+            if (rootZIndex !== null && rootZIndex < 0) {
+              warnings.push('scene root negative z-index');
+            }
+
+            return {
+              rootZIndex,
+              rootPosition: rootStyle?.position ?? null,
+              rootIsolation: rootStyle?.isolation ?? null,
+              rootPointerEvents: rootStyle?.pointerEvents ?? null,
+              rootOpacity: rootStyle?.opacity ?? null,
+              rootVisibility: rootStyle?.visibility ?? null,
+              parentZIndex,
+              parentPosition: parentStyle?.position ?? null,
+              parentIsolation: parentStyle?.isolation ?? null,
+              parentOverflow: parentStyle?.overflow ?? null,
+              rootRect: rootRect
+                ? {
+                    width: rootRect.width,
+                    height: rootRect.height,
+                    top: rootRect.top,
+                    left: rootRect.left,
+                  }
+                : null,
+              containerRect: containerRect
+                ? {
+                    width: containerRect.width,
+                    height: containerRect.height,
+                    top: containerRect.top,
+                    left: containerRect.left,
+                  }
+                : null,
+              canvasClient: renderer.domElement
+                ? {
+                    width: renderer.domElement.clientWidth,
+                    height: renderer.domElement.clientHeight,
+                  }
+                : null,
+              canvasWidth: renderer.domElement?.width ?? null,
+              canvasHeight: renderer.domElement?.height ?? null,
+              canvasAttached: Boolean(
+                renderer.domElement && containerEl?.contains(renderer.domElement),
+              ),
+            };
+          })();
+
           return {
             time: Date.now(),
             seed: (orch as any)?.ritualDNA?.seed ?? null,
             progress: (orch as any)?.progress ?? null,
             renderMode: renderModeRef.current,
+            visibleSafeMode: visibleSafeModeRef.current,
             ritualDNA: (orch as any)?.ritualDNA
               ? serializeColors((orch as any).ritualDNA)
               : null,
@@ -1088,6 +1620,7 @@ export function Oracle3DScene({
             volumeConfig,
             volumeEffective,
             targets: climateTargets,
+            climateTargets,
             safetyFactor,
             appliedFogDensity,
             appliedBloomStrength,
@@ -1095,6 +1628,8 @@ export function Oracle3DScene({
             appliedOpacityMuls,
             lightsSnapshot: lights,
             rendererInfo,
+            sceneStats,
+            dom,
             fluid: fluidState,
             feedbackCandidates: feedbackCandidatesRef.current,
             uiWindow,
@@ -1132,9 +1667,44 @@ export function Oracle3DScene({
         localCtx.fluidParticlesConfig.enabled = Boolean(visible);
 
         resetFluidParticles(localCtx);
+
+        if (visibleSafeModeRef.current) {
+          applyVisibleSafeModeRef.current(true);
+        }
+
         scanFeedbackCandidatesRef.current('fluid-visibility-update');
 
         console.info('[AUDIT] setFluidParticlesVisible', visible);
+      };
+
+      const setEmergencyVisibleMode = (enabled: boolean) => {
+        const active = Boolean(enabled);
+        const localCtx = (orchestratorRef.current as any)?.ctx;
+
+        if (active) {
+          setRenderMode('direct');
+          setFluidParticlesVisible(false);
+          applyVisibleSafeModeRef.current(true);
+
+          if (localCtx?.scene && !emergencyProbeDisposeRef.current) {
+            emergencyProbeDisposeRef.current = mountDevVisibleProbe(localCtx.scene);
+          }
+
+          if (localCtx?.camera?.position) {
+            localCtx.camera.position.set(0, 0, 8);
+            localCtx.camera.updateProjectionMatrix?.();
+          }
+
+          console.info('[AUDIT] setEmergencyVisibleMode', true);
+          return;
+        }
+
+        emergencyProbeDisposeRef.current?.();
+        emergencyProbeDisposeRef.current = null;
+        applyVisibleSafeModeRef.current(false);
+        setFluidParticlesVisible(true);
+        setRenderMode('composer-bloom');
+        console.info('[AUDIT] setEmergencyVisibleMode', false);
       };
 
       (window as any).__ORB_AUDIT__ = {
@@ -1144,6 +1714,9 @@ export function Oracle3DScene({
           resetSceneView(seed ? 'ritual-cycle-reset' : 'manual-seed-reset');
           orchestratorRef.current?.initRitual(seed);
           lastRitualSeedRef.current = String(seed || '');
+          if (visibleSafeModeRef.current) {
+            applyVisibleSafeModeRef.current(true);
+          }
         },
         setProgress: (p: number) => {
           const clamped = Math.max(0, Math.min(1, Number(p) || 0));
@@ -1155,9 +1728,12 @@ export function Oracle3DScene({
         getRenderMode,
         setAutoFallbackOnFeedback,
         setFluidParticlesVisible,
+        setVisibleSafeMode: (enabled: boolean) =>
+          applyVisibleSafeModeRef.current(Boolean(enabled)),
+        setEmergencyVisibleMode,
         scanFeedbackCandidates: (reason = 'manual') =>
           scanFeedbackCandidates(reason),
-        snapshot,
+        snapshot: snapshot,
       };
 
       if (!(window as any).__ORB_AUDIT_READY__) {
@@ -1172,9 +1748,13 @@ export function Oracle3DScene({
       camera.layers.set(ORB_BASE_RENDER_LAYER);
       bloomPass.enabled = renderModeRef.current === 'composer-bloom';
       composer.render();
+      baseRenderTelemetryRef.current = readRendererTelemetry(renderer);
       renderer.clearDepth();
       camera.layers.set(ORB_OVERLAY_RENDER_LAYER);
       renderer.render(scene, camera);
+      overlayRenderTelemetryRef.current = readRendererTelemetry(renderer);
+      lastFrameModeRef.current = renderModeRef.current;
+      renderedFramesRef.current += 1;
       camera.layers.set(ORB_BASE_RENDER_LAYER);
     };
 
@@ -1182,9 +1762,13 @@ export function Oracle3DScene({
       bloomPass.enabled = false;
       camera.layers.set(ORB_BASE_RENDER_LAYER);
       renderer.render(scene, camera);
+      baseRenderTelemetryRef.current = readRendererTelemetry(renderer);
       renderer.clearDepth();
       camera.layers.set(ORB_OVERLAY_RENDER_LAYER);
       renderer.render(scene, camera);
+      overlayRenderTelemetryRef.current = readRendererTelemetry(renderer);
+      lastFrameModeRef.current = renderModeRef.current;
+      renderedFramesRef.current += 1;
       camera.layers.set(ORB_BASE_RENDER_LAYER);
     };
 
@@ -1214,20 +1798,14 @@ export function Oracle3DScene({
       } catch (err) {
         console.error('[AUDIT] animate error', err);
         cancelAnimationFrame(frameIdRef.current);
-
-        if (overlayRef.current) {
-          overlayRef.current.style.display = 'flex';
-          overlayRef.current.textContent =
-            'Rendering halted (error). See console.';
-        }
+        setOverlayMessage('Rendering halted (error). See console.');
       }
     };
 
     frameIdRef.current = requestAnimationFrame(animate);
 
     const handleResize = () => {
-      const width = window.innerWidth;
-      const height = window.innerHeight;
+      const { width, height } = getViewportSize(containerRef.current);
 
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
@@ -1242,16 +1820,25 @@ export function Oracle3DScene({
 
     return () => {
       resetSceneView('unmount');
+      applyVisibleSafeModeRef.current(false);
       disposeSceneResources(activeRefs);
 
       initRitualRef.current = false;
       orchestratorRef.current = null;
       scanFeedbackCandidatesRef.current = () => [];
       resetSceneViewRef.current = () => {};
+      applyVisibleSafeModeRef.current = () => {};
       feedbackCandidatesRef.current = [];
       feedbackSignatureRef.current = '';
       renderModeRef.current = 'composer-bloom';
+      visibleSafeModeRef.current = false;
+      originalMaterialsRef.current = new WeakMap();
+      emergencyProbeDisposeRef.current = null;
       lastRitualSeedRef.current = '';
+      baseRenderTelemetryRef.current = null;
+      overlayRenderTelemetryRef.current = null;
+      lastFrameModeRef.current = null;
+      renderedFramesRef.current = 0;
 
       if (
         AUDIT_RUNTIME_ENABLED &&
@@ -1274,6 +1861,9 @@ export function Oracle3DScene({
     const orch = orchestratorRef.current;
     if (!orch || !formData) return;
     orch.setRitualData(formData);
+    if (visibleSafeModeRef.current) {
+      applyVisibleSafeModeRef.current(true);
+    }
     scanFeedbackCandidatesRef.current('formData-update');
   }, [formData]);
 
@@ -1296,6 +1886,11 @@ export function Oracle3DScene({
     }
 
     (orch as any).updateState?.(progress);
+
+    if (visibleSafeModeRef.current) {
+      applyVisibleSafeModeRef.current(true);
+    }
+
     scanFeedbackCandidatesRef.current('result-update');
   }, [stage, loading, result]);
 
@@ -1330,16 +1925,21 @@ export function Oracle3DScene({
       resetSceneViewRef.current?.('ritual-cycle-reset');
       orch.initRitual(nextSeed);
       lastRitualSeedRef.current = nextSeed;
+      if (visibleSafeModeRef.current) {
+        applyVisibleSafeModeRef.current(true);
+      }
     }
   }, [formData?.seed, result?.seed, result?.visualParams?.seed]);
 
   return (
-    <div className="absolute inset-0 w-full h-full -z-10">
+    <div
+      ref={rootRef}
+      className="absolute inset-0 w-full h-full z-0 pointer-events-none"
+    >
       <div ref={containerRef} className="w-full h-full" />
       <div
         ref={overlayRef}
-        style={{ display: 'none' }}
-        className="absolute inset-0 flex items-center justify-center bg-black/70 text-red-400 text-xs uppercase tracking-[0.3em] pointer-events-none"
+        className="absolute inset-0 hidden items-center justify-center bg-black/70 text-white text-xs uppercase tracking-[0.3em] pointer-events-none"
       >
         WebGL context lost
       </div>

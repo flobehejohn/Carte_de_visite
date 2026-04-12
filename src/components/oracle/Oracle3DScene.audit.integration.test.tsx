@@ -257,10 +257,11 @@ describe('Oracle3DScene audit snapshot contract', () => {
     const bridge = (window as any).__ORB_AUDIT__;
     expect(bridge).toBeDefined();
     expect(bridge.ready()).toBe(true);
+    expect(typeof bridge.setVisibleSafeMode).toBe('function');
     return bridge;
   }
 
-  it('produces a final snapshot without contradiction when no feedback risk is present', () => {
+  it('produces an extended snapshot without contradiction when no feedback risk is present', () => {
     renderScene();
 
     const snapshot = auditBridge().snapshot();
@@ -277,6 +278,8 @@ describe('Oracle3DScene audit snapshot contract', () => {
       composerBase: 0,
       overlay: 1,
     });
+    expect(snapshot.sceneStats).toBeDefined();
+    expect(snapshot.dom).toBeDefined();
     expect(snapshot.warnings).not.toContain('render-target-feedback-risk');
   });
 
@@ -318,5 +321,20 @@ describe('Oracle3DScene audit snapshot contract', () => {
     expect(snapshot.fluidParticlesConfig.renderLayer).toBe(
       snapshot.uiWindow.layers.overlay,
     );
+  });
+
+  it('can toggle the visible-safe mode through the audit bridge', () => {
+    renderScene();
+
+    const audit = auditBridge();
+    audit.setVisibleSafeMode(true);
+    let snapshot = audit.snapshot();
+    expect(snapshot.visibleSafeMode).toBe(true);
+    expect(snapshot.uiWindow.visibleSafeMode).toBe(true);
+
+    audit.setVisibleSafeMode(false);
+    snapshot = audit.snapshot();
+    expect(snapshot.visibleSafeMode).toBe(false);
+    expect(snapshot.uiWindow.visibleSafeMode).toBe(false);
   });
 });

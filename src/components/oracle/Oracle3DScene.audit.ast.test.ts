@@ -199,4 +199,24 @@ describe('Oracle3DScene AST governance locks', () => {
       'resetSceneView',
     );
   });
+
+  it('exposes the extended visual audit bridge and forbids a negative z-index on the live canvas root', () => {
+    const auditBridge = findAuditBridgeObject();
+    expect(auditBridge).toBeDefined();
+
+    const setVisibleSafeMode = findPropertyAssignment(
+      auditBridge!,
+      'setVisibleSafeMode',
+    );
+    const snapshot = findPropertyAssignment(auditBridge!, 'snapshot');
+
+    expect(setVisibleSafeMode).toBeDefined();
+    expect(snapshot).toBeDefined();
+
+    expect(sourceText).toContain('__DEV_VISIBLE_PROBE__');
+    expect(sourceText).toContain('sceneStats');
+    expect(sourceText).toContain('dom');
+    expect(sourceText).toContain('z-0 pointer-events-none');
+    expect(sourceText).not.toContain('-z-10');
+  });
 });

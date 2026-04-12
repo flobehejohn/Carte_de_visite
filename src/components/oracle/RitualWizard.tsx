@@ -259,7 +259,7 @@ export default function RitualWizard() {
         const audit = (window as any).__ORB_AUDIT__;
         const snap = audit?.snapshot?.();
         if (!snap) return fallback;
-        const targets = snap?.climateTargets;
+        const climateTargets = snap?.targets ?? snap?.climateTargets;
         const palette = snap?.ritualGenome?.palette;
         const paletteMode = snap?.ritualGenome?.paletteMode;
         const primary = palette?.primary?.hex;
@@ -269,10 +269,10 @@ export default function RitualWizard() {
         return {
           progress,
           mood: formData.mood || '',
-          presetName: targets?.presetName,
-          fog: targets?.fog,
-          bloom: targets?.bloom,
-          volume: targets?.volume,
+          presetName: climateTargets?.presetName,
+          fog: climateTargets?.fog,
+          bloom: climateTargets?.bloom,
+          volume: climateTargets?.volume,
           palette: { mode: paletteMode, primary, accent },
         };
       } catch {
@@ -386,8 +386,8 @@ export default function RitualWizard() {
   );
 
   return (
-    <div className="orbital-container">
-      <div className="zone-oracle-bg">
+    <div className="orbital-container relative isolate min-h-screen bg-black overflow-hidden">
+      <div className="zone-oracle-bg absolute inset-0 z-0 pointer-events-none">
         <Oracle3DSceneMemo
           formData={sceneData}
           stage={stage}
@@ -396,7 +396,7 @@ export default function RitualWizard() {
         />
       </div>
 
-      <div className="orbital-top">
+      <div className="orbital-top relative z-10">
         <div className="orbital-content contrast-guard">
           <AnimatePresence mode="wait">
             {lastResult ? (
@@ -516,7 +516,7 @@ export default function RitualWizard() {
         </div>
       </div>
 
-      <div className="orbital-bottom">
+      <div className="orbital-bottom relative z-10">
         <div className="orbital-content contrast-guard">
           <AnimatePresence mode="wait">
             {lastResult && (
