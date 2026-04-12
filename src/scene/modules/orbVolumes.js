@@ -11,30 +11,31 @@ const DEFAULT_VOLUME_CONFIG = {
   enabled: true,
 
   scale: 70,
-  backgroundColor: 0x0b0b0b,
-  backgroundStrength: 0.85,
-  vignette: 1.15,
+  backgroundColor: 0x121722,
+  backgroundStrength: 0.36,
+  vignette: 1.05,
 
   glowColor: 0xffffff,
-  glowIntensity: 0.55,
+  glowIntensity: 0.72,
   glowSize: 24.0,
   glowPulseSpeed: 0.55,
   glowPulseAmp: 0.06,
 
-  softness: 0.45,
+  softness: 0.56,
 
   noise: {
     scale: 4.5,
     speed: 0.18,
-    amount: 0.12
-  }
+    amount: 0.08,
+  },
 };
 
 function mergeDeep(target, patch) {
   if (!patch || typeof patch !== 'object') return target;
   Object.entries(patch).forEach(([key, value]) => {
     if (value && typeof value === 'object' && !Array.isArray(value)) {
-      if (!target[key] || typeof target[key] !== 'object') target[key] = { ...value };
+      if (!target[key] || typeof target[key] !== 'object')
+        target[key] = { ...value };
       else mergeDeep(target[key], value);
     } else {
       target[key] = value;
@@ -43,18 +44,20 @@ function mergeDeep(target, patch) {
   return target;
 }
 
-function clamp(v, a, b) { return Math.max(a, Math.min(b, Number(v) || 0)); }
+function clamp(v, a, b) {
+  return Math.max(a, Math.min(b, Number(v) || 0));
+}
 
 function normalizeConfig(cfg) {
   cfg.enabled = cfg.enabled !== false;
   cfg.scale = clamp(cfg.scale ?? 70, 10, 200);
-  cfg.backgroundStrength = clamp(cfg.backgroundStrength ?? 0.85, 0, 1.5);
+  cfg.backgroundStrength = clamp(cfg.backgroundStrength ?? 0.36, 0.08, 0.95);
   cfg.vignette = clamp(cfg.vignette ?? 1.15, 0.1, 3.0);
-  cfg.glowIntensity = clamp(cfg.glowIntensity ?? 0.55, 0, 1.2);
+  cfg.glowIntensity = clamp(cfg.glowIntensity ?? 0.72, 0.18, 1.35);
   cfg.glowSize = clamp(cfg.glowSize ?? 24.0, 12.0, 80.0);
   cfg.glowPulseSpeed = clamp(cfg.glowPulseSpeed ?? 0.55, 0, 3.0);
   cfg.glowPulseAmp = clamp(cfg.glowPulseAmp ?? 0.06, 0, 0.22);
-  cfg.softness = clamp(cfg.softness ?? 0.45, 0.05, 0.95);
+  cfg.softness = clamp(cfg.softness ?? 0.56, 0.12, 0.9);
 
   cfg.noise = cfg.noise || {};
   cfg.noise.scale = clamp(cfg.noise.scale ?? 4.5, 0.5, 18.0);
@@ -71,7 +74,7 @@ function ensureVolumeState(ctx) {
       glowMesh: null,
       backgroundMaterial: null,
       glowMaterial: null,
-      uniforms: null
+      uniforms: null,
     };
   }
   return ctx.volumeState;
@@ -79,7 +82,11 @@ function ensureVolumeState(ctx) {
 
 export function ensureVolumeConfig(ctx) {
   if (!ctx.volumeConfig) ctx.volumeConfig = { ...DEFAULT_VOLUME_CONFIG };
-  else ctx.volumeConfig = mergeDeep({ ...DEFAULT_VOLUME_CONFIG }, ctx.volumeConfig);
+  else
+    ctx.volumeConfig = mergeDeep(
+      { ...DEFAULT_VOLUME_CONFIG },
+      ctx.volumeConfig,
+    );
   return normalizeConfig(ctx.volumeConfig);
 }
 
@@ -112,7 +119,6 @@ const BG_FRAGMENT = /* glsl */ `
   uniform float uNoiseAmount;
   varying vec3 vViewDir;
 
-  // Hash noise (cheap)
   float hash(vec3 p){
     p = fract(p * 0.3183099 + vec3(.1,.1,.1));
     p *= 17.0;
@@ -145,19 +151,16 @@ const BG_FRAGMENT = /* glsl */ `
 
   void main() {
     float center = clamp(dot(normalize(vViewDir), vec3(0.0, 0.0, -1.0)), 0.0, 1.0);
-
-    // falloff + vignette
     float falloff = pow(center, 1.45);
     float edge = pow(1.0 - center, uVignette);
 
-    // noise doux (ne "pompe" pas)
     vec3 p = normalize(vViewDir) * uNoiseScale + vec3(0.0, 0.0, uTime * 0.15);
     float n = noise(p) * 2.0 - 1.0;
     float n2 = noise(p * 1.7 + 8.0) * 2.0 - 1.0;
     float organic = (n * 0.65 + n2 * 0.35);
 
-    float intensity = mix(0.22, 1.0, falloff);
-    intensity *= (1.0 - edge * 0.62);
+    float intensity = mix(0.46, 1.0, falloff);
+    intensity *= (1.0 - edge * 0.34);
     intensity *= (1.0 + organic * uNoiseAmount);
 
     vec3 col = uLightColor * uStrength * intensity;
@@ -202,7 +205,6 @@ const GLOW_FRAGMENT = /* glsl */ `
     vec2 p = vUv - 0.5;
     float d = length(p);
 
-    // noise animé (nuage discret)
     float n = noise(p * uNoiseScale + uTime * 0.22) * 2.0 - 1.0;
     float n2 = noise(p * (uNoiseScale * 1.7) + uTime * 0.14 + 10.0) * 2.0 - 1.0;
     float organic = (n * 0.65 + n2 * 0.35) * uNoiseAmount;
@@ -220,7 +222,6 @@ export function buildVolume(ctx) {
   const cfg = ensureVolumeConfig(ctx);
   const state = ensureVolumeState(ctx);
 
-  // cleanup
   if (state.backgroundMesh) {
     state.backgroundMesh.parent?.remove(state.backgroundMesh);
     state.backgroundMesh.geometry?.dispose();
@@ -240,7 +241,7 @@ export function buildVolume(ctx) {
     uVignette: { value: cfg.vignette },
     uTime: { value: 0 },
     uNoiseScale: { value: cfg.noise.scale },
-    uNoiseAmount: { value: cfg.noise.amount }
+    uNoiseAmount: { value: cfg.noise.amount },
   };
 
   const bgMaterial = new THREE.ShaderMaterial({
@@ -249,13 +250,14 @@ export function buildVolume(ctx) {
     fragmentShader: BG_FRAGMENT,
     side: THREE.BackSide,
     depthWrite: false,
-    depthTest: false
+    depthTest: false,
   });
 
   const bgGeometry = new THREE.SphereGeometry(1, 48, 32);
   const bgMesh = new THREE.Mesh(bgGeometry, bgMaterial);
   bgMesh.name = 'ReactiveBackground';
   bgMesh.renderOrder = -10;
+  bgMesh.userData.renderAuditCategory = 'volume-background';
   bgMesh.scale.setScalar(cfg.scale);
   ctx.scene.add(bgMesh);
 
@@ -265,7 +267,7 @@ export function buildVolume(ctx) {
     uSoftness: { value: cfg.softness },
     uTime: { value: 0 },
     uNoiseScale: { value: cfg.noise.scale },
-    uNoiseAmount: { value: cfg.noise.amount }
+    uNoiseAmount: { value: cfg.noise.amount },
   };
 
   const glowMaterial = new THREE.ShaderMaterial({
@@ -275,13 +277,14 @@ export function buildVolume(ctx) {
     transparent: true,
     depthWrite: false,
     depthTest: false,
-    blending: THREE.AdditiveBlending
+    blending: THREE.AdditiveBlending,
   });
 
   const glowGeometry = new THREE.PlaneGeometry(1, 1, 1, 1);
   const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
   glowMesh.name = 'OrbGlow';
-  glowMesh.renderOrder = 0;
+  glowMesh.renderOrder = 5;
+  glowMesh.userData.renderAuditCategory = 'volume-glow';
   glowMesh.scale.setScalar(cfg.glowSize);
   ctx.scene.add(glowMesh);
 
@@ -295,19 +298,28 @@ export function buildVolume(ctx) {
 }
 
 export function updateVolumeForFrame(ctx, time = 0) {
-  const cfg = ensureVolumeConfig(ctx);
   const state = ensureVolumeState(ctx);
 
+  if (ctx.runtimeFlags?.emergencyMode) {
+    if (state.backgroundMesh) state.backgroundMesh.visible = false;
+    if (state.glowMesh) state.glowMesh.visible = false;
+    return;
+  }
+
+  const cfg = ensureVolumeConfig(ctx);
   if (!state.backgroundMesh || !state.glowMesh) buildVolume(ctx);
   if (!state.backgroundMesh || !state.glowMesh) return;
 
   state.backgroundMesh.visible = !!cfg.enabled;
   state.glowMesh.visible = !!cfg.enabled;
 
-  // feedback lumière principale (si dispo)
   const mainLight = ctx.lightsRegistry?.get('sun-main')?.light;
-  const lightColor = mainLight?.color ? mainLight.color : toColor(cfg.backgroundColor, 0x111111);
-  const strengthBoost = mainLight?.intensity ? Math.min(1.4, Math.max(0.75, mainLight.intensity / 6)) : 1.0;
+  const lightColor = mainLight?.color
+    ? mainLight.color
+    : toColor(cfg.backgroundColor, 0x111111);
+  const strengthBoost = mainLight?.intensity
+    ? Math.min(1.25, Math.max(0.9, mainLight.intensity / 5.2))
+    : 1.0;
 
   const noiseSpeed = cfg.noise?.speed ?? 0.18;
 
@@ -320,7 +332,6 @@ export function updateVolumeForFrame(ctx, time = 0) {
     state.uniforms.bg.uNoiseAmount.value = cfg.noise.amount;
   }
 
-  // pulse: discret, contrôlé
   const pulse = 1 + Math.sin(time * cfg.glowPulseSpeed) * cfg.glowPulseAmp;
   const glowSize = cfg.glowSize * pulse;
   state.glowMesh.scale.set(glowSize, glowSize, glowSize);
@@ -332,8 +343,12 @@ export function updateVolumeForFrame(ctx, time = 0) {
   }
 
   if (state.uniforms?.glow) {
-    state.uniforms.glow.uColor.value.copy(toColor(cfg.glowColor ?? cfg.backgroundColor, 0xffffff));
-    state.uniforms.glow.uIntensity.value = cfg.glowIntensity * (0.80 + Math.sin(time * cfg.glowPulseSpeed) * cfg.glowPulseAmp);
+    state.uniforms.glow.uColor.value.copy(
+      toColor(cfg.glowColor ?? cfg.backgroundColor, 0xffffff),
+    );
+    state.uniforms.glow.uIntensity.value =
+      cfg.glowIntensity *
+      (0.8 + Math.sin(time * cfg.glowPulseSpeed) * cfg.glowPulseAmp);
     state.uniforms.glow.uSoftness.value = cfg.softness;
     state.uniforms.glow.uTime.value = time * noiseSpeed;
     state.uniforms.glow.uNoiseScale.value = cfg.noise.scale;
@@ -347,6 +362,21 @@ export function setVolumeConfig(ctx, patch = {}) {
   normalizeConfig(cfg);
 
   const rebuild = !!patch.forceRebuild;
-  if (rebuild || !ctx.volumeState?.backgroundMesh || !ctx.volumeState?.glowMesh) buildVolume(ctx);
+  if (rebuild || !ctx.volumeState?.backgroundMesh || !ctx.volumeState?.glowMesh)
+    buildVolume(ctx);
   return cfg;
 }
+
+export const buildReactiveVolume = buildVolume;
+export const updateReactiveVolumeForFrame = updateVolumeForFrame;
+
+const orbVolumesApi = {
+  ensureVolumeConfig,
+  buildVolume,
+  buildReactiveVolume,
+  updateVolumeForFrame,
+  updateReactiveVolumeForFrame,
+  setVolumeConfig,
+};
+
+export default orbVolumesApi;
