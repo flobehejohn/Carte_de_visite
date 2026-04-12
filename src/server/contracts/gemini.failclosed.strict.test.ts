@@ -62,10 +62,26 @@ const citation = (id: string) => ({
 function makeOraclePayload() {
   return {
     quote: 'Stub quote',
-    interpretation: 'Stub interpretation',
-    keywords: ['stub'],
-    citation_ids: ['1', '2'],
-    delta: {},
+    opening_image: 'Une lueur tient encore sur le seuil.',
+    central_tension: 'Le nom cherche un sens plus haut que sa forme.',
+    reversal: 'La simplicite devient orientation.',
+    imperative: 'Traverse le seuil avec sobriete.',
+    return_axis: 'Reviens au feu quand la forme vacille.',
+    keywords: ['seuil', 'feu', 'retour', 'orientation'],
+    anchors: [
+      {
+        citation_id: '1',
+        role: 'anchor',
+        motif: 'lueur',
+        claim: 'Le rite commence par une apparition simple.',
+      },
+      {
+        citation_id: '2',
+        role: 'turn',
+        motif: 'traversee',
+        claim: 'Le passage transforme le nom en geste.',
+      },
+    ],
     confidence: 0.9,
     visual_prescription: {
       primary_color: '#88aaff',
@@ -82,6 +98,7 @@ const stubStructuredOk = async () => {
     ok: true,
     status: 200,
     text: JSON.stringify(payload),
+    jsonCandidate: payload,
     raw: {
       structured: true,
       fallback: false,
@@ -101,6 +118,7 @@ const stubStructuredRepairOk = async () => {
     ok: true,
     status: 200,
     text: JSON.stringify(payload),
+    jsonCandidate: payload,
     raw: {
       structured: false,
       fallback: false,
@@ -115,7 +133,20 @@ const stubStructuredRepairOk = async () => {
 };
 
 const stubRawOk = async () => {
-  const payload = makeOraclePayload();
+  const payload = {
+    quote: 'Stub quote',
+    interpretation: 'Stub interpretation',
+    keywords: ['stub'],
+    citation_ids: ['1', '2'],
+    delta: {},
+    confidence: 0.9,
+    visual_prescription: {
+      primary_color: '#88aaff',
+      chaos: 0.3,
+      fog_density: 0.2,
+      shape_archetype: 'torusKnot',
+    },
+  };
   return {
     ok: true,
     status: 200,
@@ -125,6 +156,43 @@ const stubRawOk = async () => {
       fallback: false,
       repairApplied: false,
       reason: 'RAW_OK',
+      parseError: null,
+      rawJsonError: null,
+      retryCount: 0,
+    },
+    ms: 5,
+  };
+};
+
+const stubStructuredUnknownAnchor = async () => {
+  const payload = {
+    ...makeOraclePayload(),
+    anchors: [
+      {
+        citation_id: '1',
+        role: 'anchor',
+        motif: 'lueur',
+        claim: 'Le rite commence par une apparition simple.',
+      },
+      {
+        citation_id: '9999',
+        role: 'turn',
+        motif: 'traversee',
+        claim: 'Le passage transforme le nom en geste.',
+      },
+    ],
+  };
+
+  return {
+    ok: true,
+    status: 200,
+    text: JSON.stringify(payload),
+    jsonCandidate: payload,
+    raw: {
+      structured: true,
+      fallback: false,
+      repairApplied: false,
+      reason: 'NATIVE_OK',
       parseError: null,
       rawJsonError: null,
       retryCount: 0,
@@ -288,6 +356,7 @@ describe('fail-closed strict invariants (handler)', () => {
     expect(res.body.jsonError).toBe(null);
     expect(readFinalJsonError(res.body)).toBe(null);
     expect(res.body.violations).toEqual([]);
+    expect(res.body.hermeneutic?.anchors?.length).toBeGreaterThanOrEqual(2);
   });
 
   it('returns HTTP 200 for raw KO / final OK and keeps the raw error only in audit fields (Option B)', async () => {
@@ -330,6 +399,37 @@ describe('fail-closed strict invariants (handler)', () => {
 
     expect(Array.isArray(res.body.citationsUsed)).toBe(true);
     expect(res.body.citationsUsed.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('returns HTTP 422 when a structured oracle anchor points to an unresolved citation', async () => {
+    process.env.GEMINI_STRUCTURED_OUTPUTS = '1';
+
+    retrieveMock.mockReturnValue([
+      citation('1'),
+      citation('2'),
+      citation('3'),
+      citation('4'),
+      citation('5'),
+      citation('6'),
+    ]);
+
+    const handler = createHandler({
+      callGeminiStructuredImpl: stubStructuredUnknownAnchor as any,
+      callGeminiImpl: stubRawOk as any,
+    });
+
+    const req = makeOracleReq(2);
+    const res = makeRes();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(422);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error.code).toBe('STRICT_INVARIANT_VIOLATION');
+    expect(readRawJsonError(res.body)).toBe('SCHEMA_VALIDATION_FAILED');
+    expect(readFinalJsonError(res.body)).toBe('SCHEMA_VALIDATION_FAILED');
+    expect(Array.isArray(res.body.violations)).toBe(true);
+    expect(res.body.violations.map((v: any) => v.code)).toContain('JSON_ERROR');
   });
 
   it('returns HTTP 422 when oracle JSON is invalid instead of accepting a synthetic fallback as final state', async () => {

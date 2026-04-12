@@ -1,14 +1,39 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { handleGeminiRequest } from '../../../api/gemini.js';
 import { OracleRequestSchema } from '../contracts/oracle.schemas.js';
+import { retrieveZaraCitations } from './retriever.js';
 
-const stubStructuredCall = async () => {
-  const payload = {
+function buildOracleRetrievalQuery(prompt: string, nameOrNickname: string): string {
+  return JSON.stringify({
+    ritual: { nameOrNickname },
+    prompt,
+    climate: null,
+  });
+}
+
+function makeOracleHermeneuticPayload(citationIds: string[]) {
+  return {
     quote: 'Test quote',
-    interpretation: 'Test interpretation',
-    keywords: ['test'],
-    citation_ids: ['1', '2'],
-    delta: {},
+    opening_image: 'Une lueur se leve dans la brume.',
+    central_tension: 'Le seuil demande une forme plus haute.',
+    reversal: 'Ce qui semblait simple devient orientation.',
+    imperative: 'Traverse sans lourdeur.',
+    return_axis: 'Reviens au seuil quand le sens se retire.',
+    keywords: ['seuil', 'brume', 'retour', 'forme'],
+    anchors: [
+      {
+        citation_id: citationIds[0],
+        role: 'anchor',
+        motif: 'lueur',
+        claim: 'Le commencement se donne comme apparition.',
+      },
+      {
+        citation_id: citationIds[1],
+        role: 'turn',
+        motif: 'passage',
+        claim: 'Le rite incline deja vers la transformation.',
+      },
+    ],
     confidence: 0.5,
     visual_prescription: {
       primary_color: '#88aaff',
@@ -17,6 +42,10 @@ const stubStructuredCall = async () => {
       shape_archetype: 'torusKnot',
     },
   };
+}
+
+const makeStructuredCall = (citationIds: string[]) => async () => {
+  const payload = makeOracleHermeneuticPayload(citationIds);
 
   return {
     ok: true,
@@ -31,6 +60,7 @@ const stubStructuredCall = async () => {
       retryCount: 0,
     },
     text: JSON.stringify(payload),
+    jsonCandidate: payload,
     ms: 5,
   };
 };
@@ -75,18 +105,26 @@ describe('knowledge layer contract', () => {
     process.env.GEMINI_FAIL_CLOSED_STRICT = '1';
   });
 
-  it('returns citationsUsed (>=2), locks corpus, and includes citations in json', async () => {
+  it('returns citationsUsed (>=2), locks corpus, and exposes hermeneutic with audit json', async () => {
+    const prompt = 'Rituel: je franchis le seuil et je cite Zarathoustra.';
+    const nameOrNickname = 'test';
     const req = OracleRequestSchema.parse({
       mode: 'oracle',
-      prompt: 'Rituel: je franchis le seuil et je cite Zarathoustra.',
-      ritual: { nameOrNickname: 'test' },
+      prompt,
+      ritual: { nameOrNickname },
       expectJson: true,
       wantCitations: true,
       minCitations: 2,
     });
+    const citationIds = retrieveZaraCitations(
+      buildOracleRetrievalQuery(prompt, nameOrNickname),
+      { k: 6 },
+    )
+      .slice(0, 2)
+      .map((citation) => String(citation.id));
 
     const res = await handleGeminiRequest(req, {
-      callGeminiStructuredImpl: stubStructuredCall as any,
+      callGeminiStructuredImpl: makeStructuredCall(citationIds) as any,
       callGeminiImpl: stubRawCall as any,
     });
 
@@ -97,30 +135,41 @@ describe('knowledge layer contract', () => {
       true,
     );
     expect(out.citationsUsed.every((c) => String(c.id).length > 0)).toBe(true);
-
-    const json = out.json as any;
-    expect(json).toBeTruthy();
-    expect(Array.isArray(json.citations)).toBe(true);
-    expect(json.citations.length).toBeGreaterThanOrEqual(2);
+    expect(out.json).toBeTruthy();
+    expect(out.hermeneutic).toBeTruthy();
+    expect(out.hermeneutic?.anchors.length).toBeGreaterThanOrEqual(2);
+    expect(
+      out.hermeneutic?.anchors.every((anchor) =>
+        out.citationsUsed.some((citation) => String(citation.id) === anchor.citation_id),
+      ),
+    ).toBe(true);
   });
 
   it('keeps citation ids stable for the same request (within a run)', async () => {
+    const prompt = 'Rituel: je franchis le seuil et je cite Zarathoustra.';
+    const nameOrNickname = 'test';
     const req = OracleRequestSchema.parse({
       mode: 'oracle',
-      prompt: 'Rituel: je franchis le seuil et je cite Zarathoustra.',
-      ritual: { nameOrNickname: 'test' },
+      prompt,
+      ritual: { nameOrNickname },
       expectJson: true,
       wantCitations: true,
       minCitations: 2,
     });
+    const citationIds = retrieveZaraCitations(
+      buildOracleRetrievalQuery(prompt, nameOrNickname),
+      { k: 6 },
+    )
+      .slice(0, 2)
+      .map((citation) => String(citation.id));
 
     const a = await handleGeminiRequest(req, {
-      callGeminiStructuredImpl: stubStructuredCall as any,
+      callGeminiStructuredImpl: makeStructuredCall(citationIds) as any,
       callGeminiImpl: stubRawCall as any,
     });
 
     const b = await handleGeminiRequest(req, {
-      callGeminiStructuredImpl: stubStructuredCall as any,
+      callGeminiStructuredImpl: makeStructuredCall(citationIds) as any,
       callGeminiImpl: stubRawCall as any,
     });
 

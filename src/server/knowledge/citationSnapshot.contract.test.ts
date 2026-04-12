@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { handleGeminiRequest } from '../../../api/gemini.js';
 import { OracleRequestSchema } from '../contracts/oracle.schemas.js';
 import type { Citation } from '../contracts/oracle.types.js';
+import { retrieveZaraCitations } from './retriever.js';
 
 type HandlerDeps = NonNullable<Parameters<typeof handleGeminiRequest>[1]>;
 type StructuredImpl = NonNullable<HandlerDeps['callGeminiStructuredImpl']>;
@@ -14,13 +15,37 @@ type CitationSnapshot = {
   section_title: string;
 };
 
-const stubStructuredCall: StructuredImpl = async (args) => {
-  const payload = {
+function buildOracleRetrievalQuery(prompt: string, nameOrNickname: string): string {
+  return JSON.stringify({
+    ritual: { nameOrNickname },
+    prompt,
+    climate: null,
+  });
+}
+
+function makeOracleHermeneuticPayload(citationIds: string[]) {
+  return {
     quote: 'Test quote',
-    interpretation: 'Test interpretation',
-    keywords: ['test'],
-    citation_ids: ['1', '2'],
-    delta: {},
+    opening_image: 'Une lueur parait au bord du texte.',
+    central_tension: 'Le seuil retient encore son sens.',
+    reversal: 'Le passage se compose dans la citation.',
+    imperative: 'Avance sans rompre le fil du corpus.',
+    return_axis: 'Reviens a la phrase-source si le rite se disperse.',
+    keywords: ['lueur', 'seuil', 'passage', 'corpus'],
+    anchors: [
+      {
+        citation_id: citationIds[0],
+        role: 'anchor',
+        motif: 'lueur',
+        claim: 'Le premier appui est textuel.',
+      },
+      {
+        citation_id: citationIds[1],
+        role: 'turn',
+        motif: 'passage',
+        claim: 'Le retournement se noue dans la citation.',
+      },
+    ],
     confidence: 0.5,
     visual_prescription: {
       primary_color: '#88aaff',
@@ -29,30 +54,36 @@ const stubStructuredCall: StructuredImpl = async (args) => {
       shape_archetype: 'torusKnot',
     },
   };
+}
 
-  return {
-    ok: true,
-    status: 200,
-    text: JSON.stringify(payload),
-    jsonCandidate: payload,
-    raw: {
-      traceId: args.traceId,
-      model: args.model,
-      structured: true,
-      fallback: false,
-      repairApplied: false,
-      reason: 'NATIVE_OK',
-      parseError: null,
-      rawJsonError: null,
-      retryCount: 0,
-      parseStage: 'direct',
-      preview: null,
-      parsedPreview: null,
-      error: null,
-    },
-    ms: 5,
+const makeStructuredCall =
+  (citationIds: string[]): StructuredImpl =>
+  async (args) => {
+    const payload = makeOracleHermeneuticPayload(citationIds);
+
+    return {
+      ok: true,
+      status: 200,
+      text: JSON.stringify(payload),
+      jsonCandidate: payload,
+      raw: {
+        traceId: args.traceId,
+        model: args.model,
+        structured: true,
+        fallback: false,
+        repairApplied: false,
+        reason: 'NATIVE_OK',
+        parseError: null,
+        rawJsonError: null,
+        retryCount: 0,
+        parseStage: 'direct',
+        preview: null,
+        parsedPreview: null,
+        error: null,
+      },
+      ms: 5,
+    };
   };
-};
 
 const stubRawCall: RawImpl = async (args) => {
   const payload = {
@@ -124,22 +155,30 @@ describe('citation snapshot contract', () => {
   });
 
   it('same request -> same citation snapshot within a run', async () => {
+    const prompt = 'Rituel: je franchis le seuil et je cite Zarathoustra.';
+    const nameOrNickname = 'snapshot';
     const req = OracleRequestSchema.parse({
       mode: 'oracle',
-      prompt: 'Rituel: je franchis le seuil et je cite Zarathoustra.',
-      ritual: { nameOrNickname: 'snapshot' },
+      prompt,
+      ritual: { nameOrNickname },
       expectJson: true,
       wantCitations: true,
       minCitations: 2,
     });
+    const citationIds = retrieveZaraCitations(
+      buildOracleRetrievalQuery(prompt, nameOrNickname),
+      { k: 6 },
+    )
+      .slice(0, 2)
+      .map((citation) => String(citation.id));
 
     const a = await handleGeminiRequest(req, {
-      callGeminiStructuredImpl: stubStructuredCall,
+      callGeminiStructuredImpl: makeStructuredCall(citationIds),
       callGeminiImpl: stubRawCall,
     });
 
     const b = await handleGeminiRequest(req, {
-      callGeminiStructuredImpl: stubStructuredCall,
+      callGeminiStructuredImpl: makeStructuredCall(citationIds),
       callGeminiImpl: stubRawCall,
     });
 
