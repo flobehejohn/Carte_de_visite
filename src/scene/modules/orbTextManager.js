@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Text } from 'troika-three-text';
-import { oracleInteractionBridge } from '../../domain/oracleText/InteractionBridge'; // <-- LE PONT SYNAPTIQUE
+import { oracleInteractionBridge } from '../../domain/oracleText/InteractionBridge';
 
 const ORB_BASE_RENDER_LAYER = 0;
 const ORB_OVERLAY_RENDER_LAYER = 1;
@@ -10,7 +10,9 @@ export class OrbTextManager {
     this.scene = scene;
 
     this.worldGroup = new THREE.Group();
+    this.worldGroup.name = 'OrbTextManager_World';
     this.hudGroup = new THREE.Group();
+    this.hudGroup.name = 'OrbTextManager_HUD';
 
     this.scene.add(this.worldGroup);
     this.scene.add(this.hudGroup);
@@ -19,12 +21,21 @@ export class OrbTextManager {
     this.progress = 0;
     this.isReady = false;
 
-    // PHASE 4 : Abonnement aux événements du DOM
     this.focusTarget = 'none';
-    this.unsubscribeBridge = oracleInteractionBridge.subscribe((detail) => {
-      this.focusTarget = detail.target;
-      this.applyFocusState();
-    });
+
+    // 🛡️ FIX VITEST & STABILITÉ : Sécurisation absolue de l'abonnement au bridge
+    // Empêche les crashs si le composant est appelé dans un environnement de test non-isolé
+    if (
+      oracleInteractionBridge &&
+      typeof oracleInteractionBridge.subscribe === 'function'
+    ) {
+      this.unsubscribeBridge = oracleInteractionBridge.subscribe((detail) => {
+        this.focusTarget = detail?.target || 'none';
+        this.applyFocusState();
+      });
+    } else {
+      this.unsubscribeBridge = () => {};
+    }
   }
 
   async loadFont() {
@@ -43,26 +54,43 @@ export class OrbTextManager {
     zPos,
     role,
   ) {
+    if (!text) return; // 🛡️ Sécurité anti-crash si le champ texte est indéfini
+
     const mesh = new Text();
-    mesh.text = text;
-    mesh.font =
-      'https://fonts.gstatic.com/s/cinzel/v11/8vIbcqZycPFAyCXT92aELQ.woff';
+    mesh.text = String(text);
+
+    // FIX GARANTI : On désactive la police externe pour éviter le crash 404 de Troika
+    mesh.font = null;
     mesh.fontSize = fontSize;
-    mesh.color = 0xffffff;
-    mesh.fillOpacity = 0;
+
+    mesh.color = 0xffeebb;
+    mesh.fillOpacity = 0.0;
     mesh.outlineWidth = outlineWidth;
-    mesh.outlineColor = 0xffffff;
-    mesh.outlineOpacity = 0;
-    mesh.renderOrder = renderOrder;
-    mesh.depthTest = false;
-    mesh.depthWrite = false;
-    mesh.textAlign = 'center';
+    mesh.outlineColor = 0xffaa44;
+    mesh.outlineOpacity = 0.0;
+
     mesh.anchorX = 'center';
     mesh.anchorY = 'middle';
-    mesh.maxWidth = isHUD ? 2.0 : 4.0;
 
+    // IMPORTANT : On autorise le retour à la ligne pour ne pas déborder
+    mesh.maxWidth = isHUD ? 1.5 : 2.5;
+    mesh.whiteSpace = 'normal';
+    mesh.textAlign = 'center';
+
+    mesh.position.y = yPos;
+    mesh.position.z = zPos;
+    mesh.renderOrder = renderOrder;
     mesh.layers.set(layer);
-    mesh.position.set(0, yPos, zPos);
+
+    // Force la synchro immédiate pour éviter un flash frame
+    mesh.sync();
+
+    // Stockage structuré pour l'Interaction Bridge et les animations
+    mesh.userData.role = role;
+    mesh.userData.baseFillOpacity = fillOpacity;
+    mesh.userData.baseOutlineOpacity = outlineWidth > 0 ? 0.3 : 0.0;
+    mesh.userData.targetFillOpacity = mesh.userData.baseFillOpacity;
+    mesh.userData.targetOutlineOpacity = mesh.userData.baseOutlineOpacity;
 
     if (isHUD) {
       this.hudGroup.add(mesh);
@@ -70,91 +98,16 @@ export class OrbTextManager {
       this.worldGroup.add(mesh);
     }
 
-    // Sauvegarde des bases pour permettre l'interpolation synaptique
-    mesh.userData = {
-      role: role,
-      baseFillOpacity: fillOpacity,
-      baseOutlineOpacity:
-        layer === ORB_BASE_RENDER_LAYER ? fillOpacity * 0.4 : fillOpacity * 0.1,
-      targetFillOpacity: fillOpacity,
-      targetOutlineOpacity:
-        layer === ORB_BASE_RENDER_LAYER ? fillOpacity * 0.4 : fillOpacity * 0.1,
-    };
-
     this.meshes.push(mesh);
-    return mesh;
-  }
-
-  spawnOracle({ quote, chapter }) {
-    this.clear();
-
-    // 1. CHAPITRE (HUD)
-    this._createText(
-      chapter,
-      true,
-      ORB_BASE_RENDER_LAYER,
-      0.15,
-      0.18,
-      0.015,
-      3,
-      1.5,
-      2.0,
-      'chapter',
-    );
-    this._createText(
-      chapter,
-      true,
-      ORB_OVERLAY_RENDER_LAYER,
-      0.15,
-      0.92,
-      0.004,
-      25,
-      1.5,
-      2.0,
-      'chapter',
-    );
-
-    // 2. CITATION (World)
-    this._createText(
-      quote,
-      false,
-      ORB_BASE_RENDER_LAYER,
-      0.32,
-      0.18,
-      0.015,
-      3,
-      -0.6,
-      0.0,
-      'quote',
-    );
-    this._createText(
-      quote,
-      false,
-      ORB_OVERLAY_RENDER_LAYER,
-      0.32,
-      0.98,
-      0.006,
-      20,
-      -0.6,
-      0.0,
-      'quote',
-    );
-
-    this.meshes.forEach((m) => m.sync());
   }
 
   applyFocusState() {
-    // Logique de modification d'état quand le DOM envoie un signal
     this.meshes.forEach((mesh) => {
-      const isBloomLayer = mesh.layers.mask === 1;
-
-      if (this.focusTarget === 'citation') {
-        // Le joueur lit le panneau HTML : L'hologramme 3D s'efface pour ne pas gêner,
-        // mais le Bloom augmente pour garder une présence magique.
+      if (this.focusTarget === 'citation' && mesh.userData.role !== 'quote') {
+        const isBloomLayer = mesh.layers.isEnabled(ORB_BASE_RENDER_LAYER);
         mesh.userData.targetFillOpacity = mesh.userData.baseFillOpacity * 0.2;
         mesh.userData.targetOutlineOpacity = isBloomLayer ? 0.8 : 0.05;
       } else {
-        // Retour à la normale
         mesh.userData.targetFillOpacity = mesh.userData.baseFillOpacity;
         mesh.userData.targetOutlineOpacity = mesh.userData.baseOutlineOpacity;
       }
@@ -162,8 +115,12 @@ export class OrbTextManager {
   }
 
   animateReveal(dt) {
+    // 🛡️ PROTECTION FRAME-DROP : Limite dt à 100ms maximum
+    // Si l'utilisateur change d'onglet, dt explose. Ceci empêche la mathématique de casser.
+    const safeDt = Math.min(dt, 0.1);
+
     if (this.progress < 1.0) {
-      this.progress = Math.min(1.0, this.progress + dt * 0.3);
+      this.progress = Math.min(1.0, this.progress + safeDt * 0.3);
     }
 
     const ease =
@@ -175,11 +132,11 @@ export class OrbTextManager {
       const targetFill = mesh.userData.targetFillOpacity * ease;
       const targetOutline = mesh.userData.targetOutlineOpacity * ease;
 
-      // Lerp (interpolation) fluide pour une réaction organique au survol HTML
-      mesh.fillOpacity += (targetFill - mesh.fillOpacity) * dt * 4.0;
-      mesh.outlineOpacity += (targetOutline - mesh.outlineOpacity) * dt * 4.0;
+      mesh.fillOpacity += (targetFill - mesh.fillOpacity) * safeDt * 4.0;
+      mesh.outlineOpacity +=
+        (targetOutline - mesh.outlineOpacity) * safeDt * 4.0;
 
-      // On ne synchronise le SDF que si la valeur bouge vraiment
+      // 🛡️ OPTIMISATION CPU : Ne déclenche sync() que si la valeur a significativement changé
       if (
         Math.abs(targetFill - mesh.fillOpacity) > 0.005 ||
         Math.abs(targetOutline - mesh.outlineOpacity) > 0.005
@@ -189,20 +146,111 @@ export class OrbTextManager {
     });
   }
 
-  clear() {
-    this.meshes.forEach((mesh) => {
-      mesh.dispose();
-      if (mesh.parent) mesh.parent.remove(mesh);
-    });
-    this.meshes = [];
+  spawnOracle(data) {
+    this.clear();
     this.progress = 0;
-    this.focusTarget = 'none';
+    if (!data) return;
+
+    // 🔴 PHASE 8 - DIÈTE 3D : Suppression totale du champ 'interpretation'
+    const { quote, chapter, author } = data;
+
+    // 1. HUD: Chapitre (Haut)
+    if (chapter) {
+      this._createText(
+        chapter,
+        true,
+        ORB_OVERLAY_RENDER_LAYER,
+        0.08,
+        0.9,
+        0.002,
+        999,
+        0.35,
+        0,
+        'chapter',
+      );
+    }
+
+    // 2. WORLD: Tension Centrale (Milieu, holographique)
+    if (quote) {
+      this._createText(
+        quote,
+        false,
+        ORB_OVERLAY_RENDER_LAYER,
+        0.12,
+        0.95,
+        0.003,
+        10,
+        0,
+        1.2,
+        'quote',
+      );
+      this._createText(
+        quote,
+        false,
+        ORB_BASE_RENDER_LAYER,
+        0.12,
+        0.2,
+        0.015,
+        5,
+        0,
+        1.2,
+        'quote-bloom',
+      );
+    }
+
+    // 3. HUD: Auteur (Bas droite)
+    if (author) {
+      this._createText(
+        `— ${author}`,
+        true,
+        ORB_OVERLAY_RENDER_LAYER,
+        0.04,
+        0.6,
+        0.001,
+        999,
+        -0.4,
+        0,
+        'author',
+      );
+    }
   }
 
+  clear() {
+    if (this.meshes) {
+      this.meshes.forEach((mesh) => {
+        if (mesh.parent) mesh.parent.remove(mesh);
+        // Libération correcte des ressources Troika (Geometry/Material natifs)
+        if (typeof mesh.dispose === 'function') mesh.dispose();
+      });
+      this.meshes = [];
+    }
+
+    // 🔴 PHASE 8 - RESET IMPLACABLE : Purge radicale des groupes pour tuer les fantômes
+    if (this.worldGroup) {
+      while (this.worldGroup.children.length > 0) {
+        this.worldGroup.remove(this.worldGroup.children[0]);
+      }
+    }
+    if (this.hudGroup) {
+      while (this.hudGroup.children.length > 0) {
+        this.hudGroup.remove(this.hudGroup.children[0]);
+      }
+    }
+
+    this.progress = 0;
+  }
+
+  // 🛡️ MEMORY LEAK PROTECTOR : Utilisé au démontage total du composant React / WebGL
   dispose() {
-    if (this.unsubscribeBridge) {
+    this.clear();
+    if (typeof this.unsubscribeBridge === 'function') {
       this.unsubscribeBridge();
     }
-    this.clear();
+    if (this.worldGroup && this.worldGroup.parent) {
+      this.worldGroup.parent.remove(this.worldGroup);
+    }
+    if (this.hudGroup && this.hudGroup.parent) {
+      this.hudGroup.parent.remove(this.hudGroup);
+    }
   }
 }

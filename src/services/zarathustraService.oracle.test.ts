@@ -97,7 +97,14 @@ describe('consultOracle', () => {
     expect(result.sentence.text).toContain('Zarathoustra le danseur');
     expect(result.sentence.part_title).toBe('QUATRIEME ET DERNIERE PARTIE');
     expect(result.visualParams?.primary_color).toBe('#ffd700');
-    expect(result.composition?.prose).toContain('Le nom devient un seuil tendu');
+    expect(result.composition?.prose).toContain(
+      'Le nom devient un seuil tendu',
+    );
+
+    // NOUVEAU: Vérification de l'attachement du modèle canonique FinalRevealModel
+    expect(result.finalReveal).toBeDefined();
+    expect(result.finalReveal?.quote).toContain('Florian');
+    expect(result.finalReveal?.citations.length).toBeGreaterThan(0);
   });
 
   it('uses composition.prose length when governed prose already embeds the quote', async () => {

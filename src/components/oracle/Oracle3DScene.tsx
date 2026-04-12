@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -19,7 +19,7 @@ interface Oracle3DSceneProps {
   stage: number;
   loading: boolean;
   result: any;
-  progress?: number; // GOUVERNANCE: Synchronisation de la progression de Révélation
+  progress?: number;
 }
 
 type RenderMode = 'composer-bloom' | 'composer-no-bloom' | 'direct';
@@ -41,6 +41,11 @@ type FeedbackCandidate = {
   textureUuid: string;
   renderTargetLabel: string;
   renderTargetUuid: string;
+};
+
+type SceneGraphMetrics = {
+  type: string;
+  count: number;
 };
 
 type SceneResources = {
@@ -122,6 +127,46 @@ type EmergencyVisualState = {
   volumeBackgroundVisible: boolean | null;
   volumeGlowVisible: boolean | null;
   foregroundVisible: boolean | null;
+};
+
+type UiWindowAudit = {
+  renderMode: string;
+  visibleSafeMode: boolean;
+  layers: {
+    base: number;
+    overlay: number;
+  };
+  resolution: {
+    w: number;
+    h: number;
+    pixelRatio: number;
+  };
+  postprocessing: {
+    composerExists: boolean;
+    activePasses: string[];
+    bloomEnabled: boolean;
+    bloomParams?: {
+      threshold: number;
+      strength: number;
+      radius: number;
+    };
+  };
+  renderer: {
+    localClippingEnabled: boolean;
+    shadowMapEnabled: boolean;
+    toneMapping: number;
+  };
+  sceneGraph: SceneGraphMetrics[];
+};
+
+type FluidParticlesConfigType = {
+  enabled?: boolean;
+  color?: string;
+  count?: number;
+  size?: number;
+  excludeFromComposer?: boolean;
+  renderLayer?: number;
+  opacityMul?: number;
 };
 
 const MATERIAL_TEXTURE_KEYS = [
@@ -627,6 +672,83 @@ function collectSceneStats(
   };
 }
 
+function resolveRenderMode(
+  composer: EffectComposer | null,
+  bloomPass: UnrealBloomPass | null,
+): RenderMode {
+  if (!composer) return 'direct';
+  if (!bloomPass) return 'composer-no-bloom';
+  return 'composer-bloom';
+}
+
+function resolvePassName(pass: any): string {
+  if (!pass) return 'unknown';
+  if (pass instanceof RenderPass) return 'RenderPass';
+  if (pass instanceof UnrealBloomPass) return 'UnrealBloomPass';
+  return pass.constructor?.name || 'unknown';
+}
+
+function collectActivePasses(composer: EffectComposer | null): string[] {
+  if (!composer || !composer.passes) return [];
+  return composer.passes
+    .filter((p) => p.enabled)
+    .map((p) => resolvePassName(p));
+}
+
+function countSceneGraphTypes(scene: THREE.Scene): SceneGraphMetrics[] {
+  const counts = new Map<string, number>();
+  scene.traverse((obj) => {
+    const t = obj.type || 'Object3D';
+    counts.set(t, (counts.get(t) || 0) + 1);
+  });
+  return Array.from(counts.entries()).map(([type, count]) => ({
+    type,
+    count,
+  }));
+}
+
+function buildUiWindowAudit(
+  renderer: THREE.WebGLRenderer,
+  composer: EffectComposer | null,
+  bloomPass: UnrealBloomPass | null,
+  scene: THREE.Scene,
+  visibleSafeMode: boolean,
+): UiWindowAudit {
+  const size = new THREE.Vector2();
+  renderer.getSize(size);
+  return {
+    renderMode: resolveRenderMode(composer, bloomPass),
+    visibleSafeMode,
+    layers: {
+      base: ORB_BASE_RENDER_LAYER,
+      overlay: ORB_OVERLAY_RENDER_LAYER,
+    },
+    resolution: {
+      w: size.x,
+      h: size.y,
+      pixelRatio: renderer.getPixelRatio(),
+    },
+    postprocessing: {
+      composerExists: composer !== null,
+      activePasses: collectActivePasses(composer),
+      bloomEnabled: bloomPass !== null && bloomPass.enabled,
+      bloomParams: bloomPass
+        ? {
+            threshold: bloomPass.threshold,
+            strength: bloomPass.strength,
+            radius: bloomPass.radius,
+          }
+        : undefined,
+    },
+    renderer: {
+      localClippingEnabled: renderer.localClippingEnabled,
+      shadowMapEnabled: renderer.shadowMap.enabled,
+      toneMapping: renderer.toneMapping,
+    },
+    sceneGraph: countSceneGraphTypes(scene),
+  };
+}
+
 function materialColor(
   material: THREE.Material | undefined,
 ): THREE.ColorRepresentation {
@@ -641,7 +763,6 @@ function createVisibleSafeMaterial(
   obj: DrawableObject,
   sourceMaterial: THREE.Material,
 ): THREE.Material {
-  const fallbackColor = materialColor(sourceMaterial);
   const brightMeshColor = 0xff00ff;
   const brightLineColor = 0x00ffff;
 
@@ -759,11 +880,13 @@ export function Oracle3DScene({
   stage,
   loading,
   result,
-  progress, // GOUVERNANCE: Synchronisation de la progression de Révélation
+  progress,
 }: Oracle3DSceneProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const orchestratorRef = useRef<RitualOrchestrator | null>(null);
+  const webGLFailureRef = useRef(false);
+  const [webGLFailed, setWebGLFailed] = useState(false);
   const frameIdRef = useRef<number>(0);
   const frameCountRef = useRef<number>(0);
   const initRitualRef = useRef(false);
@@ -798,7 +921,12 @@ export function Oracle3DScene({
   const lastFrameModeRef = useRef<RenderMode | null>(null);
   const renderedFramesRef = useRef(0);
 
+  // CLOCK REFS
+  const lastTimeRef = useRef<number>(0);
+  const clockRef = useRef(new THREE.Clock());
+
   useEffect(() => {
+    if (webGLFailureRef.current) return;
     if (!containerRef.current) return;
 
     const setOverlayMessage = (message: string | null) => {
@@ -861,12 +989,23 @@ export function Oracle3DScene({
     camera.position.set(0, 0, 8);
     camera.layers.set(ORB_BASE_RENDER_LAYER);
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: true,
-      premultipliedAlpha: false,
-      powerPreference: 'high-performance',
-    });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: true,
+        premultipliedAlpha: false,
+        powerPreference: 'high-performance',
+      });
+    } catch (error) {
+      webGLFailureRef.current = true;
+      console.warn(
+        '[Oracle3DScene] Impossible de créer le contexte WebGL. Bascule en mode lecture statique.',
+        error,
+      );
+      setWebGLFailed(true);
+      return;
+    }
 
     renderer.setClearColor(0x111624, 1.0);
     renderer.autoClear = false;
@@ -1340,7 +1479,6 @@ export function Oracle3DScene({
           const localCtx = (orch as any).ctx || {};
           ensureFluidParticlesConfig(localCtx);
 
-          // PHASE 3 : ENRICHISSEMENT DE L'AUDIT SHELL
           const orbShell = {
             present: !!localCtx.orbMesh,
             visible: !!localCtx.orbMesh?.visible,
@@ -1375,7 +1513,9 @@ export function Oracle3DScene({
             }
           }
 
-          const lights = getLightsSnapshot ? getLightsSnapshot(localCtx) : [];
+          const lights = getLightsSnapshot
+            ? getLightsSnapshot(localCtx as any)
+            : [];
           const volumeConfig = localCtx.volumeConfig
             ? serializeColors(localCtx.volumeConfig)
             : null;
@@ -1929,7 +2069,9 @@ export function Oracle3DScene({
         ready: () => !!orchestratorRef.current,
         setSeed: (seed: string) => {
           console.info('[AUDIT] setSeed', seed);
-          resetSceneView(seed ? 'ritual-cycle-reset' : 'manual-seed-reset');
+          resetSceneViewRef.current?.(
+            seed ? 'ritual-cycle-reset' : 'manual-seed-reset',
+          );
           orchestratorRef.current?.initRitual(seed);
           lastRitualSeedRef.current = String(seed || '');
           if (visibleSafeModeRef.current) {
@@ -1941,7 +2083,7 @@ export function Oracle3DScene({
           console.info('[AUDIT] setProgress', clamped);
           (orchestratorRef.current as any)?.updateState(clamped);
         },
-        resetScene: (reason = 'manual') => resetSceneView(reason),
+        resetScene: (reason = 'manual') => resetSceneViewRef.current?.(reason),
         setRenderMode,
         getRenderMode,
         setAutoFallbackOnFeedback,
@@ -1950,7 +2092,7 @@ export function Oracle3DScene({
           applyVisibleSafeModeRef.current(Boolean(enabled)),
         setEmergencyVisibleMode,
         scanFeedbackCandidates: (reason = 'manual') =>
-          scanFeedbackCandidates(reason),
+          scanFeedbackCandidatesRef.current(reason),
         snapshot: snapshot,
       };
 
@@ -1960,7 +2102,7 @@ export function Oracle3DScene({
       }
     }
 
-    scanFeedbackCandidates('init');
+    scanFeedbackCandidatesRef.current('init');
 
     const renderBaseWithComposer = () => {
       renderer.clear(true, true, true);
@@ -1999,12 +2141,15 @@ export function Oracle3DScene({
       camera.layers.set(ORB_BASE_RENDER_LAYER);
     };
 
-    const animate = (time: number) => {
+    const animate = () => {
       try {
-        const t = time * 0.001;
+        const time = clockRef.current.getElapsedTime();
+        const dt = time - lastTimeRef.current;
+        lastTimeRef.current = time;
 
         if (orchestratorRef.current) {
-          orchestratorRef.current.update(t);
+          // Cast en any pour l'appel de `update` qui peut prendre (time, dt) ou (t)
+          (orchestratorRef.current as any).update(time, dt);
         }
 
         if (emergencyVisualStateRef.current.active) {
@@ -2021,7 +2166,7 @@ export function Oracle3DScene({
 
         frameCountRef.current += 1;
         if (frameCountRef.current % 120 === 0) {
-          scanFeedbackCandidates('periodic');
+          scanFeedbackCandidatesRef.current('periodic');
         }
 
         if (renderModeRef.current === 'direct') {
@@ -2078,7 +2223,7 @@ export function Oracle3DScene({
         window.removeEventListener('resize', handleResize);
       }
 
-      resetSceneView('unmount');
+      resetSceneViewRef.current?.('unmount');
       applyVisibleSafeModeRef.current(false);
       disposeSceneResources(activeRefs);
 
@@ -2139,7 +2284,7 @@ export function Oracle3DScene({
     const orch = orchestratorRef.current;
     if (!orch) return;
 
-    const progress = result
+    const currentProgress = result
       ? 1.0
       : loading
         ? 0.95
@@ -2153,7 +2298,7 @@ export function Oracle3DScene({
       });
     }
 
-    (orch as any).updateState?.(progress);
+    (orch as any).updateState?.(currentProgress);
 
     if (visibleSafeModeRef.current) {
       applyVisibleSafeModeRef.current(true);
@@ -2199,28 +2344,65 @@ export function Oracle3DScene({
     }
   }, [formData?.seed, result?.seed, result?.visualParams?.seed]);
 
-  // --- LE PONT DIÉGÉTIQUE REACT -> WEBGL ---
+  // FIX TYPECHECK: Hook d'interaction avec le texte
   useEffect(() => {
-    const orch = orchestratorRef.current;
-    if (!orch || !result) return;
+    if (!orchestratorRef.current) return;
+    const orch: any = orchestratorRef.current;
 
-    const prose = result.composition?.prose || result.interpretation;
-    const rawQuote = result.hermeneutic?.quote || result.quote;
-    const chapter = result.hermeneutic?.chapter || result.chapter;
+    // 🔴 PHASE 8 - RESET IMPLACABLE : Le panneau UI demande un reset
+    if (!result) {
+      if (orch.textManager && typeof orch.textManager.clear === 'function') {
+        orch.textManager.clear();
+      }
+      return;
+    }
 
-    // PHASE 6 : Si on est sur mobile, la citation va au HTML. On ne l'envoie donc pas en 3D !
+    // 🔴 PHASE 8 - DIÈTE 3D : On ne passe plus la prose longue !
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+    const reveal = result.finalReveal;
 
-    if (prose && rawQuote) {
+    if (reveal) {
+      // On ne donne à la 3D qu'une fraction symbolique du modèle canonique
       const oracleData3D = {
-        quote: isMobile ? '' : rawQuote, // Effacement holographique sur mobile
-        interpretation: prose,
-        chapter: chapter || 'RÉVÉLATION',
-        author: result.author || 'Zarathoustra',
+        chapter: reveal.chapter || 'RÉVÉLATION',
+        author: reveal.author || 'Zarathoustra',
+        // Sur mobile on efface le texte 3D central. Sur desktop, juste la tension.
+        quote: isMobile ? '' : reveal.central_tension || '',
       };
-      orch.triggerFinalRevelation(oracleData3D);
+
+      console.warn(
+        '[AUDIT 3D] Diète appliquée. Envoi des fragments symboliques :',
+        oracleData3D,
+      );
+      if (typeof orch.triggerFinalRevelation === 'function') {
+        orch.triggerFinalRevelation(oracleData3D);
+      }
     }
   }, [result]);
+
+  if (webGLFailed) {
+    return (
+      <div
+        ref={rootRef}
+        className="absolute inset-0 w-full h-full z-0 pointer-events-none"
+        data-testid="oracle3d-fallback"
+      >
+        <div className="absolute inset-0 bg-black" />
+        <div className="absolute inset-0 flex items-center justify-center px-6">
+          <div className="max-w-md text-center text-white/70">
+            <div className="mx-auto mb-5 h-14 w-14 rounded-full border border-amber-500/30 border-t-amber-400 animate-spin" />
+            <p className="mb-2 text-[11px] font-mono uppercase tracking-[0.35em] text-amber-300/70">
+              Mode lecture statique
+            </p>
+            <p className="text-sm leading-relaxed text-white/60">
+              Le moteur 3D est indisponible sur ce navigateur ou cette machine.
+              Le rituel continue via l’interface HTML.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -2232,7 +2414,7 @@ export function Oracle3DScene({
         ref={overlayRef}
         className="absolute inset-0 hidden items-center justify-center bg-black/70 text-white text-xs uppercase tracking-[0.3em] pointer-events-none"
       >
-        WebGL context lost
+        WebGL Fallback (Safe Mode)
       </div>
       <div
         ref={(el) => {

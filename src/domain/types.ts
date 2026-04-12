@@ -7,7 +7,7 @@ export type Humeur =
   | 'fatigué'
   | 'curieux'
   | 'perdu'
-  | (string & {}); // permet d’étendre sans casser le typage
+  | (string & {});
 
 export type TirageFormat =
   | 'Conseil'
@@ -16,6 +16,7 @@ export type TirageFormat =
   | 'Oracle'
   | 'Marteau'
   | 'Miel'
+  | "L'Aigle"
   | 'Aigle';
 
 export interface RitualInput {
@@ -24,13 +25,28 @@ export interface RitualInput {
   format: TirageFormat;
   questionText: string;
 
-  // Curseurs / dimensions (optionnels : certains écrans ne les collectent pas)
-  weight?: string;    // Le Poids
-  fear?: string;      // La Peur
-  desire?: string;    // Le Désir
-  sacrifice?: string; // Le Sacrifice
-  social?: string;    // Le Troupeau
-  eternity?: string;  // L'Éternité
+  weight?: string;
+  fear?: string;
+  desire?: string;
+  sacrifice?: string;
+  social?: string;
+  eternity?: string;
+}
+
+// NOUVEAU : Modèle canonique final (Sprint 1.1)
+export interface FinalRevealModel {
+  quote: string;
+  chapter: string;
+  author: string;
+  central_tension: string;
+  reversal: string;
+  imperative: string;
+  return_axis: string;
+  explanation_short: string;
+  explanation_long: string;
+  citations: string[];
+  confidence: number;
+  blocks: any[];
 }
 
 export interface OracleResult {
@@ -44,8 +60,13 @@ export interface OracleResult {
   interpretation: string;
   keywords: string[];
   ritual: RitualInput;
+
+  // NOUVEAU : Attachement du modèle canonique unique
+  finalReveal?: FinalRevealModel;
+
   hermeneutic?: {
     quote?: string;
+    chapter?: string;
     keywords?: string[];
     anchors?: Array<{
       citation_id: string;

@@ -1,45 +1,81 @@
-/**
- * PHASE 4 - THE SYNAPTIC BRIDGE
- * Permet au DOM (React) et au Canvas (WebGL) de synchroniser leurs états de focus (survol/clic)
- * sans couplage direct.
- */
+export type OracleInteractionSource = 'html' | 'webgl' | 'system';
 
-export type FocusTarget = 'none' | 'chapter' | 'quote' | 'keyword' | 'citation';
+export type OracleInteractionTarget =
+  | 'none'
+  | 'citation'
+  | 'sources'
+  | 'quote'
+  | 'interpretation'
+  | 'prose'
+  | 'chapter';
 
-export interface FocusEventDetail {
-  target: FocusTarget;
-  id?: string; // Ex: l'identifiant du mot-clé survolé
-  source: 'html' | 'webgl';
+export interface OracleInteractionEvent {
+  target: OracleInteractionTarget;
+  source: OracleInteractionSource;
+  at: number;
+  payload?: Record<string, unknown>;
 }
 
-class InteractionBridge {
-  private target: EventTarget;
+export type OracleInteractionListener = (event: OracleInteractionEvent) => void;
 
-  constructor() {
-    // Utilisation d'un DocumentFragment comme bus d'événements léger en mémoire
-    this.target =
-      typeof document !== 'undefined'
-        ? document.createDocumentFragment()
-        : new EventTarget();
+class OracleInteractionBridge {
+  private listeners = new Set<OracleInteractionListener>();
+
+  private current: OracleInteractionEvent = {
+    target: 'none',
+    source: 'system',
+    at: Date.now(),
+  };
+
+  subscribe(listener: OracleInteractionListener): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 
-  setFocus(detail: FocusEventDetail) {
-    this.target.dispatchEvent(new CustomEvent('oracle-focus', { detail }));
+  setFocus(
+    input: Omit<OracleInteractionEvent, 'at'> &
+      Partial<Pick<OracleInteractionEvent, 'at'>>,
+  ): void {
+    this.current = {
+      target: input.target,
+      source: input.source,
+      payload: input.payload,
+      at: input.at ?? Date.now(),
+    };
+    this.emit();
   }
 
-  clearFocus(source: 'html' | 'webgl') {
-    this.target.dispatchEvent(
-      new CustomEvent('oracle-focus', {
-        detail: { target: 'none', source },
-      }),
-    );
+  clearFocus(source: OracleInteractionSource = 'system'): void {
+    this.current = {
+      target: 'none',
+      source,
+      at: Date.now(),
+    };
+    this.emit();
   }
 
-  subscribe(callback: (detail: FocusEventDetail) => void) {
-    const handler = (e: Event) => callback((e as CustomEvent).detail);
-    this.target.addEventListener('oracle-focus', handler);
-    return () => this.target.removeEventListener('oracle-focus', handler);
+  getSnapshot(): OracleInteractionEvent {
+    return { ...this.current };
+  }
+
+  private emit(): void {
+    const snapshot = this.getSnapshot();
+
+    if (typeof window !== 'undefined') {
+      (window as any).__ORACLE_LAST_FOCUS__ = snapshot;
+      (window as any).__ORACLE_INTERACTION_BRIDGE__ = this;
+    }
+
+    for (const listener of this.listeners) {
+      listener(snapshot);
+    }
   }
 }
 
-export const oracleInteractionBridge = new InteractionBridge();
+export const oracleInteractionBridge = new OracleInteractionBridge();
+
+if (typeof window !== 'undefined') {
+  (window as any).__ORACLE_INTERACTION_BRIDGE__ = oracleInteractionBridge;
+}

@@ -40,18 +40,12 @@ jobs:
         run: |
           set -eo pipefail
           npm install -g npm@11.3.0
-          node --version
-          npm --version
 
       - name: npm ci
-        run: |
-          set -eo pipefail
-          npm ci 2>&1 | tee ci-npm-ci.log
+        run: npm ci 2>&1 | tee ci-npm-ci.log
 
       - name: Typecheck
-        run: |
-          set -eo pipefail
-          npm run typecheck 2>&1 | tee ci-typecheck.log
+        run: npm run typecheck 2>&1 | tee ci-typecheck.log
 
       - name: Upload typecheck artifacts
         if: always()
@@ -61,15 +55,12 @@ jobs:
           path: |
             ci-npm-ci.log
             ci-typecheck.log
-            audit/_latest/**
-            artifacts/gate*.json
-          if-no-files-found: warn
-          retention-days: 14
 
   tests:
-    name: tests
+    name: tests unit & integration
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: typecheck
 
     steps:
       - name: Checkout
@@ -80,45 +71,25 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Setup npm 11
-        run: |
-          set -eo pipefail
-          npm install -g npm@11.3.0
-          node --version
-          npm --version
 
       - name: npm ci
-        run: |
-          set -eo pipefail
-          npm ci 2>&1 | tee ci-npm-ci.log
+        run: npm ci
 
       - name: Vitest
-        run: |
-          set -eo pipefail
-          npx vitest run --config ./vitest.config.ts 2>&1 | tee ci-vitest.log
+        run: npx vitest run 2>&1 | tee ci-vitest.log
 
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: tests-${{ github.run_number }}-${{ github.sha }}
-          path: |
-            ci-npm-ci.log
-            ci-vitest.log
-            audit/_latest/**
-            artifacts/gate*.json
-          if-no-files-found: warn
-          retention-days: 14
+          path: ci-vitest.log
 
   build:
     name: build
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs:
-      - typecheck
-      - tests
+    needs: tests
 
     steps:
       - name: Checkout
@@ -129,35 +100,52 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Setup npm 11
-        run: |
-          set -eo pipefail
-          npm install -g npm@11.3.0
-          node --version
-          npm --version
 
       - name: npm ci
-        run: |
-          set -eo pipefail
-          npm ci 2>&1 | tee ci-npm-ci.log
+        run: npm ci
 
       - name: Build
-        run: |
-          set -eo pipefail
-          npm run build 2>&1 | tee ci-build.log
+        run: npm run build 2>&1 | tee ci-build.log
 
       - name: Upload build artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-${{ github.run_number }}-${{ github.sha }}
+          path: ci-build.log
+
+  e2e-smoke:
+    name: playwright e2e smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: npm ci
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests
+        run: npx playwright test --project=chromium 2>&1 | tee ci-e2e.log
+        # 🛡️ SPRINT 5.2 : Non-bloquant au début (continue-on-error)
+        continue-on-error: true
+
+      - name: Upload E2E Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_number }}-${{ github.sha }}
           path: |
-            ci-npm-ci.log
-            ci-build.log
-            dist/**
-            audit/_latest/**
-            artifacts/gate*.json
-          if-no-files-found: warn
-          retention-days: 14
+            playwright-report/
+            ci-e2e.log

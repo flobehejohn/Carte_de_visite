@@ -1,3 +1,4 @@
+import { mapToFinalRevealModel } from '../domain/oracleText/finalRevealModel';
 import { OracleResult, RitualInput } from '../domain/types';
 import { geminiGenerate } from '../lib/geminiClient';
 import {
@@ -291,7 +292,7 @@ function normalizeGuardianMovement(
     case 'orienting':
       return 'orienting';
     case 'releasing':
-      return 'releasing';
+      return 'holding';
     case 'holding':
       return 'holding';
     case 'receiving':
@@ -404,12 +405,6 @@ export function buildGuardianGuidanceFromPayload(
   };
 }
 
-/**
- * Unwrap robuste du retour de geminiGenerate()
- * - soit envelope /api/gemini: { ok, mode, text, json, ... }
- * - soit payload direct
- * - si json absent mais text contient du JSON => extractFirstJsonObject(text)
- */
 function unwrapGeminiPayload(r: any): {
   env: any;
   payload: any;
@@ -548,6 +543,8 @@ function buildOracleResult(
     interpretation,
     keywords,
     ritual,
+    // INTÉGRATION DE LA PHASE 8 : Le modèle canonique
+    finalReveal: mapToFinalRevealModel(env || data),
     hermeneutic: resolvedHermeneutic,
     composition: resolvedComposition,
     tone: { sentiment: 0.5, intensity: 1.0, mysticism: 0.7 },
@@ -709,12 +706,13 @@ export async function consultOracle(
       maxOutputTokens: 1200,
     });
 
-    const { payload } = unwrapGeminiPayload(r);
+    const { env, payload } = unwrapGeminiPayload(r);
     if (!payload) {
       throw new Error('Oracle payload missing in API response.');
     }
 
-    const result = buildOracleResult(ritual, payload, r);
+    // Le env est passé ici pour que mapToFinalRevealModel puisse lire les données
+    const result = buildOracleResult(ritual, payload, env);
     const combined = `${result.quote} ${result.interpretation}`;
 
     if (guard.shouldRetry(combined)) {

@@ -1,6 +1,8 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { useOracle } from '../../hooks/useOracle';
+import { useOracleContext } from '../../context/OracleContext';
+import { mapToFinalRevealModel } from '../../domain/oracleText/finalRevealModel';
+import { oracleInteractionBridge } from '../../domain/oracleText/InteractionBridge';
 import {
   extractGuidanceParts,
   getOraclePrimaryProse,
@@ -10,39 +12,56 @@ import { Oracle3DScene } from './Oracle3DScene';
 
 const Oracle3DSceneMemo = memo(Oracle3DScene);
 
+type ViewState = 'INPUT' | 'GUIDANCE';
+
 const Typewriter = ({
   text,
   speed = 20,
+  instant = false,
   onComplete,
 }: {
   text: string;
   speed?: number;
+  instant?: boolean;
   onComplete?: () => void;
 }) => {
-  const [charIndex, setCharIndex] = useState(0);
+  const [charIndex, setCharIndex] = useState(instant ? text.length : 0);
   const completionRef = useRef(false);
 
   useEffect(() => {
-    setCharIndex(0);
     completionRef.current = false;
-    if (!text) return;
-    const interval = window.setInterval(() => {
-      setCharIndex((prev) => (prev < text.length ? prev + 1 : prev));
-    }, speed);
+    if (!text) {
+      setCharIndex(0);
+      return;
+    }
+    if (instant) {
+      setCharIndex(text.length);
+      completionRef.current = true;
+      onComplete?.();
+      return;
+    }
+    setCharIndex(0);
+    const interval = window.setInterval(
+      () => {
+        setCharIndex((prev) => (prev < text.length ? prev + 1 : prev));
+      },
+      Math.max(10, speed),
+    );
     return () => window.clearInterval(interval);
-  }, [text, speed]);
+  }, [text, speed, instant, onComplete]);
 
   useEffect(() => {
+    if (instant) return;
     if (text && charIndex >= text.length && !completionRef.current) {
       completionRef.current = true;
       onComplete?.();
     }
-  }, [charIndex, text, onComplete]);
+  }, [charIndex, text, instant, onComplete]);
 
   return (
     <span>
-      {text?.slice(0, charIndex)}
-      <span className="cursor-blink">|</span>
+      {text.slice(0, charIndex)}
+      {!instant && <span className="cursor-blink">|</span>}
     </span>
   );
 };
@@ -53,62 +72,65 @@ const STEPS = [
     label: 'I. Identité',
     q: 'Qui ose éveiller Zarathoustra ?',
     placeholder: 'Ton nom...',
+    mode: 'input',
   },
   {
     id: 'mood',
     label: 'II. Atmosphère',
     q: 'Quel ciel pèse sur ton âme ?',
-    type: 'cards',
+    mode: 'cards',
   },
   {
     id: 'weight',
     label: 'III. Le Fardeau',
     q: 'Quelle pierre est la plus lourde ?',
-    type: 'cards',
+    mode: 'cards',
   },
   {
     id: 'fear',
     label: "IV. L'Entrave",
     q: "Qu'est-ce qui te fait trembler ?",
     placeholder: 'Ma peur est...',
+    mode: 'input',
   },
   {
     id: 'desire',
     label: 'V. Le Désir',
     q: 'Vers quelle étoile tends-tu ?',
-    type: 'cards',
+    mode: 'cards',
   },
   {
     id: 'sacrifice',
     label: 'VI. Le Combat',
     q: 'Que dois-tu sacrifier ?',
-    type: 'cards',
+    mode: 'cards',
   },
   {
     id: 'social',
     label: 'VII. Le Troupeau',
     q: 'Où te tiens-tu parmi les autres ?',
-    type: 'cards',
+    mode: 'cards',
   },
   {
     id: 'eternity',
     label: "VIII. L'Éternité",
     q: 'Si cet instant se répétait...',
-    type: 'cards',
+    mode: 'cards',
   },
   {
     id: 'format',
     label: 'IX. Le Réceptacle',
     q: 'Quelle forme pour la vérité ?',
-    type: 'formats',
+    mode: 'formats',
   },
   {
     id: 'question',
     label: 'X. Invocation',
     q: "Parle maintenant à l'Abîme.",
     placeholder: 'Ta question...',
+    mode: 'input',
   },
-];
+] as const;
 
 const MOODS = [
   'Orageux',
@@ -176,7 +198,30 @@ function renderQuotedPreview(value: string) {
   return `« ${clean} »`;
 }
 
-export default function RitualWizard() {
+function pickStepOptions(stepId: string): string[] {
+  switch (stepId) {
+    case 'mood':
+      return MOODS;
+    case 'weight':
+      return WEIGHTS;
+    case 'desire':
+      return DESIRES;
+    case 'sacrifice':
+      return SACRIFICES;
+    case 'social':
+      return SOCIALS;
+    case 'eternity':
+      return ETERNITIES;
+    default:
+      return [];
+  }
+}
+
+interface RitualWizardProps {
+  isE2E?: boolean;
+}
+
+export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
   const {
     checkStep,
     error,
@@ -187,16 +232,29 @@ export default function RitualWizard() {
     loading,
     lastResult,
     reset,
-  } = useOracle();
+  } = useOracleContext();
 
   const [stage, setStage] = useState<number>(1);
   const [formData, setFormData] = useState<any>(INITIAL_FORM);
   const [sceneData, setSceneData] = useState<any>(INITIAL_FORM);
-  const [viewState, setViewState] = useState<'INPUT' | 'GUIDANCE'>('INPUT');
+  const [viewState, setViewState] = useState<ViewState>('INPUT');
   const [canProceed, setCanProceed] = useState(false);
   const [guidanceEchoDone, setGuidanceEchoDone] = useState(false);
+
+  // 🛡️ STATE IMMERSION : Contrôle l'affichage du panneau texte vs HUD 3D
+  const [isImmersion, setIsImmersion] = useState(false);
+
   const textRef = useRef<HTMLDivElement | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const finalDrawTimeoutRef = useRef<number | null>(null);
+  const effectiveLoading = isE2E ? false : loading;
+
+  useEffect(() => {
+    return () => {
+      if (finalDrawTimeoutRef.current)
+        window.clearTimeout(finalDrawTimeoutRef.current);
+    };
+  }, []);
 
   const currentStep = STEPS[stage - 1];
   const currentValue = currentStep ? formData[currentStep.id] || '' : '';
@@ -215,30 +273,48 @@ export default function RitualWizard() {
     [lastResult],
   );
 
+  const revealModel = useMemo(() => {
+    if (!lastResult) return null;
+    return lastResult.finalReveal ?? mapToFinalRevealModel(lastResult);
+  }, [lastResult]);
+
+  const revealQuote = useMemo(
+    () => revealModel?.quote || lastResult?.quote || '',
+    [revealModel, lastResult],
+  );
+  const revealInterpretation = useMemo(
+    () =>
+      revealModel?.central_tension ||
+      revealModel?.explanation_short ||
+      lastResult?.interpretation ||
+      '',
+    [revealModel, lastResult],
+  );
+  const revealProse = useMemo(
+    () =>
+      revealModel?.explanation_long ||
+      oraclePrimaryProse ||
+      lastResult?.interpretation ||
+      '',
+    [revealModel, oraclePrimaryProse, lastResult],
+  );
+  const revealSources = useMemo(() => {
+    if (Array.isArray(revealModel?.citations) && revealModel.citations.length)
+      return revealModel.citations;
+    if (Array.isArray(lastResult?.hermeneutic?.anchors))
+      return lastResult.hermeneutic.anchors.map(
+        (a: any) => a.claim || a.motif || a.citation_id,
+      );
+    return [];
+  }, [revealModel, lastResult]);
+
   const updateField = (fieldKey: string, value: string) => {
     setFormData((prev: any) => ({ ...prev, [fieldKey]: value }));
   };
 
-  const handleValidate = async () => {
-    if (!currentStep || !canValidate) return;
-    clearGuidance();
-    setViewState('GUIDANCE');
-    setCanProceed(false);
-    setGuidanceEchoDone(false);
-    setSceneData((prev: any) => ({ ...prev, [currentStep.id]: currentValue }));
-    await checkStep(currentStep.id, currentValue);
-  };
-
-  const handleNextStep = () => {
-    clearGuidance();
-    setCanProceed(false);
-    setGuidanceEchoDone(false);
-    if (stage < 10) {
-      setStage((prev) => prev + 1);
-      setViewState('INPUT');
-    } else {
-      handleFinalDraw();
-    }
+  const unlockProceed = () => {
+    setGuidanceEchoDone(true);
+    setCanProceed(true);
   };
 
   const handleFinalDraw = () => {
@@ -248,7 +324,6 @@ export default function RitualWizard() {
     setCanProceed(false);
     setGuidanceEchoDone(false);
     setSceneData((prev: any) => ({ ...prev, ...formData }));
-
     const fallbackProgress = Math.max(0, Math.min(1, (stage - 1) / 9));
     const climateSnapshot = (() => {
       const fallback = {
@@ -261,25 +336,26 @@ export default function RitualWizard() {
         if (!snap) return fallback;
         const climateTargets = snap?.targets ?? snap?.climateTargets;
         const palette = snap?.ritualGenome?.palette;
-        const paletteMode = snap?.ritualGenome?.paletteMode;
-        const primary = palette?.primary?.hex;
-        const accent = palette?.accent?.hex;
-        const progress =
-          typeof snap?.progress === 'number' ? snap.progress : fallbackProgress;
         return {
-          progress,
+          progress:
+            typeof snap?.progress === 'number'
+              ? snap.progress
+              : fallbackProgress,
           mood: formData.mood || '',
           presetName: climateTargets?.presetName,
           fog: climateTargets?.fog,
           bloom: climateTargets?.bloom,
           volume: climateTargets?.volume,
-          palette: { mode: paletteMode, primary, accent },
+          palette: {
+            mode: snap?.ritualGenome?.paletteMode,
+            primary: palette?.primary?.hex,
+            accent: palette?.accent?.hex,
+          },
         };
       } catch {
         return fallback;
       }
     })();
-
     drawFromRitual(
       {
         ...formData,
@@ -290,67 +366,84 @@ export default function RitualWizard() {
     );
   };
 
+  const handleValidate = async () => {
+    if (!currentStep || !canValidate) return;
+    clearGuidance();
+    setViewState('GUIDANCE');
+    setCanProceed(false);
+    setGuidanceEchoDone(false);
+    setSceneData((prev: any) => ({ ...prev, [currentStep.id]: currentValue }));
+    if (isE2E) {
+      if (currentStep.id === 'question') {
+        finalDrawTimeoutRef.current = window.setTimeout(
+          () => handleFinalDraw(),
+          0,
+        );
+        return;
+      }
+      unlockProceed();
+      return;
+    }
+    const isSafe = await checkStep(currentStep.id, currentValue);
+    if (!isSafe) return;
+    if (currentStep.id === 'question') {
+      finalDrawTimeoutRef.current = window.setTimeout(
+        () => handleFinalDraw(),
+        1500,
+      );
+    }
+  };
+
+  const handleNextStep = () => {
+    clearGuidance();
+    setCanProceed(false);
+    setGuidanceEchoDone(false);
+    if (stage < 10) {
+      setStage((prev) => prev + 1);
+      setViewState('INPUT');
+      return;
+    }
+    handleFinalDraw();
+  };
+
   const handleReset = () => {
-    if (reset) reset();
+    if (finalDrawTimeoutRef.current) {
+      window.clearTimeout(finalDrawTimeoutRef.current);
+      finalDrawTimeoutRef.current = null;
+    }
+    setIsImmersion(false); // Réinitialise l'immersion
+    reset?.();
+    clearGuidance();
     setStage(1);
     setFormData(INITIAL_FORM);
     setSceneData(INITIAL_FORM);
     setViewState('INPUT');
     setCanProceed(false);
     setGuidanceEchoDone(false);
-    clearGuidance();
+    oracleInteractionBridge.clearFocus('html');
   };
 
   useEffect(() => {
     if (viewState !== 'GUIDANCE') return;
+    if (isE2E) {
+      if (currentStep?.id !== 'question' && !guidanceLoading) unlockProceed();
+      return;
+    }
     if (guidanceLoading) {
       setCanProceed(false);
       setGuidanceEchoDone(false);
+      return;
+    }
+    if (currentStep?.id === 'question') {
+      setGuidanceEchoDone(true);
+      setCanProceed(true);
       return;
     }
     if (!guidanceEcho) {
       setGuidanceEchoDone(true);
       setCanProceed(true);
     }
-  }, [viewState, guidanceLoading, guidanceEcho]);
-
-  useEffect(() => {
-    if (!textRef.current) return;
-    if (resizeObserverRef.current) resizeObserverRef.current.disconnect();
-
-    const computeMetrics = () => {
-      const el = textRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const vw = window.innerWidth || 1;
-      const vh = window.innerHeight || 1;
-      const areaRatio = Math.max(
-        0,
-        Math.min(1, (rect.width * rect.height) / (vw * vh)),
-      );
-      const linesApprox = Math.max(1, Math.round(rect.height / 18));
-      const metrics = {
-        textLength: oraclePrimaryProse.length || formData.question?.length || 0,
-        boxW: rect.width,
-        boxH: rect.height,
-        linesApprox,
-        areaRatio,
-        viewportW: vw,
-        viewportH: vh,
-      };
-      setSceneData((prev: any) => ({ ...prev, textMetrics: metrics }));
-    };
-
-    computeMetrics();
-    const ro = new ResizeObserver(() => computeMetrics());
-    resizeObserverRef.current = ro;
-    ro.observe(textRef.current);
-    window.addEventListener('resize', computeMetrics);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', computeMetrics);
-    };
-  }, [oraclePrimaryProse, formData.question]);
+  }, [viewState, guidanceLoading, guidanceEcho, currentStep?.id, isE2E]);
 
   useEffect(() => {
     if (!lastResult) return;
@@ -362,22 +455,21 @@ export default function RitualWizard() {
     }));
   }, [lastResult]);
 
+  const setBridgeFocus = (target: any, payload?: any) => {
+    oracleInteractionBridge.setFocus({ target, source: 'html', payload });
+    if (typeof window !== 'undefined')
+      (window as any).__ORACLE_LAST_FOCUS__ = { target, source: 'html' };
+  };
+
   const renderCards = (items: string[], fieldKey: string) => (
     <div className="grid grid-cols-2 md:grid-cols-3 gap-2 w-full">
-      {items.map((item) => (
+      {items.map((item, index) => (
         <button
           key={item}
           type="button"
+          data-testid={`choice-${fieldKey}-${index}`}
           onClick={() => updateField(fieldKey, item)}
-          className={`
-            p-3 text-sm rounded border transition-all duration-300 font-oracle backdrop-blur-md
-            hover:bg-white/10 hover:text-white hover:border-white/40
-            ${
-              formData[fieldKey] === item
-                ? 'bg-amber-500/20 border-amber-400 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.5)]'
-                : 'bg-black/60 border-white/20 text-white/70'
-            }
-          `}
+          className={`p-3 text-sm rounded border transition-all duration-300 font-oracle backdrop-blur-md hover:bg-white/10 hover:text-white hover:border-white/40 ${formData[fieldKey] === item ? 'bg-amber-500/20 border-amber-400 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.5)]' : 'bg-black/60 border-white/20 text-white/70'}`}
         >
           {item}
         </button>
@@ -385,57 +477,165 @@ export default function RitualWizard() {
     </div>
   );
 
+  const renderRevealPanel = () => (
+    <motion.div
+      key="reveal-panel"
+      initial={isE2E ? false : { opacity: 0, y: 12, filter: 'blur(10px)' }}
+      animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+      exit={{ opacity: 0, y: 12, filter: 'blur(10px)' }}
+      transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+      data-testid="reveal-panel"
+      className="glass-clear w-full max-w-4xl pointer-events-auto p-6 md:p-8 rounded-xl border border-white/10 shadow-2xl bg-black/40 backdrop-blur-md"
+    >
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-8 border-b border-white/10 pb-6">
+        <div>
+          <p
+            data-testid="reveal-chapter"
+            className="text-[11px] font-mono uppercase tracking-[0.35em] text-amber-300/70 mb-2"
+          >
+            {revealModel?.chapter || 'RÉVÉLATION'}
+          </p>
+          <h2 className="text-2xl md:text-3xl font-oracle text-white">
+            {revealModel?.author || 'Zarathoustra'}
+          </h2>
+        </div>
+        <div className="flex flex-wrap gap-3 w-full md:w-auto">
+          <button
+            type="button"
+            onClick={() => setIsImmersion(true)}
+            className="flex-1 md:flex-none px-5 py-2.5 bg-white/5 border border-white/20 text-white hover:bg-white/15 uppercase tracking-widest text-xs transition-all rounded shadow-lg flex items-center justify-center gap-2"
+          >
+            <span className="text-amber-400">👁️</span> Contempler
+          </button>
+          <button
+            type="button"
+            data-testid="btn-restart"
+            onClick={handleReset}
+            className="flex-1 md:flex-none px-5 py-2.5 border border-amber-500/50 text-amber-200 hover:bg-amber-500 hover:text-black uppercase tracking-widest text-xs transition-all rounded shadow-lg"
+          >
+            Fermer le Cercle
+          </button>
+        </div>
+      </div>
+      <blockquote
+        data-testid="reveal-quote"
+        className="text-xl md:text-3xl font-oracle italic text-amber-100 leading-relaxed mb-8 border-l-2 border-amber-500/50 pl-6"
+        onMouseEnter={() => setBridgeFocus('quote')}
+        onMouseLeave={() => oracleInteractionBridge.clearFocus('html')}
+      >
+        {revealQuote}
+      </blockquote>
+      <p
+        data-testid="reveal-interpretation"
+        className="text-sm md:text-base text-white/72 leading-relaxed font-hud mb-6"
+        onMouseEnter={() => setBridgeFocus('interpretation')}
+        onMouseLeave={() => oracleInteractionBridge.clearFocus('html')}
+      >
+        {revealInterpretation}
+      </p>
+      <div
+        data-testid="reveal-prose"
+        className="text-base md:text-lg text-white/90 leading-8 font-oracle mb-8"
+        onMouseEnter={() => setBridgeFocus('prose')}
+        onMouseLeave={() => oracleInteractionBridge.clearFocus('html')}
+      >
+        {revealProse}
+      </div>
+      <div
+        data-testid="reveal-sources"
+        className="bg-black/30 rounded-lg p-5 border border-white/5"
+        onMouseEnter={() => setBridgeFocus('sources')}
+        onMouseLeave={() => oracleInteractionBridge.clearFocus('html')}
+      >
+        <p className="text-[11px] font-mono uppercase tracking-[0.3em] text-amber-300/70 mb-4 flex items-center gap-2">
+          <span className="w-4 h-px bg-amber-300/50" /> Sources
+        </p>
+        {revealSources.length > 0 ? (
+          <ul className="space-y-3">
+            {revealSources.map((source, index) => (
+              <li
+                key={`${source}-${index}`}
+                data-testid={`reveal-citation-${index}`}
+                className="text-sm text-white/75 hover:text-amber-200 transition-colors cursor-default"
+                onMouseEnter={() =>
+                  setBridgeFocus('citation', { index, source })
+                }
+                onMouseLeave={() => oracleInteractionBridge.clearFocus('html')}
+              >
+                {source}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-white/40 italic">
+            Aucune source affichable.
+          </p>
+        )}
+      </div>
+    </motion.div>
+  );
+
   return (
-    <div className="relative w-full h-screen min-h-screen bg-black overflow-hidden isolate">
-      {/* SCÈNE 3D (Arrière-plan total) */}
-      <div className="absolute inset-0 z-0 pointer-events-none">
+    <div
+      data-testid="ritual-root"
+      data-stage={stage}
+      className="relative w-full h-screen min-h-screen bg-[#020408] overflow-hidden isolate"
+    >
+      {/* SCÈNE 3D - Toujours en fond, reçoit les clics si l'UI HTML ne bloque pas */}
+      <div className="absolute inset-0 z-0">
         <Oracle3DSceneMemo
           formData={sceneData}
           stage={stage}
-          loading={loading}
+          loading={effectiveLoading}
           result={lastResult}
-          progress={lastResult ? 1.0 : loading ? 0.85 : (stage / 10) * 0.8}
+          progress={
+            lastResult ? 1.0 : effectiveLoading ? 0.85 : (stage / 10) * 0.8
+          }
         />
       </div>
 
-      {/* SURCOUCHE UI (Premier plan interactif) */}
+      {/* HUD D'IMMERSION FLOTTANT */}
+      <AnimatePresence>
+        {lastResult && isImmersion && (
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 30 }}
+            className="absolute bottom-8 md:bottom-12 left-1/2 -translate-x-1/2 flex flex-col md:flex-row gap-4 z-50 pointer-events-auto"
+          >
+            <button
+              onClick={() => setIsImmersion(false)}
+              className="px-6 py-3 bg-black/60 border border-white/20 text-white rounded hover:bg-white/10 hover:border-white/40 transition-all uppercase text-[11px] tracking-[0.2em] backdrop-blur-xl shadow-2xl flex items-center justify-center gap-2"
+            >
+              📖 Retour au Verbe
+            </button>
+            <button
+              onClick={handleReset}
+              className="px-6 py-3 border border-amber-500/50 bg-black/80 text-amber-300 hover:bg-amber-500 hover:text-black uppercase text-[11px] tracking-[0.2em] transition-all rounded backdrop-blur-xl shadow-2xl flex items-center justify-center gap-2"
+            >
+              ⭘ Fermer le Cercle
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* COUCHE UI PRINCIPALE - pointer-events-none laisse passer les clics vers la 3D */}
       <div className="absolute inset-0 z-10 pointer-events-none flex flex-col justify-between px-4 pt-8 pb-12 md:pt-12 md:px-8">
-        {/* EN-TÊTE */}
-        <div className="w-full flex justify-center flex-shrink-0">
+        <div className="w-full flex justify-center flex-shrink-0 max-h-full overflow-y-auto custom-scrollbar">
           <div className="pointer-events-auto w-full max-w-4xl flex flex-col items-center">
             <AnimatePresence mode="wait">
               {lastResult ? (
-                <motion.div
-                  key="result-top"
-                  initial={{ opacity: 0, y: -20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="flex flex-col items-center gap-4"
-                >
-                  <button
-                    type="button"
-                    onClick={handleReset}
-                    className="px-6 py-2 border border-amber-500/50 text-amber-500 hover:bg-amber-500 hover:text-black uppercase tracking-widest text-xs transition-all"
-                  >
-                    Fermer le Cercle
-                  </button>
-
-                  <div className="max-w-4xl text-center">
-                    <p className="text-[11px] font-mono uppercase tracking-[0.35em] text-amber-400/70 mb-3">
-                      Parole oracle
-                    </p>
-                    <div className="text-2xl md:text-3xl font-oracle italic text-white drop-shadow-lg px-4">
-                      “<Typewriter text={lastResult.quote} />”
-                    </div>
-                  </div>
-                </motion.div>
+                !isImmersion ? (
+                  renderRevealPanel()
+                ) : null
               ) : error ? (
                 <motion.div
                   key={`error-top-${stage}`}
-                  initial={{ opacity: 0, y: -20 }}
+                  initial={isE2E ? false : { opacity: 0, y: -20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="glass-clear inline-block max-w-xl p-6 rounded"
+                  className="glass-clear inline-block max-w-xl p-6 rounded border border-red-500/30"
                 >
-                  <p className="text-[11px] font-mono uppercase tracking-[0.35em] text-red-200/70 mb-3">
+                  <p className="text-[11px] font-mono uppercase tracking-[0.35em] text-red-400 mb-3">
                     Oracle indisponible
                   </p>
                   <p className="text-lg md:text-xl text-red-100 italic font-oracle leading-relaxed">
@@ -445,49 +645,60 @@ export default function RitualWizard() {
               ) : (
                 <motion.div
                   key={`top-${stage}-${viewState}`}
-                  initial={{ opacity: 0, y: -20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
+                  initial={
+                    isE2E ? false : { opacity: 0, y: -20, filter: 'blur(5px)' }
+                  }
+                  animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                  exit={
+                    isE2E ? false : { opacity: 0, y: -20, filter: 'blur(5px)' }
+                  }
+                  transition={{ duration: 0.5 }}
                   className="w-full"
                 >
-                  {viewState === 'INPUT' && currentStep && (
+                  {currentStep && (
                     <div className="max-w-3xl mx-auto text-center mt-4">
-                      <p className="text-amber-500/60 text-xs font-mono uppercase tracking-[0.3em] mb-2">
+                      <p
+                        data-testid="step-title"
+                        className="text-amber-500/60 text-xs font-mono uppercase tracking-[0.3em] mb-3"
+                      >
                         {currentStep.label}
                       </p>
-                      <h1 className="text-3xl md:text-4xl font-oracle text-white leading-tight drop-shadow-md">
+                      <h1
+                        data-testid="step-question"
+                        className="text-3xl md:text-5xl font-oracle text-white leading-tight drop-shadow-2xl"
+                      >
                         {currentStep.q}
                       </h1>
                     </div>
                   )}
-
                   {viewState === 'GUIDANCE' && currentStep && (
-                    <div className="glass-clear inline-block max-w-3xl text-left p-6 rounded">
-                      <p className="text-[11px] font-mono uppercase tracking-[0.35em] text-amber-300/70 mb-3">
-                        Écho du seuil · {currentStep.label}
+                    <div className="glass-clear inline-block max-w-3xl text-left p-6 md:p-8 rounded-lg mt-8 border border-white/5 bg-black/40 backdrop-blur-md">
+                      <p className="text-[11px] font-mono uppercase tracking-[0.35em] text-amber-400/70 mb-4 flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full bg-amber-500/20 flex items-center justify-center">
+                          <span className="w-1 h-1 bg-amber-400 rounded-full animate-ping" />
+                        </span>{' '}
+                        Écho du seuil
                       </p>
-
-                      <h2 className="text-xl md:text-2xl font-oracle text-white leading-snug mb-4">
-                        {currentStep.q}
-                      </h2>
-
                       {currentValuePreview && (
-                        <p className="text-sm md:text-base text-white/65 italic mb-4 font-oracle">
+                        <p className="text-sm md:text-base text-white/50 italic mb-5 font-oracle border-l-2 border-white/10 pl-4">
                           {currentValuePreview}
                         </p>
                       )}
-
-                      {guidanceLoading ? (
+                      {guidanceLoading && !isE2E ? (
                         <p className="text-amber-300 animate-pulse italic font-oracle">
-                          Le seuil écoute...
+                          L'abîme écoute...
                         </p>
                       ) : (
                         <div className="max-w-2xl">
-                          <p className="text-lg md:text-xl text-amber-100 font-oracle leading-relaxed">
+                          <p
+                            data-testid="guidance-echo"
+                            className="text-lg md:text-2xl text-amber-100 font-oracle leading-relaxed"
+                          >
                             {guidanceEcho ? (
                               <Typewriter
                                 text={guidanceEcho}
                                 speed={14}
+                                instant={isE2E}
                                 onComplete={() => {
                                   setGuidanceEchoDone(true);
                                   setCanProceed(true);
@@ -497,16 +708,15 @@ export default function RitualWizard() {
                               'Le seuil reste ouvert.'
                             )}
                           </p>
-
                           {guidanceSubcomment && (
                             <motion.p
-                              initial={{ opacity: 0, y: 8 }}
+                              initial={isE2E ? false : { opacity: 0, y: 8 }}
                               animate={{
                                 opacity:
-                                  guidanceEchoDone || !guidanceEcho ? 1 : 0.45,
+                                  guidanceEchoDone || !guidanceEcho ? 1 : 0.2,
                                 y: 0,
                               }}
-                              className="mt-4 text-sm md:text-base text-white/72 leading-relaxed font-hud border-l border-amber-400/25 pl-4"
+                              className="mt-5 text-sm md:text-base text-white/70 leading-relaxed font-hud border-l border-amber-500/30 pl-4 bg-gradient-to-r from-amber-500/5 to-transparent py-2"
                             >
                               {guidanceSubcomment}
                             </motion.p>
@@ -521,129 +731,77 @@ export default function RitualWizard() {
           </div>
         </div>
 
-        {/* PIED DE PAGE */}
-        <div className="w-full flex justify-center flex-shrink-0 mt-auto">
+        {/* CONTROLES INFERIEURS */}
+        <div className="w-full flex justify-center flex-shrink-0 mt-auto pt-8">
           <div className="pointer-events-auto w-full max-w-4xl flex flex-col items-center">
             <AnimatePresence mode="wait">
-              {lastResult && (
-                <motion.div
-                  key="result-bottom"
-                  initial={{ opacity: 0, y: 50 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="glass-clear w-full max-h-[45vh] overflow-y-auto custom-scrollbar text-left shadow-2xl p-6 rounded"
-                  ref={textRef}
-                >
-                  <div className="prose prose-invert max-w-none prose-p:text-slate-200 prose-p:font-hud prose-p:leading-relaxed">
-                    <p>
-                      <Typewriter text={oraclePrimaryProse} speed={5} />
-                    </p>
-                  </div>
-
-                  {Array.isArray(lastResult.keywords) &&
-                    lastResult.keywords.length > 0 && (
-                      <div className="mt-5 flex flex-wrap gap-2">
-                        {lastResult.keywords.map((keyword) => (
-                          <span
-                            key={keyword}
-                            className="px-2.5 py-1 rounded-full border border-amber-500/30 text-[11px] uppercase tracking-[0.18em] text-amber-200/90 bg-amber-500/10"
-                          >
-                            {keyword}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-
-                  <div className="mt-5 pt-4 border-t border-white/10 text-[11px] uppercase tracking-[0.22em] text-white/45 font-mono">
-                    <div>
-                      Ancrage : {lastResult.sentence.part_title} ·{' '}
-                      {lastResult.sentence.section_title}
-                    </div>
-                    <div className="mt-1">
-                      Citation #{lastResult.sentence.id}
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-
-              {!lastResult && !loading && error && (
+              {!lastResult && !effectiveLoading && error && (
                 <motion.div
                   key={`error-bottom-${stage}`}
-                  initial={{ opacity: 0, y: 20 }}
+                  initial={isE2E ? false : { opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="w-full flex flex-col items-center gap-4"
+                  className="w-full flex flex-col sm:flex-row justify-center items-center gap-4"
                 >
                   <button
                     type="button"
                     onClick={handleFinalDraw}
-                    className="mt-2 px-8 py-2 bg-white/10 hover:bg-white hover:text-black border border-white/20 text-white transition-all uppercase text-xs tracking-widest rounded shadow-lg"
+                    className="px-8 py-3 bg-amber-600 hover:bg-amber-500 text-black transition-all uppercase text-xs font-bold tracking-widest rounded shadow-[0_0_20px_rgba(245,158,11,0.3)]"
                   >
                     Réessayer l’invocation
                   </button>
                   <button
                     type="button"
                     onClick={handleReset}
-                    className="px-8 py-2 border border-amber-500/50 text-amber-200 hover:bg-amber-500 hover:text-black uppercase tracking-widest text-xs transition-all"
+                    className="px-8 py-3 border border-white/20 text-white/70 hover:bg-white hover:text-black uppercase tracking-widest text-xs transition-all rounded"
                   >
-                    Recommencer le rituel
+                    Fermer le Cercle
                   </button>
                 </motion.div>
               )}
-
-              {!lastResult && !loading && !error && (
+              {!lastResult && !effectiveLoading && !error && (
                 <motion.div
                   key={`bottom-${stage}-${viewState}`}
-                  initial={{ opacity: 0, y: 20 }}
+                  initial={isE2E ? false : { opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 20 }}
+                  exit={isE2E ? false : { opacity: 0, y: 20 }}
                   className="w-full flex flex-col items-center gap-4"
                 >
                   {viewState === 'INPUT' && currentStep && (
                     <>
-                      {currentStep.type === 'cards' &&
+                      {currentStep.mode === 'cards' &&
                         renderCards(
-                          currentStep.id === 'mood'
-                            ? MOODS
-                            : currentStep.id === 'weight'
-                              ? WEIGHTS
-                              : currentStep.id === 'desire'
-                                ? DESIRES
-                                : currentStep.id === 'sacrifice'
-                                  ? SACRIFICES
-                                  : currentStep.id === 'social'
-                                    ? SOCIALS
-                                    : ETERNITIES,
+                          pickStepOptions(currentStep.id),
                           currentStep.id,
                         )}
-
-                      {currentStep.type === 'formats' && (
-                        <div className="grid grid-cols-2 gap-2 w-full">
-                          {FORMATS.map((f) => (
+                      {currentStep.mode === 'formats' && (
+                        <div className="grid grid-cols-2 gap-3 w-full max-w-2xl">
+                          {FORMATS.map((f, index) => (
                             <button
                               key={f.id}
                               type="button"
+                              data-testid={`choice-format-${index}`}
                               onClick={() => updateField('format', f.id)}
-                              className={`p-3 border text-left transition-all rounded backdrop-blur-md hover:bg-white/10 hover:text-white hover:border-white/40
-                                ${
-                                  formData.format === f.id
-                                    ? 'bg-amber-500/20 border-amber-400 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.5)]'
-                                    : 'bg-black/60 border-white/20 text-white/70'
-                                }`}
+                              className={`p-4 border text-left transition-all rounded-lg backdrop-blur-xl hover:bg-white/10 hover:border-white/40 ${formData.format === f.id ? 'bg-amber-500/20 border-amber-400 shadow-[0_0_30px_rgba(245,158,11,0.3)]' : 'bg-black/60 border-white/10'}`}
                             >
-                              <div className="font-oracle text-white">
+                              <div
+                                className={`font-oracle text-lg mb-1 ${formData.format === f.id ? 'text-amber-100' : 'text-white/90'}`}
+                              >
                                 {f.label}
                               </div>
-                              <div className="text-[10px] text-gray-400 uppercase tracking-tighter">
+                              <div
+                                className={`text-[10px] uppercase tracking-widest ${formData.format === f.id ? 'text-amber-400/80' : 'text-white/40'}`}
+                              >
                                 {f.desc}
                               </div>
                             </button>
                           ))}
                         </div>
                       )}
-
-                      {!currentStep.type && (
+                      {currentStep.mode === 'input' && (
                         <input
                           autoFocus
                           type="text"
+                          data-testid="step-input"
                           placeholder={currentStep.placeholder}
                           value={formData[currentStep.id] || ''}
                           onChange={(e) =>
@@ -652,48 +810,54 @@ export default function RitualWizard() {
                           onKeyDown={(e) =>
                             e.key === 'Enter' && canValidate && handleValidate()
                           }
-                          className="oracle-input w-full max-w-md p-4 text-center bg-black/50 border border-white/30 text-white rounded focus:outline-none focus:border-amber-500"
+                          className="oracle-input w-full max-w-lg p-5 text-center text-lg bg-black/60 border border-white/20 text-white rounded-lg focus:outline-none focus:border-amber-500 focus:bg-black/80 transition-all shadow-2xl placeholder:text-white/20"
                         />
                       )}
-
                       {canValidate && (
                         <motion.button
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
+                          initial={isE2E ? false : { opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
                           type="button"
+                          data-testid="btn-confirm"
                           onClick={handleValidate}
-                          className="mt-4 px-8 py-2 bg-white/10 hover:bg-white hover:text-black border border-white/20 text-white transition-all uppercase text-xs tracking-widest rounded shadow-lg"
+                          className="mt-6 px-12 py-3 bg-white/10 hover:bg-white hover:text-black border border-white/20 text-white transition-all uppercase text-xs tracking-[0.2em] rounded shadow-lg"
                         >
                           Confirmer
                         </motion.button>
                       )}
                     </>
                   )}
-
-                  {viewState === 'GUIDANCE' && canProceed && (
+                  {viewState === 'GUIDANCE' && canProceed && stage < 10 && (
                     <motion.button
-                      initial={{ scale: 0.9, opacity: 0 }}
+                      initial={isE2E ? false : { scale: 0.9, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
                       type="button"
+                      data-testid="btn-next"
                       onClick={handleNextStep}
-                      className="px-10 py-3 mt-4 bg-amber-600 hover:bg-amber-500 text-white font-oracle font-bold text-lg shadow-lg shadow-amber-900/50 rounded-sm"
+                      className="px-12 py-4 mt-6 bg-amber-600 hover:bg-amber-500 text-black font-oracle font-bold text-lg shadow-[0_0_30px_rgba(245,158,11,0.4)] rounded transition-all hover:scale-105 active:scale-95"
                     >
-                      {stage < 10
-                        ? 'Continuer le voyage'
-                        : 'Invoquer Zarathoustra'}
+                      Continuer le voyage
                     </motion.button>
                   )}
                 </motion.div>
               )}
-
-              {loading && (
-                <div className="text-amber-500 text-xs tracking-[0.4em] animate-pulse mb-8 z-50">
-                  ALIGNEMENT DES ASTRES...
+              {effectiveLoading && (
+                <div
+                  data-testid="loading-indicator"
+                  className="flex items-center gap-3 text-amber-500 text-[10px] tracking-[0.4em] font-mono uppercase bg-black/50 px-6 py-2 rounded-full border border-amber-500/20 backdrop-blur-md"
+                >
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />{' '}
+                  Alignement des astres...
                 </div>
               )}
             </AnimatePresence>
           </div>
         </div>
+      </div>
+      <div className="sr-only" ref={textRef}>
+        <p>Parole oracle</p>
+        <p>{revealQuote}</p>
+        <p>{revealProse}</p>
       </div>
     </div>
   );
