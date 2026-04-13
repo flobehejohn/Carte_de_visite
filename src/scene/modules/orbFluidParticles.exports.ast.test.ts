@@ -1,16 +1,22 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
-const jsPath = resolve(__dirname, './orbFluidParticles.js');
-const dtsPath = resolve(__dirname, './orbFluidParticles.d.ts');
+const jsPath = fileURLToPath(
+  new URL('./orbFluidParticles.js', import.meta.url),
+);
+const dtsPath = fileURLToPath(
+  new URL('./orbFluidParticles.d.ts', import.meta.url),
+);
 
 const expectedPublicExports = [
   'ORB_BASE_RENDER_LAYER',
   'ORB_OVERLAY_RENDER_LAYER',
   'ensureFluidParticlesConfig',
   'resetFluidParticles',
+  'initFluidParticles',
+  'buildFluidParticles',
   'setFluidParticlesEnabled',
   'setFluidParticlesConfig',
   'updateFluidParticles',

@@ -1,4 +1,5 @@
 export type FluidParticlesContext = Record<string, unknown>;
+export type FluidParticlesConfig = Record<string, unknown>;
 export type FluidParticlesConfigPatch = Record<string, unknown>;
 export type FluidParticlesHandle = unknown;
 
@@ -7,28 +8,29 @@ export const ORB_OVERLAY_RENDER_LAYER: number;
 
 export function ensureFluidParticlesConfig(
   ctx: FluidParticlesContext,
-): FluidParticlesContext;
+): FluidParticlesConfig;
 
 export function resetFluidParticles(ctx: FluidParticlesContext): void;
+
+export function initFluidParticles(
+  ctx: FluidParticlesContext,
+): FluidParticlesHandle | null;
+
+export function buildFluidParticles(
+  ctx: FluidParticlesContext,
+): FluidParticlesHandle;
 
 export function setFluidParticlesEnabled(
   ctx: FluidParticlesContext,
   enabled: boolean,
-): FluidParticlesHandle | void;
+): FluidParticlesConfig;
 
 export function setFluidParticlesConfig(
   ctx: FluidParticlesContext,
   patch?: FluidParticlesConfigPatch,
-): FluidParticlesContext;
+): FluidParticlesConfig;
 
 export function updateFluidParticles(
   ctx: FluidParticlesContext,
   delta?: number,
 ): void;
-
-// À ajouter uniquement si ce symbole est réellement exporté par
-// orbFluidParticles.js et utilisé par un import TS/TSX.
-//
-// export function buildFluidParticles(
-//   ctx: FluidParticlesContext,
-// ): FluidParticlesHandle;

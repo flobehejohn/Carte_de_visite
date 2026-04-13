@@ -10,6 +10,7 @@ import { SimplexNoise } from 'three/examples/jsm/math/SimplexNoise.js';
  * - aucune écriture post-construction sur :
  *   material.opacity / transparent / depthWrite / depthTest
  * - si la config optique change, le matériau est recréé
+ * - compatibilité legacy ajoutée via initFluidParticles + ctx.fluidParticles
  */
 
 const simplex = new SimplexNoise();
@@ -188,6 +189,12 @@ function ensureState(ctx) {
   return ctx.fluidParticlesState;
 }
 
+function syncLegacyHandle(ctx, mesh = null) {
+  if (!ctx || typeof ctx !== 'object') return mesh ?? null;
+  ctx.fluidParticles = mesh ?? null;
+  return ctx.fluidParticles;
+}
+
 export function ensureFluidParticlesConfig(ctx) {
   if (!ctx.fluidParticlesConfig) {
     ctx.fluidParticlesConfig = { ...DEFAULT_FLUID_CONFIG };
@@ -238,12 +245,18 @@ export function ensureFluidParticlesConfig(ctx) {
   return cfg;
 }
 
-function disposeMesh(state) {
-  if (!state?.mesh) return;
+function disposeMesh(ctx, state) {
+  if (!state?.mesh) {
+    syncLegacyHandle(ctx, null);
+    return;
+  }
+
   state.mesh.parent?.remove(state.mesh);
   state.mesh.geometry?.dispose?.();
   state.mesh.material?.dispose?.();
   state.mesh = null;
+
+  syncLegacyHandle(ctx, null);
 }
 
 function buildGeometry(cfg) {
@@ -334,16 +347,30 @@ export function resetFluidParticles(ctx) {
     if (state.mesh.instanceColor) {
       state.mesh.instanceColor.needsUpdate = true;
     }
+    syncLegacyHandle(ctx, state.mesh);
+  } else {
+    syncLegacyHandle(ctx, null);
   }
 
   log(ctx, 'Reset particules fluide.');
+}
+
+/**
+ * Alias de compatibilité legacy.
+ * Permet à RitualOrchestrator d'appeler encore initFluidParticles()
+ * sans warning Rollup ni rupture de contrat.
+ */
+export function initFluidParticles(ctx) {
+  ensureFluidParticlesConfig(ctx);
+  const mesh = buildFluidParticles(ctx);
+  return syncLegacyHandle(ctx, mesh ?? null);
 }
 
 export function buildFluidParticles(ctx) {
   const cfg = ensureFluidParticlesConfig(ctx);
   const state = ensureState(ctx);
 
-  disposeMesh(state);
+  disposeMesh(ctx, state);
 
   const geometry = buildGeometry(cfg);
   const material = buildMaterial(cfg);
@@ -366,6 +393,8 @@ export function buildFluidParticles(ctx) {
   state.rebuildCount = (state.rebuildCount || 0) + 1;
   state.lastConfigSignature = stableConfigSignature(cfg);
   state.lastOpticalSignature = opticalConfigSignature(cfg);
+
+  syncLegacyHandle(ctx, mesh);
 
   log(ctx, 'Rebuild instanced mesh.');
   return mesh;
@@ -421,6 +450,7 @@ export function setFluidParticlesConfig(ctx, patch = {}) {
     replaceMaterialIfNeeded(state, cfg);
     state.mesh.visible = !!cfg.enabled;
     applyMeshRenderIsolation(state.mesh, cfg);
+    syncLegacyHandle(ctx, state.mesh);
   }
 
   if (changed) {
@@ -571,6 +601,7 @@ export function updateFluidParticles(ctx, delta) {
 
   replaceMaterialIfNeeded(state, cfg);
   applyMeshRenderIsolation(mesh, cfg);
+  syncLegacyHandle(ctx, mesh);
 
   if (!cfg.enabled) {
     mesh.visible = false;
@@ -671,4 +702,3 @@ export function updateFluidParticles(ctx, delta) {
     state.lastLogTime = now;
   }
 }
-
