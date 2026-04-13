@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import RitualWizard from './RitualWizard';
 
 global.ResizeObserver = class ResizeObserver {
@@ -75,28 +75,69 @@ const baseOracleResult = {
   },
 };
 
-describe('RitualWizard - Result Rendering', () => {
-  it('E2E Bypass Anti-Regression: Rend instantanément le panneau de révélation et le bouton Immersion en mode isE2E=true', async () => {
-    useOracleMock.mockReturnValue({
-      loading: false,
-      lastResult: baseOracleResult,
-      error: null,
-      guidanceLoading: false,
-      lastGuidance: null,
-      clearGuidance: vi.fn(),
-      drawFromRitual: vi.fn(),
-      checkStep: vi.fn(),
-      reset: vi.fn(),
-    });
+function buildOracleContext(overrides: Record<string, unknown> = {}) {
+  return {
+    loading: false,
+    lastResult: baseOracleResult,
+    error: null,
+    guidanceLoading: false,
+    lastGuidance: null,
+    clearGuidance: vi.fn(),
+    drawFromRitual: vi.fn(),
+    checkStep: vi.fn(),
+    reset: vi.fn(),
+    ...overrides,
+  };
+}
 
+describe('RitualWizard - Result Rendering', () => {
+  beforeEach(() => {
+    useOracleMock.mockReset();
+  });
+
+  it('rend immédiatement le panneau de révélation et le bouton Contempler en mode isE2E=true', () => {
+    useOracleMock.mockReturnValue(buildOracleContext());
     render(<RitualWizard isE2E={true} />);
 
     expect(screen.getByTestId('reveal-panel')).toBeTruthy();
     expect(screen.getByTestId('reveal-quote').textContent).toContain(
       'La vérité est un marteau.',
     );
+    expect(screen.getByRole('button', { name: /Contempler/i })).toBeTruthy();
+    expect(screen.getByText(/Ainsi parlait/i)).toBeTruthy();
+  });
 
-    // Le texte a été mis à jour vers "Contempler" dans la V2 de l'UI
-    expect(screen.getByText(/Contempler/i)).toBeTruthy();
+  it('fallback proprement vers les anchors herméneutiques quand les citations finales sont absentes', () => {
+    useOracleMock.mockReturnValue(
+      buildOracleContext({
+        lastResult: {
+          ...baseOracleResult,
+          finalReveal: { ...baseOracleResult.finalReveal, citations: [] },
+          citations: [],
+          hermeneutic: { anchors: [{ claim: 'Deviens qui tu es' }] },
+        },
+      }),
+    );
+
+    render(<RitualWizard isE2E={true} />);
+    expect(screen.getByText(/Deviens qui tu es/i)).toBeTruthy();
+    expect(
+      screen.queryByText(/La source originelle n'a pu être transcrite/i),
+    ).toBeNull();
+  });
+
+  it('bascule en immersion puis revient proprement au panneau texte', () => {
+    useOracleMock.mockReturnValue(buildOracleContext());
+    render(<RitualWizard isE2E={true} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Contempler/i }));
+    expect(screen.getByTestId('immersion-overlay')).toBeTruthy();
+    expect(screen.getByTestId('immersion-quote').textContent).toContain(
+      'La vérité est un marteau.',
+    );
+    expect(screen.queryByTestId('reveal-panel')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Retour au Verbe/i }));
+    expect(screen.getByTestId('reveal-panel')).toBeTruthy();
   });
 });

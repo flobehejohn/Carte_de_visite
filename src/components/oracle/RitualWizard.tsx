@@ -14,58 +14,6 @@ const Oracle3DSceneMemo = memo(Oracle3DScene);
 
 type ViewState = 'INPUT' | 'GUIDANCE';
 
-const Typewriter = ({
-  text,
-  speed = 20,
-  instant = false,
-  onComplete,
-}: {
-  text: string;
-  speed?: number;
-  instant?: boolean;
-  onComplete?: () => void;
-}) => {
-  const [charIndex, setCharIndex] = useState(instant ? text.length : 0);
-  const completionRef = useRef(false);
-
-  useEffect(() => {
-    completionRef.current = false;
-    if (!text) {
-      setCharIndex(0);
-      return;
-    }
-    if (instant) {
-      setCharIndex(text.length);
-      completionRef.current = true;
-      onComplete?.();
-      return;
-    }
-    setCharIndex(0);
-    const interval = window.setInterval(
-      () => {
-        setCharIndex((prev) => (prev < text.length ? prev + 1 : prev));
-      },
-      Math.max(10, speed),
-    );
-    return () => window.clearInterval(interval);
-  }, [text, speed, instant, onComplete]);
-
-  useEffect(() => {
-    if (instant) return;
-    if (text && charIndex >= text.length && !completionRef.current) {
-      completionRef.current = true;
-      onComplete?.();
-    }
-  }, [charIndex, text, instant, onComplete]);
-
-  return (
-    <span>
-      {text.slice(0, charIndex)}
-      {!instant && <span className="cursor-blink">|</span>}
-    </span>
-  );
-};
-
 const STEPS = [
   {
     id: 'name',
@@ -132,6 +80,26 @@ const STEPS = [
   },
 ] as const;
 
+type StepDefinition = (typeof STEPS)[number];
+type StepId = StepDefinition['id'];
+type RitualFormData = Record<StepId, string>;
+
+type RevealModelLike = Partial<{
+  quote: string;
+  interpretation: string;
+  central_tension: string;
+  explanation_short: string;
+  explanation_long: string;
+  chapter: string;
+  author: string;
+  citations: any[];
+  sources: any[];
+}>;
+
+type OracleInteractionTarget = Parameters<
+  typeof oracleInteractionBridge.setFocus
+>[0]['target'];
+
 const MOODS = [
   'Orageux',
   'Brumeux',
@@ -177,9 +145,9 @@ const FORMATS = [
   { id: 'Le Miel', label: 'Le Miel', desc: 'Doux' },
   { id: "L'Aigle", label: "L'Aigle", desc: 'Haut' },
   { id: "L'Énigme", label: "L'Énigme", desc: 'Mystique' },
-];
+] as const;
 
-const INITIAL_FORM = {
+const INITIAL_FORM: RitualFormData = {
   name: '',
   mood: '',
   weight: '',
@@ -192,13 +160,69 @@ const INITIAL_FORM = {
   question: '',
 };
 
+function cleanText(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean')
+    return String(value).trim();
+  return '';
+}
+
+function firstNonEmptyText(...values: (string | undefined | null)[]): string {
+  for (const value of values) {
+    if (value) {
+      const candidate = cleanText(value);
+      if (candidate) return candidate;
+    }
+  }
+  return '';
+}
+
+function collectRevealSources(
+  revealModel: RevealModelLike | null,
+  lastResult: any,
+): string[] {
+  const collected: string[] = [];
+
+  const extract = (obj: any) => {
+    if (!obj) return;
+    if (typeof obj === 'string') {
+      if (obj.length > 5) collected.push(obj);
+    } else if (Array.isArray(obj)) {
+      obj.forEach(extract);
+    } else if (typeof obj === 'object') {
+      if (obj.claim) collected.push(obj.claim);
+      if (obj.motif) collected.push(obj.motif);
+      if (obj.citation_id) collected.push(obj.citation_id);
+      if (obj.text) collected.push(obj.text);
+      if (obj.source) collected.push(obj.source);
+    }
+  };
+
+  if (revealModel?.citations) extract(revealModel.citations);
+  if (revealModel?.sources) extract(revealModel.sources);
+  if (lastResult?.citations) extract(lastResult.citations);
+  if (lastResult?.hermeneutic?.anchors) extract(lastResult.hermeneutic.anchors);
+  if (lastResult?.composition?.motifs) extract(lastResult.composition.motifs);
+
+  const unique = Array.from(
+    new Set(collected.map((s) => s.trim()).filter(Boolean)),
+  );
+
+  if (unique.length === 0) {
+    if (revealModel?.chapter) unique.push(`Chapitre : ${revealModel.chapter}`);
+    if (lastResult?.chapter) unique.push(`Chapitre : ${lastResult.chapter}`);
+  }
+
+  return unique;
+}
+
 function renderQuotedPreview(value: string) {
   const clean = String(value ?? '').trim();
   if (!clean) return null;
   return `« ${clean} »`;
 }
 
-function pickStepOptions(stepId: string): string[] {
+function pickStepOptions(stepId: StepId): string[] {
   switch (stepId) {
     case 'mood':
       return MOODS;
@@ -216,6 +240,99 @@ function pickStepOptions(stepId: string): string[] {
       return [];
   }
 }
+
+function isSmallViewport(): boolean {
+  return typeof window !== 'undefined' && window.innerWidth < 768;
+}
+
+const Typewriter = ({
+  text,
+  speed = 20,
+  instant = false,
+  onComplete,
+}: {
+  text: string;
+  speed?: number;
+  instant?: boolean;
+  onComplete?: () => void;
+}) => {
+  const [charIndex, setCharIndex] = useState(instant ? text.length : 0);
+  const intervalRef = useRef<number | null>(null);
+  const completedTextRef = useRef<string>(instant ? text : '');
+  const onCompleteRef = useRef(onComplete);
+
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+
+  useEffect(() => {
+    if (intervalRef.current !== null) {
+      window.clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    const nextText = text ?? '';
+
+    if (!nextText) {
+      setCharIndex(0);
+      completedTextRef.current = '';
+      return;
+    }
+
+    if (instant) {
+      setCharIndex(nextText.length);
+      if (completedTextRef.current !== nextText) {
+        completedTextRef.current = nextText;
+        onCompleteRef.current?.();
+      }
+      return;
+    }
+
+    if (completedTextRef.current === nextText) {
+      setCharIndex(nextText.length);
+      return;
+    }
+
+    setCharIndex(0);
+    intervalRef.current = window.setInterval(
+      () => {
+        setCharIndex((prev) => Math.min(prev + 1, nextText.length));
+      },
+      Math.max(10, speed),
+    );
+
+    return () => {
+      if (intervalRef.current !== null) {
+        window.clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [text, speed, instant]);
+
+  useEffect(() => {
+    const nextText = text ?? '';
+    if (!nextText || instant) return;
+    if (charIndex >= nextText.length && completedTextRef.current !== nextText) {
+      completedTextRef.current = nextText;
+      if (intervalRef.current !== null) {
+        window.clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      onCompleteRef.current?.();
+    }
+  }, [charIndex, text, instant]);
+
+  const hasText = text.length > 0;
+  const isDone = instant || (hasText && charIndex >= text.length);
+
+  return (
+    <span>
+      {text.slice(0, charIndex)}
+      {hasText && !isDone && !instant && (
+        <span className="cursor-blink">|</span>
+      )}
+    </span>
+  );
+};
 
 interface RitualWizardProps {
   isE2E?: boolean;
@@ -235,29 +352,40 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
   } = useOracleContext();
 
   const [stage, setStage] = useState<number>(1);
-  const [formData, setFormData] = useState<any>(INITIAL_FORM);
-  const [sceneData, setSceneData] = useState<any>(INITIAL_FORM);
+  const [formData, setFormData] = useState<RitualFormData>(INITIAL_FORM);
+  const [sceneData, setSceneData] = useState<RitualFormData>(INITIAL_FORM);
   const [viewState, setViewState] = useState<ViewState>('INPUT');
   const [canProceed, setCanProceed] = useState(false);
   const [guidanceEchoDone, setGuidanceEchoDone] = useState(false);
-
-  // 🛡️ STATE IMMERSION : Contrôle l'affichage du panneau texte vs HUD 3D
   const [isImmersion, setIsImmersion] = useState(false);
 
   const textRef = useRef<HTMLDivElement | null>(null);
-  const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const finalDrawTimeoutRef = useRef<number | null>(null);
   const effectiveLoading = isE2E ? false : loading;
 
   useEffect(() => {
     return () => {
-      if (finalDrawTimeoutRef.current)
+      if (finalDrawTimeoutRef.current !== null) {
         window.clearTimeout(finalDrawTimeoutRef.current);
+      }
     };
   }, []);
 
+  useEffect(() => {
+    if (!isImmersion) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsImmersion(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isImmersion]);
+
+  useEffect(() => {
+    if (!lastResult && isImmersion) setIsImmersion(false);
+  }, [lastResult, isImmersion]);
+
   const currentStep = STEPS[stage - 1];
-  const currentValue = currentStep ? formData[currentStep.id] || '' : '';
+  const currentValue = currentStep ? (formData[currentStep.id] ?? '') : '';
   const currentValuePreview = useMemo(
     () => renderQuotedPreview(currentValue),
     [currentValue],
@@ -273,48 +401,55 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
     [lastResult],
   );
 
-  const revealModel = useMemo(() => {
+  const revealModel = useMemo<RevealModelLike | null>(() => {
     if (!lastResult) return null;
-    return lastResult.finalReveal ?? mapToFinalRevealModel(lastResult);
+    return (lastResult.finalReveal ??
+      mapToFinalRevealModel(lastResult)) as RevealModelLike | null;
   }, [lastResult]);
 
   const revealQuote = useMemo(
-    () => revealModel?.quote || lastResult?.quote || '',
+    () => firstNonEmptyText(revealModel?.quote, (lastResult as any)?.quote),
     [revealModel, lastResult],
   );
   const revealInterpretation = useMemo(
     () =>
-      revealModel?.central_tension ||
-      revealModel?.explanation_short ||
-      lastResult?.interpretation ||
-      '',
+      firstNonEmptyText(
+        revealModel?.central_tension,
+        revealModel?.explanation_short,
+        revealModel?.interpretation,
+        (lastResult as any)?.interpretation,
+      ),
     [revealModel, lastResult],
   );
   const revealProse = useMemo(
     () =>
-      revealModel?.explanation_long ||
-      oraclePrimaryProse ||
-      lastResult?.interpretation ||
-      '',
+      firstNonEmptyText(
+        revealModel?.explanation_long,
+        oraclePrimaryProse,
+        (lastResult as any)?.interpretation,
+      ),
     [revealModel, oraclePrimaryProse, lastResult],
   );
-  const revealSources = useMemo(() => {
-    if (Array.isArray(revealModel?.citations) && revealModel.citations.length)
-      return revealModel.citations;
-    if (Array.isArray(lastResult?.hermeneutic?.anchors))
-      return lastResult.hermeneutic.anchors.map(
-        (a: any) => a.claim || a.motif || a.citation_id,
-      );
-    return [];
-  }, [revealModel, lastResult]);
+  const revealSources = useMemo(
+    () => collectRevealSources(revealModel, lastResult),
+    [revealModel, lastResult],
+  );
 
-  const updateField = (fieldKey: string, value: string) => {
-    setFormData((prev: any) => ({ ...prev, [fieldKey]: value }));
+  const updateField = (fieldKey: StepId, value: string) => {
+    setFormData((prev) => ({ ...prev, [fieldKey]: value }));
   };
 
   const unlockProceed = () => {
     setGuidanceEchoDone(true);
     setCanProceed(true);
+  };
+
+  const handleTypewriterComplete = () => {
+    setGuidanceEchoDone(true);
+    setCanProceed(true);
+    if (stage === 10) {
+      handleFinalDraw();
+    }
   };
 
   const handleFinalDraw = () => {
@@ -323,7 +458,8 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
     setViewState('INPUT');
     setCanProceed(false);
     setGuidanceEchoDone(false);
-    setSceneData((prev: any) => ({ ...prev, ...formData }));
+    setSceneData((prev) => ({ ...prev, ...formData }));
+
     const fallbackProgress = Math.max(0, Math.min(1, (stage - 1) / 9));
     const climateSnapshot = (() => {
       const fallback = {
@@ -331,11 +467,19 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
         mood: formData.mood || '',
       };
       try {
-        const audit = (window as any).__ORB_AUDIT__;
+        const audit = (window as Window & { __ORB_AUDIT__?: any })
+          .__ORB_AUDIT__;
         const snap = audit?.snapshot?.();
         if (!snap) return fallback;
         const climateTargets = snap?.targets ?? snap?.climateTargets;
         const palette = snap?.ritualGenome?.palette;
+        const mobile = isSmallViewport();
+        const fogDensity =
+          typeof climateTargets?.fog?.density === 'number'
+            ? mobile
+              ? Math.min(climateTargets.fog.density, 0.2)
+              : climateTargets.fog.density
+            : climateTargets?.fog?.density;
         return {
           progress:
             typeof snap?.progress === 'number'
@@ -343,7 +487,9 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
               : fallbackProgress,
           mood: formData.mood || '',
           presetName: climateTargets?.presetName,
-          fog: climateTargets?.fog,
+          fog: climateTargets?.fog
+            ? { ...climateTargets.fog, density: fogDensity }
+            : undefined,
           bloom: climateTargets?.bloom,
           volume: climateTargets?.volume,
           palette: {
@@ -362,36 +508,29 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
         nameOrNickname: formData.name,
         questionText: formData.question,
       } as any,
-      { climateSnapshot },
+      { climateSnapshot } as any,
     );
   };
 
-  const handleValidate = async () => {
+  const executeValidation = async () => {
     if (!currentStep || !canValidate) return;
     clearGuidance();
     setViewState('GUIDANCE');
     setCanProceed(false);
     setGuidanceEchoDone(false);
-    setSceneData((prev: any) => ({ ...prev, [currentStep.id]: currentValue }));
+    setSceneData((prev) => ({ ...prev, [currentStep.id]: currentValue }));
+
     if (isE2E) {
       if (currentStep.id === 'question') {
-        finalDrawTimeoutRef.current = window.setTimeout(
-          () => handleFinalDraw(),
-          0,
-        );
+        handleFinalDraw();
         return;
       }
-      unlockProceed();
+      setCanProceed(true);
+      setGuidanceEchoDone(true);
       return;
     }
     const isSafe = await checkStep(currentStep.id, currentValue);
     if (!isSafe) return;
-    if (currentStep.id === 'question') {
-      finalDrawTimeoutRef.current = window.setTimeout(
-        () => handleFinalDraw(),
-        1500,
-      );
-    }
   };
 
   const handleNextStep = () => {
@@ -407,11 +546,11 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
   };
 
   const handleReset = () => {
-    if (finalDrawTimeoutRef.current) {
+    if (finalDrawTimeoutRef.current !== null) {
       window.clearTimeout(finalDrawTimeoutRef.current);
       finalDrawTimeoutRef.current = null;
     }
-    setIsImmersion(false); // Réinitialise l'immersion
+    setIsImmersion(false);
     reset?.();
     clearGuidance();
     setStage(1);
@@ -426,7 +565,10 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
   useEffect(() => {
     if (viewState !== 'GUIDANCE') return;
     if (isE2E) {
-      if (currentStep?.id !== 'question' && !guidanceLoading) unlockProceed();
+      if (currentStep?.id !== 'question' && !guidanceLoading) {
+        setCanProceed(true);
+        setGuidanceEchoDone(true);
+      }
       return;
     }
     if (guidanceLoading) {
@@ -434,11 +576,7 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
       setGuidanceEchoDone(false);
       return;
     }
-    if (currentStep?.id === 'question') {
-      setGuidanceEchoDone(true);
-      setCanProceed(true);
-      return;
-    }
+    if (currentStep?.id === 'question') return;
     if (!guidanceEcho) {
       setGuidanceEchoDone(true);
       setCanProceed(true);
@@ -447,21 +585,30 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
 
   useEffect(() => {
     if (!lastResult) return;
-    setSceneData((prev: any) => ({
-      ...prev,
-      visualParams: lastResult.visualParams,
-      seed: lastResult.seed ?? lastResult.visualParams?.seed,
-      textLength: getOracleTextLength(lastResult),
-    }));
+    setSceneData(
+      (prev) =>
+        ({
+          ...prev,
+          visualParams: (lastResult as any).visualParams,
+          seed:
+            (lastResult as any).seed ?? (lastResult as any).visualParams?.seed,
+          textLength: getOracleTextLength(lastResult),
+        }) as any,
+    );
   }, [lastResult]);
 
-  const setBridgeFocus = (target: any, payload?: any) => {
+  const setBridgeFocus = (
+    target: OracleInteractionTarget,
+    payload?: Record<string, unknown>,
+  ) => {
     oracleInteractionBridge.setFocus({ target, source: 'html', payload });
     if (typeof window !== 'undefined')
-      (window as any).__ORACLE_LAST_FOCUS__ = { target, source: 'html' };
+      (
+        window as Window & { __ORACLE_LAST_FOCUS__?: unknown }
+      ).__ORACLE_LAST_FOCUS__ = { target, source: 'html' };
   };
 
-  const renderCards = (items: string[], fieldKey: string) => (
+  const renderCards = (items: string[], fieldKey: StepId) => (
     <div className="grid grid-cols-2 md:grid-cols-3 gap-2 w-full">
       {items.map((item, index) => (
         <button
@@ -469,7 +616,11 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
           type="button"
           data-testid={`choice-${fieldKey}-${index}`}
           onClick={() => updateField(fieldKey, item)}
-          className={`p-3 text-sm rounded border transition-all duration-300 font-oracle backdrop-blur-md hover:bg-white/10 hover:text-white hover:border-white/40 ${formData[fieldKey] === item ? 'bg-amber-500/20 border-amber-400 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.5)]' : 'bg-black/60 border-white/20 text-white/70'}`}
+          className={`p-3 text-sm rounded border transition-all duration-300 font-oracle backdrop-blur-md hover:bg-white/10 hover:text-white hover:border-white/40 ${
+            formData[fieldKey] === item
+              ? 'bg-amber-500/20 border-amber-400 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.5)]'
+              : 'bg-black/60 border-white/20 text-white/70'
+          }`}
         >
           {item}
         </button>
@@ -502,6 +653,8 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
         <div className="flex flex-wrap gap-3 w-full md:w-auto">
           <button
             type="button"
+            data-testid="btn-immersion"
+            aria-pressed={isImmersion}
             onClick={() => setIsImmersion(true)}
             className="flex-1 md:flex-none px-5 py-2.5 bg-white/5 border border-white/20 text-white hover:bg-white/15 uppercase tracking-widest text-xs transition-all rounded shadow-lg flex items-center justify-center gap-2"
           >
@@ -568,7 +721,7 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
           </ul>
         ) : (
           <p className="text-sm text-white/40 italic">
-            Aucune source affichable.
+            La source originelle n'a pu être transcrite.
           </p>
         )}
       </div>
@@ -581,7 +734,6 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
       data-stage={stage}
       className="relative w-full h-screen min-h-screen bg-[#020408] overflow-hidden isolate"
     >
-      {/* SCÈNE 3D - Toujours en fond, reçoit les clics si l'UI HTML ne bloque pas */}
       <div className="absolute inset-0 z-0">
         <Oracle3DSceneMemo
           formData={sceneData}
@@ -594,33 +746,56 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
         />
       </div>
 
-      {/* HUD D'IMMERSION FLOTTANT */}
       <AnimatePresence>
         {lastResult && isImmersion && (
           <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 30 }}
-            className="absolute bottom-8 md:bottom-12 left-1/2 -translate-x-1/2 flex flex-col md:flex-row gap-4 z-50 pointer-events-auto"
+            data-testid="immersion-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 pointer-events-none flex flex-col justify-between z-50"
           >
-            <button
-              onClick={() => setIsImmersion(false)}
-              className="px-6 py-3 bg-black/60 border border-white/20 text-white rounded hover:bg-white/10 hover:border-white/40 transition-all uppercase text-[11px] tracking-[0.2em] backdrop-blur-xl shadow-2xl flex items-center justify-center gap-2"
+            <div className="w-full p-6 md:p-12 text-center bg-gradient-to-b from-black/80 to-transparent">
+              <p
+                data-testid="immersion-quote"
+                className="text-xl md:text-3xl font-oracle italic text-amber-100/90 drop-shadow-lg"
+              >
+                {revealQuote}
+              </p>
+            </div>
+            <motion.div
+              initial={{ y: 30 }}
+              animate={{ y: 0 }}
+              className="w-full pb-8 md:pb-12 flex flex-col md:flex-row items-center justify-center gap-4 pointer-events-auto bg-gradient-to-t from-black/80 to-transparent pt-12"
             >
-              📖 Retour au Verbe
-            </button>
-            <button
-              onClick={handleReset}
-              className="px-6 py-3 border border-amber-500/50 bg-black/80 text-amber-300 hover:bg-amber-500 hover:text-black uppercase text-[11px] tracking-[0.2em] transition-all rounded backdrop-blur-xl shadow-2xl flex items-center justify-center gap-2"
-            >
-              ⭘ Fermer le Cercle
-            </button>
+              <button
+                type="button"
+                data-testid="btn-return-to-verb"
+                onClick={() => setIsImmersion(false)}
+                className="px-6 py-3 bg-black/60 border border-white/20 text-white rounded hover:bg-white/10 hover:border-white/40 transition-all uppercase text-[11px] tracking-[0.2em] backdrop-blur-xl shadow-2xl flex items-center justify-center gap-2"
+              >
+                📖 Retour au Verbe
+              </button>
+              <button
+                type="button"
+                data-testid="btn-close-circle-immersion"
+                onClick={handleReset}
+                className="px-6 py-3 border border-amber-500/50 bg-black/80 text-amber-300 hover:bg-amber-500 hover:text-black uppercase text-[11px] tracking-[0.2em] transition-all rounded backdrop-blur-xl shadow-2xl flex items-center justify-center gap-2"
+              >
+                ⭘ Fermer le Cercle
+              </button>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* COUCHE UI PRINCIPALE - pointer-events-none laisse passer les clics vers la 3D */}
-      <div className="absolute inset-0 z-10 pointer-events-none flex flex-col justify-between px-4 pt-8 pb-12 md:pt-12 md:px-8">
+      <div
+        className={`absolute inset-0 z-10 flex flex-col justify-between px-4 pt-8 pb-12 md:pt-12 md:px-8 transition-opacity duration-500 ${
+          isImmersion
+            ? 'opacity-0 pointer-events-none'
+            : 'opacity-100 pointer-events-none'
+        }`}
+      >
         <div className="w-full flex justify-center flex-shrink-0 max-h-full overflow-y-auto custom-scrollbar">
           <div className="pointer-events-auto w-full max-w-4xl flex flex-col items-center">
             <AnimatePresence mode="wait">
@@ -699,10 +874,7 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
                                 text={guidanceEcho}
                                 speed={14}
                                 instant={isE2E}
-                                onComplete={() => {
-                                  setGuidanceEchoDone(true);
-                                  setCanProceed(true);
-                                }}
+                                onComplete={handleTypewriterComplete}
                               />
                             ) : (
                               'Le seuil reste ouvert.'
@@ -731,7 +903,6 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
           </div>
         </div>
 
-        {/* CONTROLES INFERIEURS */}
         <div className="w-full flex justify-center flex-shrink-0 mt-auto pt-8">
           <div className="pointer-events-auto w-full max-w-4xl flex flex-col items-center">
             <AnimatePresence mode="wait">
@@ -775,23 +946,37 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
                         )}
                       {currentStep.mode === 'formats' && (
                         <div className="grid grid-cols-2 gap-3 w-full max-w-2xl">
-                          {FORMATS.map((f, index) => (
+                          {FORMATS.map((formatOption, index) => (
                             <button
-                              key={f.id}
+                              key={formatOption.id}
                               type="button"
                               data-testid={`choice-format-${index}`}
-                              onClick={() => updateField('format', f.id)}
-                              className={`p-4 border text-left transition-all rounded-lg backdrop-blur-xl hover:bg-white/10 hover:border-white/40 ${formData.format === f.id ? 'bg-amber-500/20 border-amber-400 shadow-[0_0_30px_rgba(245,158,11,0.3)]' : 'bg-black/60 border-white/10'}`}
+                              onClick={() =>
+                                updateField('format', formatOption.id)
+                              }
+                              className={`p-4 border text-left transition-all rounded-lg backdrop-blur-xl hover:bg-white/10 hover:border-white/40 ${
+                                formData.format === formatOption.id
+                                  ? 'bg-amber-500/20 border-amber-400 shadow-[0_0_30px_rgba(245,158,11,0.3)]'
+                                  : 'bg-black/60 border-white/10'
+                              }`}
                             >
                               <div
-                                className={`font-oracle text-lg mb-1 ${formData.format === f.id ? 'text-amber-100' : 'text-white/90'}`}
+                                className={`font-oracle text-lg mb-1 ${
+                                  formData.format === formatOption.id
+                                    ? 'text-amber-100'
+                                    : 'text-white/90'
+                                }`}
                               >
-                                {f.label}
+                                {formatOption.label}
                               </div>
                               <div
-                                className={`text-[10px] uppercase tracking-widest ${formData.format === f.id ? 'text-amber-400/80' : 'text-white/40'}`}
+                                className={`text-[10px] uppercase tracking-widest ${
+                                  formData.format === formatOption.id
+                                    ? 'text-amber-400/80'
+                                    : 'text-white/40'
+                                }`}
                               >
-                                {f.desc}
+                                {formatOption.desc}
                               </div>
                             </button>
                           ))}
@@ -803,13 +988,15 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
                           type="text"
                           data-testid="step-input"
                           placeholder={currentStep.placeholder}
-                          value={formData[currentStep.id] || ''}
+                          value={formData[currentStep.id] ?? ''}
                           onChange={(e) =>
                             updateField(currentStep.id, e.target.value)
                           }
-                          onKeyDown={(e) =>
-                            e.key === 'Enter' && canValidate && handleValidate()
-                          }
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && canValidate) {
+                              void executeValidation();
+                            }
+                          }}
                           className="oracle-input w-full max-w-lg p-5 text-center text-lg bg-black/60 border border-white/20 text-white rounded-lg focus:outline-none focus:border-amber-500 focus:bg-black/80 transition-all shadow-2xl placeholder:text-white/20"
                         />
                       )}
@@ -819,7 +1006,9 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
                           animate={{ opacity: 1, scale: 1 }}
                           type="button"
                           data-testid="btn-confirm"
-                          onClick={handleValidate}
+                          onClick={() => {
+                            void executeValidation();
+                          }}
                           className="mt-6 px-12 py-3 bg-white/10 hover:bg-white hover:text-black border border-white/20 text-white transition-all uppercase text-xs tracking-[0.2em] rounded shadow-lg"
                         >
                           Confirmer
