@@ -1,5 +1,4 @@
 export type FluidParticlesContext = Record<string, unknown>;
-export type FluidParticlesConfig = Record<string, unknown>;
 export type FluidParticlesConfigPatch = Record<string, unknown>;
 export type FluidParticlesHandle = unknown;
 
@@ -8,7 +7,7 @@ export const ORB_OVERLAY_RENDER_LAYER: number;
 
 export function ensureFluidParticlesConfig(
   ctx: FluidParticlesContext,
-): FluidParticlesConfig;
+): FluidParticlesContext;
 
 export function resetFluidParticles(ctx: FluidParticlesContext): void;
 
@@ -18,17 +17,17 @@ export function initFluidParticles(
 
 export function buildFluidParticles(
   ctx: FluidParticlesContext,
-): FluidParticlesHandle;
+): FluidParticlesHandle | null;
 
 export function setFluidParticlesEnabled(
   ctx: FluidParticlesContext,
   enabled: boolean,
-): FluidParticlesConfig;
+): FluidParticlesHandle | void;
 
 export function setFluidParticlesConfig(
   ctx: FluidParticlesContext,
   patch?: FluidParticlesConfigPatch,
-): FluidParticlesConfig;
+): FluidParticlesContext;
 
 export function updateFluidParticles(
   ctx: FluidParticlesContext,

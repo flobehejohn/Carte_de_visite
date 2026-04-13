@@ -417,7 +417,8 @@ export class RitualOrchestrator {
     }
 
     orbParticles.setParticlesConfig?.(this.ctx, { enabled: false });
-    orbFluidParticles.initFluidParticles?.(this.ctx);
+    orbFluidParticles.ensureFluidParticlesConfig?.(this.ctx);
+    orbFluidParticles.buildFluidParticles?.(this.ctx);
 
     Object.assign(this.currentState, {
       orbScale: 0.42,
