@@ -8,7 +8,6 @@ describe('orbFluidParticles public contract', () => {
       ORB_OVERLAY_RENDER_LAYER: expect.any(Number),
       ensureFluidParticlesConfig: expect.any(Function),
       resetFluidParticles: expect.any(Function),
-      initFluidParticles: expect.any(Function),
       buildFluidParticles: expect.any(Function),
       setFluidParticlesEnabled: expect.any(Function),
       setFluidParticlesConfig: expect.any(Function),
@@ -24,10 +23,5 @@ describe('orbFluidParticles public contract', () => {
     expect(orbFluidParticles.ORB_BASE_RENDER_LAYER).not.toBe(
       orbFluidParticles.ORB_OVERLAY_RENDER_LAYER,
     );
-  });
-
-  it('exposes a compatibility init alias for legacy orchestrator calls', () => {
-    expect(typeof orbFluidParticles.initFluidParticles).toBe('function');
-    expect(typeof orbFluidParticles.buildFluidParticles).toBe('function');
   });
 });

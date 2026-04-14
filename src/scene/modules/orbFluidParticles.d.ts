@@ -11,10 +11,6 @@ export function ensureFluidParticlesConfig(
 
 export function resetFluidParticles(ctx: FluidParticlesContext): void;
 
-export function initFluidParticles(
-  ctx: FluidParticlesContext,
-): FluidParticlesHandle | null;
-
 export function buildFluidParticles(
   ctx: FluidParticlesContext,
 ): FluidParticlesHandle | null;

@@ -10,7 +10,7 @@ import { SimplexNoise } from 'three/examples/jsm/math/SimplexNoise.js';
  * - aucune écriture post-construction sur :
  *   material.opacity / transparent / depthWrite / depthTest
  * - si la config optique change, le matériau est recréé
- * - compatibilité legacy ajoutée via initFluidParticles + ctx.fluidParticles
+ * - compatibilité du handle legacy ctx.fluidParticles conservée
  */
 
 const simplex = new SimplexNoise();
@@ -353,17 +353,6 @@ export function resetFluidParticles(ctx) {
   }
 
   log(ctx, 'Reset particules fluide.');
-}
-
-/**
- * Alias de compatibilité legacy.
- * Permet à RitualOrchestrator d'appeler encore initFluidParticles()
- * sans warning Rollup ni rupture de contrat.
- */
-export function initFluidParticles(ctx) {
-  ensureFluidParticlesConfig(ctx);
-  const mesh = buildFluidParticles(ctx);
-  return syncLegacyHandle(ctx, mesh ?? null);
 }
 
 export function buildFluidParticles(ctx) {

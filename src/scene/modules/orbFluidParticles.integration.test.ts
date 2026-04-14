@@ -36,14 +36,6 @@ describe('orbFluidParticles integration', () => {
     expect(text).toContain("log(ctx, 'Reset particules fluide.');");
   });
 
-  it('exports a compatibility init alias that delegates to buildFluidParticles', () => {
-    const text = readFileSync(JS_FILE, 'utf8');
-
-    expect(text).toContain('export function initFluidParticles(ctx)');
-    expect(text).toContain('const mesh = buildFluidParticles(ctx);');
-    expect(text).toContain('return syncLegacyHandle(ctx, mesh ?? null);');
-  });
-
   it('synchronizes the legacy ctx.fluidParticles handle', () => {
     const text = readFileSync(JS_FILE, 'utf8');
 

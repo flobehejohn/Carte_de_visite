@@ -15,7 +15,6 @@ const expectedPublicExports = [
   'ORB_OVERLAY_RENDER_LAYER',
   'ensureFluidParticlesConfig',
   'resetFluidParticles',
-  'initFluidParticles',
   'buildFluidParticles',
   'setFluidParticlesEnabled',
   'setFluidParticlesConfig',
