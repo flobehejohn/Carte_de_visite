@@ -1,4 +1,4 @@
-/* @vitest-environment node */
+// @vitest-environment node
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
@@ -37,5 +37,23 @@ describe('RitualOrchestrator observability migration', () => {
     expect(source).toContain('text metrics updated');
     expect(source).toContain('ritual:text-metrics-updated');
     expect(source).toContain('payload.textMetrics');
+  });
+
+  it('expose les timings orchestrateur runtime sans ajouter de console directs', () => {
+    expect(source).toContain('orchestratorTimings');
+    expect(source).toContain('climateMs');
+    expect(source).toContain('applyTargetsMs');
+    expect(source).toContain('motionMs');
+    expect(source).toContain('geometryMs');
+    expect(source).toContain('materialsMs');
+    expect(source).toContain('lightsMs');
+    expect(source).toContain('volumeMs');
+    expect(source).toContain('particlesMs');
+    expect(source).toContain('fluidMs');
+    expect(source).toContain('textMs');
+    expect(source).toContain('auditBridgeMs');
+    expect(source).toContain('totalUpdateMs');
+    expect(source).toContain('performance.now');
+    expect(source).toContain('Date.now');
   });
 });

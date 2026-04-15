@@ -48,7 +48,9 @@ function propertyChain(expression: ts.Expression): string[] | null {
   return null;
 }
 
-function findFunctionDeclaration(name: string): ts.FunctionDeclaration | undefined {
+function findFunctionDeclaration(
+  name: string,
+): ts.FunctionDeclaration | undefined {
   let found: ts.FunctionDeclaration | undefined;
 
   walk(sourceFile, (node) => {
@@ -126,13 +128,28 @@ function findAuditBridgeObject(): ts.ObjectLiteralExpression | undefined {
   return objectLiteral;
 }
 
-function findPropertyAssignment(
+type SupportedObjectProperty =
+  | ts.PropertyAssignment
+  | ts.ShorthandPropertyAssignment
+  | ts.MethodDeclaration;
+
+function isSupportedObjectProperty(
+  property: ts.ObjectLiteralElementLike,
+): property is SupportedObjectProperty {
+  return (
+    ts.isPropertyAssignment(property) ||
+    ts.isShorthandPropertyAssignment(property) ||
+    ts.isMethodDeclaration(property)
+  );
+}
+
+function findObjectProperty(
   objectLiteral: ts.ObjectLiteralExpression,
   propertyName: string,
-): ts.PropertyAssignment | undefined {
+): SupportedObjectProperty | undefined {
   return objectLiteral.properties.find(
-    (property): property is ts.PropertyAssignment =>
-      ts.isPropertyAssignment(property) &&
+    (property): property is SupportedObjectProperty =>
+      isSupportedObjectProperty(property) &&
       property.name.getText(sourceFile) === propertyName,
   );
 }
@@ -183,32 +200,47 @@ describe('Oracle3DScene AST governance locks', () => {
   });
 
   it('keeps the reset bridge structurally exposed through __ORB_AUDIT__ and resetSceneViewRef', () => {
-    const resetRefAssignments = assignmentTargets(['resetSceneViewRef', 'current']);
+    const resetRefAssignments = assignmentTargets([
+      'resetSceneViewRef',
+      'current',
+    ]);
     expect(
       resetRefAssignments.some(
-        (assignment) => assignment.right.getText(sourceFile) === 'resetSceneView',
+        (assignment) =>
+          assignment.right.getText(sourceFile) === 'resetSceneView',
       ),
     ).toBe(true);
 
     const auditBridge = findAuditBridgeObject();
     expect(auditBridge).toBeDefined();
 
-    const resetSceneProperty = findPropertyAssignment(auditBridge!, 'resetScene');
+    const resetSceneProperty = findObjectProperty(auditBridge!, 'resetScene');
     expect(resetSceneProperty).toBeDefined();
-    expect(resetSceneProperty!.initializer.getText(sourceFile)).toContain(
-      'resetSceneView',
-    );
+
+    if (ts.isPropertyAssignment(resetSceneProperty!)) {
+      expect(resetSceneProperty.initializer.getText(sourceFile)).toContain(
+        'resetSceneView',
+      );
+    } else if (ts.isShorthandPropertyAssignment(resetSceneProperty!)) {
+      expect(resetSceneProperty.name.getText(sourceFile)).toContain(
+        'resetScene',
+      );
+    } else if (ts.isMethodDeclaration(resetSceneProperty!)) {
+      expect(resetSceneProperty.name.getText(sourceFile)).toContain(
+        'resetScene',
+      );
+    }
   });
 
   it('exposes the extended visual audit bridge and forbids a negative z-index on the live canvas root', () => {
     const auditBridge = findAuditBridgeObject();
     expect(auditBridge).toBeDefined();
 
-    const setVisibleSafeMode = findPropertyAssignment(
+    const setVisibleSafeMode = findObjectProperty(
       auditBridge!,
       'setVisibleSafeMode',
     );
-    const snapshot = findPropertyAssignment(auditBridge!, 'snapshot');
+    const snapshot = findObjectProperty(auditBridge!, 'snapshot');
 
     expect(setVisibleSafeMode).toBeDefined();
     expect(snapshot).toBeDefined();

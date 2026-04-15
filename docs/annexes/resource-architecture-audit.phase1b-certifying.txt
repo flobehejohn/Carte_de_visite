@@ -1,0 +1,343 @@
+1. Titre
+Audit Phase 1B certifiant - consommation runtime mesuree et gouvernance de preuve
+Projet: test_unitaire/app_llmed_wt_fix
+Date: 2026-04-14
+Auteur: Codex (audit lecture seule, mesures runtime sans patch applicatif)
+
+Convention de lecture
+- [F] Fait observe (preuve statique dans le repo)
+- [M] Mesure obtenue (commande/exec reelle)
+- [H] Hypothese fondee (inference technique argumentee)
+- [L] Limite methodologique (ce qui bloque une certitude)
+- [R] Recommandation actionnable
+
+2. Perimetre et baseline utilisee
+[F] Baseline relue en premier: docs/annexes/resource-architecture-audit.txt.
+[F] Cette Phase 1B ne refait pas la cartographie generale; elle cible la quantification certifiante.
+[F] Fichiers relus prioritairement:
+- src/components/oracle/Oracle3DScene.tsx
+- src/scene/RitualOrchestrator.js
+- src/scene/OrbAuditBridge.ts
+- src/scene/modules/orbFluidParticles.js
+- src/scene/modules/orbParticles.js
+- src/scene/modules/orbGeometry.js
+- src/scene/modules/orbPoly.js
+- src/scene/modules/orbVolumes.js
+- src/scene/modules/orbTextManager.js
+- src/scene/modules/orbLighting.js
+- src/scene/params/ClimateController.ts
+- src/scene/safety/LightSafetyGovernor.ts
+- src/scene/render/materials/applyMaterials.ts
+- src/scene/render/optics/transparency.ts
+- src/hooks/useOracle.ts
+- src/components/oracle/RitualWizard.tsx
+- vite.config.ts / vite.config.js
+- package.json
+- scripts/validate-full.ps1, scripts/audit-runtime.ps1, scripts/gate-render.ps1
+- vitest.config.ts, playwright.config.ts
+- tests runtime/audit/opacity/memory guards lies au rendu
+
+3. Methode et commandes executees
+[F] Aucune modification de code applicatif/tests/configs. Un seul fichier cree: ce rapport.
+[M] Build production:
+- commande: npm run build
+- resultat: 445 modules transformes; dist/assets/index-oBaczTr3.js = 1,403.70 kB minifie; warning Vite >500 kB.
+[M] Mesure bundle disque:
+- commande: Get-ChildItem dist/assets
+- resultat: JS 1,403,926 B; CSS 27,435 B.
+[M] Mesure compression JS:
+- commande node+zlib (gzip level 9 / brotli q11)
+- resultat: raw 1,403,926 B; gzip 415,854 B; brotli 345,101 B.
+[M] Mesure runtime snapshots:
+- protocole: npm run preview + script Playwright inline (desktop + mobile)
+- extraction: window.__ORB_ACTIVE_SCENE__, renderer.info, scene traversal, ctx runtime.
+- etats couverts: stage 1,3,5,8,10 en desktop et mobile emulation.
+[M] Mesure CPU synthese (zones):
+- protocole: micro-benchmark in-page sur orchestrator.update(t) (500 iterations, 100 warmup ignorees).
+- variantes: stage1_default, stage8_default, stage8_fluid_off, stage8_emergency_mode.
+[M] Mesure long-run/churn:
+- protocole: 140 cycles updateState + initRitual(seed), duree 700,230 ms (~11m40s).
+- extraction: renderer.info.memory, fluid rebuildCount, heap JS.
+[M] Mesure Troika:
+- protocole: spawnOracle + 120 ticks animateReveal; comptage sync() instrumente en runtime (wrapper en memoire).
+[F] Verification statique par grep/lecture:
+- __ORB_AUDIT__ bridge scene: Oracle3DScene.tsx:2068+
+- overwrite invariants: OrbAuditBridge.ts:18+ et RitualOrchestrator.js:1575+
+- shadow map renderer: Oracle3DScene.tsx:1018
+- lights default castShadow false: orbLighting.js:269
+- trails alloc/frame: orbParticles.js:480
+- normals/frame: orbGeometry.js:493, orbPoly.js:391
+- troika sync: orbTextManager.js:86, 144
+
+4. Ce que le premier audit a deja valide
+[F] Deja valide en Phase 1:
+- architecture runtime (React -> RitualWizard -> Oracle3DScene -> RitualOrchestrator -> modules scene),
+- risques structurels CPU/GPU/memoire,
+- fallback feedback render target,
+- correction toNonIndexed et gouvernance AST/tests,
+- limites CI (gates perf/bundle non bloquants).
+[F] Ce socle est conserve et reutilise comme baseline de conception.
+
+5. Ce que cette Phase 1B ajoute reellement
+[M] Ajout 1: snapshots chiffres multi-etats (stage/profil), avec compteurs drawables et renderer.info.
+[M] Ajout 2: chiffres bundle exploitables (raw/gzip/brotli + first load concret).
+[M] Ajout 3: micro-benchmark CPU comparatif par scenario (stage1 vs stage8, fluid on/off, emergency).
+[M] Ajout 4: long-run synthese 11m40 avec churn/rebuild et stabilite memoire observee.
+[M] Ajout 5: quantification Troika (nombre de meshes et sync calls sur reveal).
+[L] Ajout 6: identification d une rupture de mesurabilite: __ORB_AUDIT__.snapshot runtime indisponible en live car ecrase par OrbAuditBridge invariants.
+
+6. Bloc A - Snapshots runtime chiffres
+6.1 Disponibilite des points d entree de mesure
+[F] Oracle3DScene expose un bridge complet (ready/setProgress/snapshot...) dans Oracle3DScene.tsx:2068-2097.
+[F] OrbAuditBridge re-ecrit window.__ORB_AUDIT__ avec seulement timestamp/invariants a chaque update: OrbAuditBridge.ts:18-37 et RitualOrchestrator.js:1575-1583.
+[M] En runtime live (preview), forme observee de __ORB_AUDIT__:
+- keys = ["timestamp","invariants"]
+- hasSnapshotMethod = false
+- hasReadyMethod = false
+[L] Les snapshots riches de Oracle3DScene existent dans le code, mais ne sont pas appelables via __ORB_AUDIT__ en live dans l etat courant.
+
+6.2 Snapshot chiffre par etat (mesure reelle)
+Source mesure: Playwright inline, preview build, renderer.info (autoReset=false), scene traversal.
+
+Tableau Desktop (headless, valeurs par frame echantillonnee)
+| Stage | Progress force | Mode ctx | Composer | Bloom | Fluid visible | Drawables visibles (base/overlay) | Calls/frame | Triangles/frame | Points/frame | Lines/frame | Geometries | Textures |
+|---|---:|---|---|---|---|---|---:|---:|---:|---:|---:|---:|
+| 1 | 0.000 | composer-bloom | on (2 passes) | on | false | 5 (5/0) | 20.0 | 5,780 | 0 | 4,253 | 10 | 13 |
+| 3 | 0.222 | composer-bloom | on (2 passes) | on | false | 10 (10/0) | 25.0 | 3,076 | 1,019 | 600 | 11 | 13 |
+| 5 | 0.444 | composer-bloom | on (2 passes) | on | true | 9 (8/1) | 24.0 | 7,936 | 1,019 | 10,429 | 13 | 13 |
+| 8 | 0.778 | composer-bloom | on (2 passes) | on | true | 12 (11/1) | 27.0 | 12,626 | 6,114 | 1,218 | 13 | 13 |
+| 10 | 1.000 | composer-bloom | on (2 passes) | on | true | 7 (6/1) | 22.0 | 17,356 | 12,228 | 0 | 8 | 13 |
+
+Tableau Mobile emulation (headless, valeurs par frame echantillonnee)
+| Stage | Progress force | Mode ctx | Composer | Bloom | Fluid visible | Drawables visibles (base/overlay) | Calls/frame | Triangles/frame | Points/frame | Lines/frame | Geometries | Textures |
+|---|---:|---|---|---|---|---|---:|---:|---:|---:|---:|---:|
+| 1 | 0.000 | composer-bloom | on (2 passes) | on | false | 5 (5/0) | 20.5 | 3,032 | 0 | 81 | 7 | 13 |
+| 3 | 0.222 | composer-bloom | on (2 passes) | on | false | 5 (5/0) | 20.0 | 4,844 | 1,728 | 0 | 6 | 13 |
+| 5 | 0.444 | composer-bloom | on (2 passes) | on | true | 9 (8/1) | 24.0 | 9,074 | 864 | 13,108.5 | 10 | 13 |
+| 8 | 0.778 | composer-bloom | on (2 passes) | on | true | 9 (8/1) | 24.0 | 28,950 | 5,184 | 50,592 | 10 | 13 |
+| 10 | 1.000 | composer-bloom | on (2 passes) | on | true | 13 (12/1) | 31.0 | 102,128 | 5,184 | 311,358 | 14 | 14 |
+
+6.3 Couverture des etats demandes
+[M] Etats couverts: stage 1/3/5/8/10, desktop, mobile emulation.
+[M] Seed mesurable via orchestrator.initRitual(...,{seed}): "phase1b-snapshot-seed" observee en runtime.
+[L] Profil Premium/Safe non expose comme profil explicite runtime; seulement des flags (ex: emergencyMode, visibleSafeMode) et des modulations climat/safety.
+[L] Les valeurs FPS obtenues en headless sont non certifiantes (raf throttle, GPU virtualization).
+
+7. Bloc B - Bundle et first load
+7.1 Etat build chiffre
+[M] Build production: 445 modules transformes; JS principal unique:
+- dist/assets/index-oBaczTr3.js = 1,403,926 B raw
+- gzip = 415,854 B (zlib local) / 416.76 kB (sortie Vite)
+- brotli = 345,101 B
+- dist/assets/index-DsM0uckb.css = 27,435 B
+[F] First load reel: dist/index.html charge un seul JS module + un CSS (dist/index.html:12-13).
+
+7.2 Causes structurelles observees
+[F] Pas de strategy chunking explicite dans vite.config.ts (fichier 1-40: pas de build.rollupOptions/manualChunks).
+[M] Recherche dynamique import hors tests: aucune occurrence dans src applicatif (rg import\\( avec exclusion tests -> 0 resultat).
+[F] Chemin critique statique:
+- App importe RitualWizard directement (App.tsx:3,20),
+- RitualWizard importe Oracle3DScene directement (RitualWizard.tsx:11),
+- Oracle3DScene importe three + EffectComposer + RenderPass + UnrealBloomPass (Oracle3DScene.tsx:2-5),
+- RitualOrchestrator importe gsap (RitualOrchestrator.js:1),
+- orbTextManager importe troika-three-text (orbTextManager.js:2),
+- UI importe framer-motion (RitualWizard.tsx:1, OracleReadingPanel.tsx:1).
+
+7.3 Proposition de decoupage certifiable
+[R] Niveau A (immediat): ajouter reporting bundle machine-readable en CI (taille raw/gzip/brotli par chunk) + seuil bloquant.
+[R] Niveau B (manualChunks): decomposer au minimum:
+- chunk-three-core (three)
+- chunk-three-post (EffectComposer/RenderPass/UnrealBloomPass + jsm utilises)
+- chunk-orchestrator-3d (RitualOrchestrator + modules orb*)
+- chunk-troika-text (troika-three-text)
+- chunk-motion-ui (framer-motion + gsap)
+[R] Niveau C (lazy import): deferer Oracle3DScene depuis RitualWizard apres premier paint UI.
+[H] Gain attendu (ordre de grandeur): first JS critique potentiellement reduit de ~30% a ~45% selon seuil de deferement scene/troika.
+[L] Sans analyseur de bundle graphe module->chunk, l attribution exacte par librairie reste semi-quantitative.
+
+7.4 Risques techniques du decoupage
+[R] Ne pas introduire d import dynamique dans la boucle update.
+[R] Conserver un bridge audit deterministe en mode test/e2e (ne pas deferer ce qui est requis par contrats d audit).
+[R] Valider VRT/e2e apres split pour eviter changements de timing (seed/snapshots).
+
+8. Bloc C - CPU
+8.1 Mesure disponible vs indisponible
+[L] Aucun timer par zone n est expose nativement (pas de telemetry par module dans update()).
+[M] Mesure synthetique obtenue via micro-bench sur orchestrator.update(t) en page (sans patch persistant).
+
+8.2 Micro-benchmark synthetique (orchestrator.update)
+| Scenario | n samples | mean ms | p95 ms | p99 ms | min ms | max ms |
+|---|---:|---:|---:|---:|---:|---:|
+| stage1_default | 400 | 0.70 | 1.10 | 2.20 | 0.40 | 3.30 |
+| stage8_default | 400 | 5.43 | 6.80 | 8.20 | 3.60 | 23.00 |
+| stage8_fluid_off | 400 | 3.95 | 4.70 | 7.50 | 2.60 | 31.80 |
+| stage8_emergency_mode | 400 | 4.07 | 5.00 | 6.00 | 2.70 | 24.30 |
+
+Lecture staff:
+[M] Stage8_default vs stage1_default: x7.7 sur cout CPU update pur.
+[M] Stage8_default -> stage8_fluid_off: -1.47 ms mean (~27%) sur ce bench (contribution fluide significative).
+[H] Le cout CPU dominant en phase avancee est bien multi-source (fluid + particles + deformation/normals + orchestration materiaux).
+[L] Ce bench ne couvre pas le cout GPU draw, ni le scheduling navigateur reel.
+
+8.3 Hotspots classes (preuve statique + mesure)
+1) [F][M] Fluid particles update (setMatrixAt/setColorAt boucle live) orbFluidParticles.js:636-687, 669.
+2) [F] Trails/links:
+- allocation par frame Float32Array.from(pPos) orbParticles.js:480
+- clone couleur interne c1.clone().lerp(...) dans double boucle trails (orbParticles.js ~502)
+- spatial hash + voisinage 27 cellules (orbParticles.js:387-451)
+3) [F] Normales recalculees par frame:
+- orbGeometry.js:493
+- orbPoly.js:391
+- (ground aussi selon activation)
+4) [F] Double applyTargetsToRuntime dans update:
+- RitualOrchestrator.js:1308 puis 1389
+5) [F] Traversals/scans:
+- feedback scan periodique Oracle3DScene.tsx:1325+, 2169
+- collectSceneStats scene.traverse Oracle3DScene.tsx:549+
+
+8.4 Distinction per-frame / rebuild / reset
+[F] Per-frame: update() orchestre deformation, lights, volume, particles, fluid, text reveal.
+[F] Rebuild: fluid mesh sur changement structurel (orbFluidParticles.js:420-438), poly rebuild sur patch structurel.
+[F] Reset/init: initRitual reconstruit plusieurs sous-systemes (RitualOrchestrator.js:303+).
+
+8.5 Instrumentation minimale a ajouter plus tard (sans implementation ici)
+[R] Ajouter une telemetrie runtime non intrusive:
+- timers par zone dans update() (orchestrator, geometry, poly, particles, fluid, lights, materials, text).
+- compteurs rebuild/reset (fluid/poly/ground/text) exposes dans un endpoint stable.
+- stockage fenetre glissante (p50/p95/p99) par zone.
+[R] Exporter ces metriques vers un snapshot certifiable CI (JSON) puis gate de budget.
+
+9. Bloc D - GPU / VRAM
+9.1 Cartographie GPU observee
+[F] Renderer:
+- alpha:true et toneMapping ACES (Oracle3DScene init),
+- shadowMap.enabled = true (Oracle3DScene.tsx:1018).
+[F] Postprocess:
+- EffectComposer + RenderPass + UnrealBloomPass (Oracle3DScene.tsx:1048-1066).
+[F] Rendu en 2 couches base/overlay a chaque frame (Oracle3DScene.tsx:2107-2142).
+[F] Fluid overlay isole (excludeFromComposer true, overlay layer) Oracle3DScene.tsx:408-409 + orbFluidParticles.js:90-91.
+[F] Transparence/additive multiples:
+- orbVolumes glow additive/depthWrite false (orbVolumes.js:277-280),
+- orbParticles points/links/trails additive/depthWrite false (orbParticles.js:215-218, 233-236, 256-259),
+- fluid additive/depthWrite false (orbFluidParticles.js:272-277),
+- veil foreground additive (RitualOrchestrator.js:368-372).
+
+9.2 Fill-rate / draw / shader / VRAM
+[H] Cout fill-rate principal: empilement transparences (volume + glow + veil + particles + fluid) + bloom full-screen.
+[H] Cout draw calls: double rendu (base + overlay) et objets supplementaires trails/links.
+[H] Cout shader: sphere bg shader + glow shader + veil shader + bloom pass.
+[M] Proxy VRAM (renderer.info.memory, non octets):
+- snapshots stage/profils: geometries ~6 a 14, textures ~13 a 14.
+- long-run synthese: textures stables a 13, geometries oscillantes 5-9.
+[L] renderer.info.memory donne des comptes objets, pas la VRAM MB.
+
+9.3 Shadow map utilite reelle
+[M] Runtime observe:
+- rendererShadowMapEnabled = true
+- lights default: sun-main/fill-hemi/rim-point castShadow=false (config et runtime)
+[F] orbLighting default set castShadow:false sur sun-main (orbLighting.js:269).
+[H] Cout GPU evitable: shadow pipeline active alors que zero lumiere ne projette par defaut.
+[R] Desactiver renderer.shadowMap.enabled tant qu aucune lumiere castShadow active.
+
+10. Bloc E - Long-run / churn / reset
+10.1 Ce qui est demontre par mesure
+[M] Protocole long-run synthetique:
+- duree: 700,230 ms (~11m40)
+- cycles: 140 (updateState + initRitual(seed))
+- seed final observe: phase1b-140
+[M] Drift observe:
+- textures: 13 -> 13 (stable)
+- geometries: 8 -> 9 (oscillation faible)
+- jsHeap used: ~10,000,000 -> ~10,000,000 (stable dans ce protocole)
+[M] Churn observe:
+- fluid rebuildCount: 3 -> 249 (lineaire avec les resets agressifs invokes)
+
+10.2 Interpretation
+[H] Dans ce protocole, le risque dominant est le churn/re-allocation (attendu sous reset agressif), pas une fuite cumulative evidente.
+[F] Un test guard de release existe deja pour disposal GPU sur regen fluid:
+- src/scene/memory-leaks.guard.test.ts (spy dispose geometry/material lors de regen).
+[L] Ce long-run est synthetique (driven par initRitual frequents) et ne reproduit pas exactement le parcours utilisateur complet multi-stage/reveal/restart.
+
+10.3 Protocole recommande pour certification suivante
+[R] Ajouter un long-run e2e reel 5-10 min:
+- parcours utilisateur complet (10 etapes -> reveal -> restart),
+- extraction periodique de metriques runtime (calls/triangles/points + memory proxies + rebuild counters),
+- seuils de drift autorises (ex: textures stable +/-1, no monotonic leak trend, rebuild rate bornes par cycle).
+
+11. Bloc F - Texte 3D Troika
+11.1 Inventaire exact
+[F] Troika utilise via Text de troika-three-text (orbTextManager.js:2).
+[F] sync() force a creation de chaque mesh texte (_createText): orbTextManager.js:86.
+[F] sync() aussi pendant reveal si delta opacite depasse seuil: orbTextManager.js:139-145.
+[F] spawnOracle cree jusqu a 4 meshes (chapter, quote, quote-bloom, author): orbTextManager.js:153+.
+[F] clear() appelle dispose() sur chaque mesh troika: orbTextManager.js:206-214.
+
+11.2 Mesures runtime
+[M] Scenario mesure:
+- avant spawn: meshes=0
+- apres spawn: meshes=4 (roles: chapter=1, quote=1, quote-bloom=1, author=1)
+- apres clear: meshes=0
+[M] reveal bench 120 ticks:
+- syncCalls120Ticks = 362 (instrumentation runtime volatile)
+[M] renderer.info.memory (proxy) n a pas varie dans ces runs troika (geometries/textures inchanges).
+[L] L atlas glyphes/texture troika n est pas observable precisement ici en MB sans instrumentation specifique (ou extension WebGL debug).
+
+11.3 Risques et opportunites
+[H] Le cout Troika principal est CPU/layout+sync en phase reveal, plus que du volume geometrie brut.
+[R] Opportunite:
+- lazy load du manager texte seulement proche du final reveal,
+- throttling/batching des sync (seuil adaptatif ou cadence plafonnee),
+- compteur de sync/frame expose pour budget CI.
+
+12. Limites de mesure
+[L] Bridge audit live partiellement non exploitable:
+- __ORB_AUDIT__.snapshot non disponible en runtime live car ecrase par OrbAuditBridge invariants.
+[L] Mesures FPS headless non representables de devices reels (raf throttle, GPU virtualise).
+[L] renderer.info.memory est un compteur d objets WebGL, pas une mesure VRAM octets.
+[L] Absence d instrumentation par zone dans update() => decomposition CPU par module inferentielle ou benchmark synthetique.
+[L] Pas de profiling GPU timer query (EXT_disjoint_timer_query) expose dans le runtime actuel.
+
+13. Tableau final (Sujet / Etat actuel / Niveau de preuve / Risque / Priorite / Action suivante)
+| Sujet | Etat actuel | Niveau de preuve | Risque | Priorite | Action suivante |
+|---|---|---|---|---|---|
+| Mesure snapshot certifiante | Snapshot riche code existe mais bridge live ecrase | F+M | Haut (visibilite perf incompl.) | P0 | Reunifier bridge: conserver invariants + API snapshot stable |
+| Bundle first load | 1 chunk JS monolithique 1.4 MB raw | M | Haut (TTI/cache) | P0 | manualChunks + gate bundle bloquant CI |
+| CPU stage avance | update stage8 ~5.43 ms (synthetique) vs stage1 0.70 ms | M | Haut | P0 | Instrumenter zones update + budget p95 |
+| Contribution fluid CPU | stage8 fluid off: ~3.95 ms (gain ~27%) | M | Moyen/Haut | P1 | Governor fluid (count/spawn/enable) par profil |
+| Trails allocations | Float32Array.from + clone Color par frame | F | Haut (GC/jank) | P1 | ring buffer prealloue + reuse couleur |
+| Normals par frame | computeVertexNormals repetes | F | Moyen/Haut | P1 | dirty flags / cadence adaptative |
+| Fill-rate mobile | pile alpha/additive + bloom + double couche | F+M+H | Haut | P0 | profil Safe auto (DPR, bloom, trails, fluid) |
+| Shadow map inutile par defaut | renderer shadowMap on, lights castShadow false | F+M | Moyen | P1 | activer shadowMap uniquement si castShadow actif |
+| Long-run reset agressif | textures stables, rebuild fluid lineaire avec resets | M | Moyen | P1 | test long-run e2e reel + seuils churn |
+| Troika reveal | 362 sync/120 ticks mesure | M+F | Moyen | P1 | throttling sync + lazy text module |
+| CI certifiante ressources | CI principale ne gate pas budgets perf/bundle | F | Haut | P0 | ajouter gates perf/bundle/runtime dans workflow |
+
+14. Conclusion tranchee
+Phase 1 audit architectural: OK
+Phase 1 audit de consommation mesuree: PARTIEL
+Verdict final: A COMPLETER
+
+Justification staff-level
+[F] Le systeme est bien compris architecturalement (baseline validee).
+[M] Cette Phase 1B apporte des mesures reelles utiles (snapshots multi-stage, bundle, micro-bench CPU, long-run, Troika).
+[L] La mesurabilite n est pas encore certifiante au niveau CI/perf board pour 3 raisons bloquantes:
+- bridge snapshot live non stable (__ORB_AUDIT__ ecrase),
+- absence de telemetry CPU par zone directement exportable,
+- absence de gates budgets bloquants en CI (bundle/perf runtime).
+[R] Le passage en certification complete est possible rapidement via instrumentation minimale + gates CI.
+
+15. Feuille de route de suite (3 niveaux)
+Immediat (P0, 2-4 jours)
+- [R] Stabiliser un endpoint de snapshot runtime unique (invariants + scene stats + render stats + counters).
+- [R] Ajouter gate bundle CI (raw/gzip/brotli) avec seuils explicites.
+- [R] Ajouter gate perf smoke (stage 1/5/8/10 desktop+mobile emu) sur metriques snapshot, non bloquant 1 sprint puis bloquant.
+
+Court terme (P1, 1 sprint)
+- [R] Instrumenter orchestrator.update par zones et exporter p50/p95/p99.
+- [R] Corriger quick wins CPU: trails alloc/frame, cadence normals, shadowMap conditional enable.
+- [R] Introduire profil runtime Safe automatique (DPR, bloom, fluid, trails).
+
+Structurel (P2, 1-2 sprints)
+- [R] Deployer Quality Governor certifiable Premium/Medium/Safe avec transitions tracees.
+- [R] Refaire decoupage bundle (manualChunks + lazy scene/troika) avec non-regression e2e/VRT.
+- [R] Industrialiser long-run CI 10 min + budget drift memoire/churn reset.

@@ -1,0 +1,597 @@
+Titre
+Audit staff-level de l'architecture de consommation de ressources
+Projet: test_unitaire/app_llmed_wt_fix
+Date d'audit: 2026-04-14
+Auditeur: Codex (analyse statique + build + lecture tests/CI)
+
+Notation
+- [F] Fait observe (preuve directe dans le repo)
+- [H] Hypothese plausible (inference technique fondee)
+- [R] Recommandation actionnable
+
+Resume executif
+[F] L'architecture runtime est deja fortement gouvernee autour de 3 pivots:
+- Oracle3DScene comme moteur de rendu et gouvernance runtime (layers, composer, fallback, audit bridge) dans src/components/oracle/Oracle3DScene.tsx.
+- RitualOrchestrator comme cerveau de pilotage visuel/climatique et repartiteur des updates modules dans src/scene/RitualOrchestrator.js.
+- Une couche de garde-fous (tests AST, tests integration, scripts audit PS1) qui verrouille des invariants critiques.
+
+[F] Les couts dominants actuels ne viennent pas d'un seul point, mais d'une superposition:
+- CPU: deformation geometrique + recompute normals par frame + systemes particules liens/trails + updates instancing fluides.
+- GPU: pile alpha/additive (volume + voile + particules + fluides + bloom) et double rendu base/overlay.
+- Bundle: chunk principal unique tres lourd (dist/assets/index-oBaczTr3.js = 1,403,926 bytes; build Vite signale >500 kB).
+
+[F] La gestion des risques feedback render target est bien traitee:
+- scan des candidats de feedback et fallback auto vers mode direct dans Oracle3DScene.tsx:1325-1355.
+- contrats de test associes dans Oracle3DScene.audit.integration.test.tsx.
+
+[F] La correction toNonIndexed est structurellement saine:
+- normalisation centralisee via ownNonIndexedGeometry() + dispose explicite de l'intermediaire dans src/scene/modules/orbPoly.js:152-204.
+- couverte par tests unitaires et AST locks.
+
+[H] Le risque prioritaire court terme n'est pas un bug fonctionnel, mais une degradation progressive de perf sur devices faibles:
+- fill-rate mobile + churn CPU/GC dans les trails + absence de budget perf CI bloquant.
+
+[R] Priorite strategique:
+1. Mettre en place un Quality Governor runtime (profils Premium/Medium/Safe) relie a budgets certifiables.
+2. Reduire les hotspots CPU/frame (normales, trails, scans, updates redondants).
+3. Decouper le bundle (manualChunks + lazy loading cible) sans casser l'initialisation 3D.
+4. Transformer les audits existants en gates CI bloquants (perf, bundle, render contracts).
+
+Methode d'audit
+[F] Perimetre inspecte:
+- Entree UI/runtime: src/main.tsx, src/App.tsx, src/components/layout/OracleLayout.tsx, src/components/oracle/RitualWizard.tsx, src/components/oracle/Oracle3DScene.tsx.
+- Orchestration et modules 3D: src/scene/RitualOrchestrator.js + modules orbGeometry/orbPoly/orbParticles/orbFluidParticles/orbVolumes/orbGround/orbTextManager/orbLighting.
+- Pipeline render governance: src/scene/render/materials/*, src/scene/render/optics/transparency.ts, src/scene/params/ClimateController.ts.
+- Gouvernance tests/CI: vitest.config.ts, playwright.config.ts, .github/workflows/ci.yml, scripts/audit-*.ps1, scripts/gate*.ps1, scripts/orb-deep-audit.ts.
+- Bundle/build: package.json, vite.config.ts/js, sortie build dist/assets/*.
+
+[F] Commandes de verification executees:
+- Inspection statique (rg/Get-Content) des hotspots et contrats.
+- npm run build (resultat: 445 modules transformes, JS principal 1,403.70 kB minifie, warning chunk >500 kB).
+
+[F] Contrainte respectee:
+- Aucun fichier applicatif modifie.
+- Rapport ecrit uniquement dans docs/annexes/resource-architecture-audit.txt.
+
+Cartographie architecture
+1) Points d'entree principaux du rendu
+[F] React root en StrictMode:
+- src/main.tsx:6-9.
+[F] Selection de flux applicatif:
+- src/App.tsx:10-21 (route e2e=phase8 -> RitualWizard direct, sinon OracleLayout).
+[F] OracleLayout delegue a RitualWizard:
+- src/components/layout/OracleLayout.tsx:3-8.
+[F] Montage scene 3D:
+- src/components/oracle/RitualWizard.tsx:737-746 monte Oracle3DSceneMemo en fond full screen.
+
+2) Role exact des composants centraux
+Oracle3DScene
+[F] Responsable de:
+- bootstrap scene/camera/renderer/composer/passes (Oracle3DScene.tsx:984-1067),
+- gouvernance couches base/overlay (2107-2142),
+- boucle RAF et render mode switching (2144-2187),
+- reset runtime et isolation fluid overlay (1289-1321, 406-410),
+- detection feedback render target + fallback auto direct (1325-1360),
+- bridge audit runtime window.__ORB_AUDIT__ (2068-2097),
+- cleanup/dispose complet (948-974, 2219-2269).
+
+RitualOrchestrator
+[F] Responsable de:
+- construction genome et targetState selon progress + payload (875-1019),
+- propagation config vers modules satellites (965-1016),
+- application centralisee des cibles runtime (fog, bloom, volume, opacites) via applyTargetsToRuntime (1035-1180),
+- update per-frame global orchestrant tous modules (1230-1586),
+- reveal sequence texte 3D/camera (447-500).
+
+Modules satellites (roles)
+[F] orbGeometry.js: mesh solide + wireframes + deformation shell.
+[F] orbPoly.js: couche poly complementaire + subsampling/non-index normalization + deformation.
+[F] orbParticles.js: points/liens/trails.
+[F] orbFluidParticles.js: particules fluides instanciees + overlay isolation.
+[F] orbVolumes.js: background sphere shader + glow plane additive (pseudo-volumetrie).
+[F] orbGround.js: sol optionnel deformable + textures.
+[F] orbTextManager.js: texte 3D troika et reveal.
+[F] orbLighting.js: registry lumieres et update choregraphie.
+
+3) Chaine complete React -> orchestration -> scene -> renderer -> composer -> layers -> passes -> overlays
+[F]
+1. React render RitualWizard.
+2. RitualWizard pousse formData/stage/loading/result vers Oracle3DScene.
+3. Oracle3DScene cree ctx Three.js + RitualOrchestrator.
+4. RitualOrchestrator calcule climate/targets/genome puis met a jour modules.
+5. Oracle3DScene rend:
+   - base layer via EffectComposer (RenderPass + UnrealBloomPass) si mode composer,
+   - overlay layer en render direct separe.
+6. Audit bridge expose snapshot, controles runtime, modes de secours.
+
+4) Cycles montage/demontage/reset/init
+Montage/Init
+[F] Init scene/resources dans useEffect principal Oracle3DScene.tsx:984-1112.
+[F] orchestrator.initRitual('') une fois au boot scene (1284-1287).
+[F] resize observer + RAF start (2209-2218, 2187).
+
+Reset
+[F] resetSceneView reinitialise compteurs/telemetrie/renderMode/feedback/fluid et camera layers (1289-1321).
+[F] Declencheurs reset:
+- bridge resetScene (2086),
+- busy -> idle transition (2310-2320),
+- changement seed rituel (2322-2345),
+- unmount (2226).
+
+Demontage
+[F] cleanup:
+- stop listeners/resize,
+- reset scene,
+- dispose composer/renderer/object graph,
+- purge refs globals audit/active scene (2219-2269).
+
+5) Effets possibles StrictMode / double mount en dev
+[F] StrictMode actif depuis main.tsx.
+[F] Guard dev/test present:
+- AUDIT_RUNTIME_ENABLED = import.meta.env.DEV || MODE==='test' (875-876).
+- si __ORB_ACTIVE_SCENE__ present, dispose forcé avant nouveau mount (976-979).
+[H] En dev, double mount reste possible conceptuellement sur effets React; le guard limite les effets residuels scene, mais n'empeche pas les couts d'init executes 2 fois.
+[R] Pour certification, ajouter test explicite "StrictMode double-mount resource neutrality" sur compteur allocations/dispose.
+
+Analyse CPU
+Faits observes
+Hotspots per-frame evidents
+[F] Deformation shell + normales:
+- src/scene/modules/orbGeometry.js:465-493 boucle vertices + computeVertexNormals() chaque frame.
+[F] Deformation poly + normales:
+- src/scene/modules/orbPoly.js:366-391 + computeVertexNormals() chaque frame.
+[F] Ground deformation + normales (si actif):
+- src/scene/modules/orbGround.js:225-241.
+[F] Particules liens:
+- spatial hash + voisinage 27 cellules + boucles imbriquees dans orbParticles.js:387-451.
+[F] Particules trails:
+- allocation Float32Array.from(pPos) chaque frame (480),
+- clone couleur dans double boucle interne (502),
+- ecriture massives arrays (491-515).
+[F] Fluid particles:
+- boucle reverse sur particules live + setMatrixAt/setColorAt par instance (636-687).
+[F] Orchestrator update central:
+- appelle successifs modules dans RitualOrchestrator.js:1230-1586.
+
+Appels potentiellement couteux identifies
+[F] computeVertexNormals() repetes (orbGeometry/orbPoly/orbGround).
+[F] mesh.sync() troika a la creation et pendant reveal (orbTextManager.js:86, 139-145).
+[F] traversals scene:
+- findFeedbackCandidates traverse scene (430-460),
+- collectSceneStats traverse scene (564-591),
+- applyVisibleSafeMode traverse scene complet (1146-1175).
+[F] scan feedback periodique toutes 120 frames (2167-2170).
+[F] logs repetitifs potentiels:
+- [FluidParticles] log systematique de statut + compteur periodique,
+- [AUDIT] nombreux points de log.
+
+Recalculs/rebuild evitables
+[F] RitualOrchestrator applique applyTargetsToRuntime deux fois dans le meme update (1308 puis 1389-1394).
+[H] Cette double ecriture peut etre justifiee par safetyGovernor calcule apres premier passage, mais cree potentiellement du travail redondant.
+[R] Refactor: calculer safety plus tot ou fusionner en un seul applyTargetsToRuntime final.
+
+[F] Trails generent des allocations par frame (Float32Array.from + clone Color).
+[R] Preallouer buffers/slots d'historique (ring buffer) et reutiliser une seule instance Color temporaire.
+
+[F] orbGroup.children.forEach avec material.setValues chaque frame (RitualOrchestrator.js:1349-1358).
+[R] Cacher reference directe orbMesh material et ecrire proprietes scalaires plutot que setValues objet.
+
+Hypotheses plausibles
+[H] Le couple trails + normals + fluid instancing est le principal driver CPU/frame.
+[H] Le mode VRT warmup (150 updates fluides au premier update, 1515-1519) peut biaiser des mesures perf instantanees si active en contexte non test.
+
+Recommandations CPU
+[R] Quick wins:
+- Neutraliser allocations trails (orbParticles.js).
+- Introduire cadence adaptee pour computeVertexNormals (ex: 15/30 fps logique, ou condition delta amplitude).
+- Debouncer scanFeedbackCandidates periodique hors mode debug strict.
+[R] Refactors moyens:
+- Unifier pipeline deformation + normals (dirty flags).
+- Externaliser budgets CPU par module via Quality Governor.
+[R] Chantiers:
+- Instrumentation per-frame timings par module (orchestrator.update slices) et gate CI sur budget.
+
+Analyse GPU
+Faits observes
+Stack de rendu
+[F] renderer alpha + tone mapping + shadowMap enabled (Oracle3DScene.tsx:994-1019).
+[F] Passes postprocess:
+- RenderPass + UnrealBloomPass via EffectComposer (1048-1066).
+[F] Rendu en 2 couches:
+- base layer + overlay layer renders distincts (2107-2142).
+[F] Overlay isolation particules fluides:
+- excludeFromComposer=true, renderLayer=1 (406-410).
+
+Sources majeures de cout GPU
+[F] Transparence additive et depthWrite=false sur multiples systemes:
+- orbVolumes glow material (277-280),
+- orbParticles points/links/trails (215-218, 233-236, 256-259),
+- orbFluidParticles material (270-277),
+- voile foreground additive (RitualOrchestrator.js:366-373).
+[F] Volumes:
+- sphere background shader 48x32 + BackSide + no depth test/write (251-253, 256),
+- glow plane fullscreen relatif additive (283-289).
+[F] Wireframes multiples:
+- couches wireframes exo-atmospheriques (orbGeometry.js:287-319).
+[F] Bloom postprocess:
+- cout fullscreen et sensible a strength/radius.
+[F] Deux renders scene par frame (base + overlay) en mode direct comme composer.
+
+Risques fill-rate mobile
+[H] Cumuls alpha/blending + bloom + voile + glow + particules peuvent saturer fill-rate mobile avant meme saturation vertex.
+[F] DPR cap a 2 (Oracle3DScene.tsx:1014), ce qui aide mais peut rester eleve sur appareils modestes.
+[R] Gouverner dynamiquement pixelRatio, bloom, particules, trails selon budget GPU detecte.
+
+Feedback render target: etat
+[F] Risque detecte automatiquement:
+- findFeedbackCandidates compare textures materiaux vs render targets du composer (413-473).
+[F] Action automatique:
+- switch render mode to direct si risque et autoFallback actif (1346-1355).
+[F] Couverture tests:
+- Oracle3DScene.audit.integration.test.tsx valide detection + fallback + coherence snapshot.
+[Conclusion GPU]
+- Gouvernance feedback est mature.
+- Gouvernance cout fill-rate est partielle, non encore budgetee par profil/perf.
+
+Analyse memoire / VRAM
+Faits observes
+Politique ownership/dispose
+[F] Oracle3DScene:
+- disposeSceneResources + disposeObjectGraph (948-974, 231-235),
+- cleanup complet unmount (2219-2269).
+[F] Modules:
+- orbFluidParticles.disposeMesh() dispose geometry/material (248-260).
+- orbGround dispose mesh + textures/gif/video (105-128).
+- orbVolumes rebuild dispose anciens meshes/materials (225-236).
+- orbParticles disposeObj() (115-120).
+
+Ressources reconstruites frequemment
+[F] Fluid particles rebuild sur changements structurels config (setFluidParticlesConfig:429-438).
+[H] Si maxCount/shape/layer changent souvent via genome/progress, churn VRAM possible.
+[F] Particles trails historisent snapshots positions (480-482) avec allocations frequentes cote CPU/heap.
+
+Gestion des resets
+[F] resetSceneView appelle resetFluidParticles + reset compteurs + recheck feedback (1303-1321).
+[F] Reset busy->idle et reset seed garantissent cycle propre (2310-2345).
+
+Risques fuite/churn
+[H] Le risque principal est davantage du churn (alloc/rebuild) que de fuite persistante.
+[F] Test memory-leaks.guard verify dispose appele sur regen fluid (src/scene/memory-leaks.guard.test.ts).
+[H] Absence de test longue duree (plusieurs minutes) pour detecter drift heap/VRAM.
+
+Correction recente toNonIndexed: apport structurel
+[F] ownNonIndexedGeometry:
+- convertit seulement si indexee (162-165),
+- sinon reutilise (168),
+- option clone explicite.
+[F] applySubsampling route via helper + dispose intermediaire (173, 201).
+[F] Tests:
+- orbPoly.geometry-normalization.test.ts (cas indexe/non-indexe/clone),
+- orbPoly.ast.test.ts verrouille absence de toNonIndexed brut dans applySubsampling.
+[Conclusion]
+- Cette correction reduit conversion redondante, clarifie ownership, limite churn geometrique.
+
+Analyse de la fumee / alpha / volumetrie
+Cartographie des systemes concernes
+[F] "Fumee/volumetrie" est distribuee, pas un module unique:
+- FogExp2 scene climat (RitualOrchestrator applyTargetsToRuntime:1081-1106).
+- Reactive background + glow (orbVolumes.js).
+- Voile foreground shader FBM additive (RitualOrchestrator.js:365-404, update 1524-1536).
+- Particules shell/liens/trails (orbParticles.js).
+- Particules fluides instanciees (orbFluidParticles.js).
+
+Architecture exacte
+[F] volume background: sphere BackSide sans depth test/write, intensite modulee par lumiere et bruit.
+[F] glow: plane face camera, additive, anime pulsation/taille.
+[F] veil: plane avant camera, shader noise/fbm, opacity pilotee par render params.
+[F] fluid/particles: overlays transparents additifs, opacites gouvernees par applyMaterials + climate muls.
+
+Cout probable
+[H] Plus grand cout GPU = fill-rate/transparence cumulative (pas seulement nombre de triangles).
+[H] Plus grand cout CPU associe = update particules/trails + uploads attributs.
+
+Strategie Premium / Medium / Safe proposee
+Premium
+- Conserver volume + veil + fluid + links/trails + bloom.
+- DPR max 2.
+- Objectif devices desktop/haut de gamme.
+Medium
+- Garder volume mais reduire glowIntensity/softness/bloom radius.
+- Forcer mode particules "points" ou "links" selon budget.
+- Baisser fluid maxCount/spawnRate.
+- DPR plafonne a 1.25-1.5.
+Safe
+- Desactiver fluid et trails.
+- Option desactiver veil dynamique (opacity faible fixe) + bloom minimal ou off.
+- Conserver orb shell + wireframes + lumiere/fog legers.
+- DPR = 1.
+
+Decision sur la fumee
+[R] Conserver la fumee/atmosphere comme signature visuelle, mais la rendre degradable et desactivable par profil runtime.
+[R] Interdire une politique binaire "toujours on" sans budget device.
+
+Points a tester visuellement
+[R]
+1. Lisibilite texte HTML (reveal panel) quand glow+bloom eleves.
+2. Artefacts halos autour orb avec alpha stacking.
+3. Stability du mode emergency visible (pas de wire invisibles).
+4. Transition Premium->Safe a chaud sans pop visuel brutal.
+5. Mobile low-end: jank au passage stage 7-10 et final reveal.
+
+Analyse du bundle / chargement initial
+Faits observes
+[F] Config Vite sans strategie explicite de chunking:
+- vite.config.ts/js ne definissent ni build.rollupOptions.output.manualChunks ni lazy loading.
+[F] Aucun dynamic import applicatif detecte dans src (hors tests vi.importActual).
+[F] Build production mesure:
+- 445 modules transformes.
+- dist/assets/index-oBaczTr3.js = 1,403.70 kB minifie (1,403,926 bytes sur disque), gzip 416.76 kB.
+- warning Vite explicite: "Some chunks are larger than 500 kB after minification."
+[F] Dependances client lourdes impliquees:
+- three, troika-three-text, framer-motion, gsap (+ code runtime 3D important).
+
+Causes probables du chunk principal >500 kB
+[H]
+1. Le flux principal importe statiquement RitualWizard puis Oracle3DScene puis tout le moteur 3D.
+2. three/examples (postprocessing, simplex) et troika sont charges dans le meme chemin initial.
+3. framer-motion et GSAP contribuent au meme chunk (pas de decoupage route/feature).
+
+Strategie en 3 niveaux
+a) Analyse simple (immédiat)
+[R]
+- Activer visualisation bundle (rollup-plugin-visualizer ou equivalent) sur CI artefact.
+- Definir budget:
+  - js initial max (ex 700 kB minifie, a ajuster),
+  - gzip max (ex 250-300 kB selon cible).
+- Sortie machine-readable dans audit/_latest/bundle.
+
+b) manualChunks (court terme)
+[R] Introduire build.rollupOptions.output.manualChunks dans vite.config.ts:
+- chunk-three-core: three + math/core.
+- chunk-three-postprocess: EffectComposer/RenderPass/UnrealBloomPass.
+- chunk-3d-text: troika-three-text.
+- chunk-ui-motion: framer-motion + gsap.
+- chunk-app-runtime: code applicatif.
+[R] Benefice: meilleure parallelisation cache navigateur, invalidations reduites.
+
+c) lazy loading / dynamic import (moyen terme)
+[R]
+- Charger Oracle3DScene de maniere deferree apres 1er paint UI.
+- Optionnel: charger troika text manager seulement quand reveal final requis.
+- Optionnel: charger module fluid particles uniquement si profil >= Medium et progression >= seuil.
+
+Ce qu'il faut absolument eviter
+[R]
+1. Eviter de split three en morceaux trop fragmentes qui cassent dedupe/initialisation.
+2. Eviter un dynamic import dans la boucle update (doit rester hors hot path).
+3. Eviter de retarder la creation du bridge audit en mode test (contrats e2e/vrt en dependent).
+4. Eviter des imports conditionnels non deterministes qui modifient les seeds/tests snapshots.
+
+Analyse de l'observabilite
+Inventaire des flux logs
+[F] [AUDIT] dense dans Oracle3DScene:
+- reset, render mode, feedback scans, bridge actions, errors (1178, 1319, 1335+, 1992, 2100, 2181...).
+[F] [Climate] throttle 1s dans ClimateController (673-685).
+[F] [Light] throttle ~1200 ms dans orbLighting (19-27).
+[F] [FluidParticles]:
+- infos mode simplex, rebuild/reset, compteur periodique, fallback warning (43-45, 107, 388, 355, 580, 690).
+[F] [Ground] logs infos + erreurs texture/gif (47, 259, 271).
+[F] Services:
+- Zarathoustra logger throttle (76-95),
+- geminiClient error detail en dev (125-145).
+
+Distinction utile / verbeux / critique
+Utiles
+- Warnings feedback risk, context lost, animate error, fallback simplex frequent.
+- Logs build/runtime gate.
+Trop verbeux (si non gouvernes)
+- Logs audit de routine (setProgress/setSeed/reset multiples) en boucle tests.
+- Logs info modules per-frame ou quasi.
+Critiques
+- erreurs WebGL/context lost,
+- warnings de coherence snapshot (render-target-feedback-risk, no visible drawables),
+- erreurs API gemini tracees.
+
+Architecture de logging gouvernee proposee
+[R]
+1. Definir niveaux: ERROR, WARN, INFO, DEBUG_AUDIT.
+2. Brancher un logger unifie avec sampling/throttle central.
+3. Desactiver INFO par defaut en prod; garder WARN/ERROR.
+4. Ajouter tags normalises: subsystem, seed, stage, profileQuality, frameBudgetState.
+5. Exporter compteurs (pas seulement textes) vers audit bridge:
+   - feedbackRiskCount,
+   - contextLostCount,
+   - rebuildCount fluid/poly,
+   - droppedQualityEvents.
+
+Analyse de la gouvernance tests / CI
+Ce qui est deja bien gouverne
+[F] Tests de contrats runtime/audit solides:
+- Oracle3DScene.audit.integration.test.tsx
+- Oracle3DScene.audit.ast.test.ts
+- Oracle3DScene.cycle.test.tsx
+- Oracle3DScene.emergency-shell-audit.test.tsx
+[F] Gouvernance opacite/materials:
+- applyMaterials.integration.test.ts (single writer material flags),
+- transparency.test.ts,
+- mapClimateToRenderParams.test.ts.
+[F] Gouvernance geometrique toNonIndexed:
+- orbPoly.geometry-normalization.test.ts,
+- orbPoly.ast.test.ts.
+[F] Scripts audit robustes:
+- audit-runtime.ps1, audit-opacity.ps1, audit-opacity-sinks.ps1, gate-render.ps1, validate-full.ps1.
+
+Limites actuelles pour certification ressources
+[F] Workflow CI principal (.github/workflows/ci.yml) ne lance pas validate-full/gate-render/audits opacite runtime.
+[F] Job e2e-smoke est continue-on-error true (non bloquant).
+[F] Pas de gate bundle budget explicite.
+[F] Pas de gate perf runtime (FPS, draw calls, triangles) bloquant.
+[H] On a une bonne base de gouvernance "qualitative", mais pas encore une certification "quantitative budgetee".
+
+Tests futurs a creer (certification)
+[R]
+1. test/perf-budget.playwright.ts:
+   - lit window.__ORB_AUDIT__.snapshot() a progress cibles,
+   - assert budgets calls/triangles/points par profil.
+2. test/fps-budget.e2e.ts:
+   - mesure FPS median sur 20s (desktop + mobile emulation),
+   - seuils min par profil.
+3. test/memory-churn.longrun.ts:
+   - 5-10 min loop progress/reset,
+   - verifier stabilite compte rebuild/dispose et heap trend.
+4. gate-bundle.ps1:
+   - parse manifest dist,
+   - fail si chunk principal > budget.
+5. strictmode-neutrality.test.tsx:
+   - prouve absence fuite/residus apres double mount dev.
+
+Risques majeurs
+R1 - Saturation fill-rate mobile sur pile alpha/additive+bloom
+- Impact: chute FPS, chauffe, UX degradee.
+- Preuve: accumulation materiaux transparents + double couche + bloom.
+- Probabilite: elevee sur mid/low mobile.
+
+R2 - Hotspots CPU/frame (normales + trails + instancing updates)
+- Impact: jank, input latency.
+- Preuve: boucles par frame + allocations trails + compute normals repetes.
+- Probabilite: elevee quand progress/stages avancent et effets actifs.
+
+R3 - Certification incomplète en CI
+- Impact: regressions perf silencieuses.
+- Preuve: e2e non bloquant + audits avances non executes dans workflow principal.
+- Probabilite: moyenne/elevee.
+
+R4 - Bundle initial trop lourd
+- Impact: TTI degrade, cout reseau/cache.
+- Preuve: index js 1.4 MB minifie + warning Vite >500 kB.
+- Probabilite: certaine (etat present).
+
+R5 - Churn memoire (allocs trails/rebuilds conditionnels)
+- Impact: stutters intermittents GC.
+- Preuve: Float32Array.from/couleurs clone par frame + rebuild fluid structurel.
+- Probabilite: moyenne.
+
+Opportunites majeures
+O1 - Base de gouvernance deja mature
+- AST locks + contrats render + bridge audit donnent un socle fort pour une certification objective.
+
+O2 - Point d'insertion Quality Governor deja disponible
+- runtimeFlags, lightSafetyGovernor, applyTargetsToRuntime, applyMaterials, setFluidParticlesConfig forment une colonne vertebrale exploitable sans rearchitecture totale.
+
+O3 - Gain rapide possible sur CPU sans changer direction artistique
+- trails allocation fix, cadence normals, logs governance.
+
+O4 - Gain bundle important par decoupage pragmatique
+- manualChunks + lazy scene/text fluid peut reduire significativement cout initial.
+
+Feuille de route priorisee
+Phase 0 - Baseline certifiante (1-2 jours)
+Objectif
+- figer les budgets et observables.
+Actions
+1. Ajouter gate bundle budget (nouveau script + CI).
+2. Ajouter audit perf snapshot (calls/triangles/FPS) en mode non bloquant puis bloquant.
+3. Integrer validate-full/gate-render dans workflow principal CI.
+Fichiers
+- .github/workflows/ci.yml
+- scripts/gate-render.ps1
+- scripts/validate-full.ps1
+- scripts/ (nouveau gate-bundle et parse manifest)
+Benefice
+- Detection regression immediate.
+Cout relatif
+- Faible a moyen.
+Risque
+- Faible.
+
+Phase 1 - Quick wins runtime (3-5 jours)
+Objectif
+- baisser cout CPU/GPU sans changer UX cible.
+Actions
+1. Refaire trails en ring-buffer sans alloc/frame.
+2. Limiter recalcul normals (cadence adaptative / threshold deformation).
+3. Introduire profil Safe auto: desactiver trails+fluid+bloom fort sur signal perf.
+4. Reviser logs runtime en niveaux.
+Fichiers
+- src/scene/modules/orbParticles.js
+- src/scene/modules/orbGeometry.js
+- src/scene/modules/orbPoly.js
+- src/scene/RitualOrchestrator.js
+- src/components/oracle/Oracle3DScene.tsx
+Benefice
+- Gain perceptible FPS et reduction stutters.
+Cout relatif
+- Moyen.
+Risque
+- Moyen (impact rendu, necessite VRT).
+
+Phase 2 - Gouverneur qualite structurel (1-2 sprints)
+Objectif
+- pilotage multi-profils certifiable.
+Actions
+1. Definir profils Premium/Medium/Safe dans module central.
+2. Piloter dynamiquement:
+   - DPR,
+   - bloom,
+   - particles mode/count,
+   - fluid maxCount/spawnRate,
+   - veil opacity/noise.
+3. Exposer et tracer transitions de profil dans snapshot.
+Fichiers
+- src/scene/ (nouveau quality governor)
+- src/scene/RitualOrchestrator.js
+- src/components/oracle/Oracle3DScene.tsx
+- src/scene/modules/orbFluidParticles.js
+- src/scene/modules/orbParticles.js
+- src/scene/modules/orbVolumes.js
+Benefice
+- Robustesse cross-device.
+Cout relatif
+- Moyen/eleve.
+Risque
+- Moyen.
+
+Phase 3 - Bundle et chargement progressif (1 sprint)
+Objectif
+- reduire cout initial sans casser runtime 3D.
+Actions
+1. manualChunks Vite.
+2. lazy import Oracle3DScene (suspense/fallback UI).
+3. lazy import troika text manager et modules non critiques.
+Fichiers
+- vite.config.ts
+- src/components/oracle/RitualWizard.tsx
+- src/components/oracle/Oracle3DScene.tsx
+- src/scene/modules/orbTextManager.js
+Benefice
+- TTI et cache ameliores.
+Cout relatif
+- Moyen.
+Risque
+- Moyen/eleve (timing init, tests e2e/vrt a verrouiller).
+
+Tableau synthetique probleme / impact / preuve / fichier / recommandation
+| Probleme | Impact | Preuve | Fichier | Recommandation |
+|---|---|---|---|---|
+| Chunk principal monolithique >500kB | Chargement initial lourd | Build Vite: index js 1,403.70 kB + warning >500 kB | vite.config.ts, package.json, dist/assets/index-oBaczTr3.js | Ajouter manualChunks + gate bundle + lazy loading cible |
+| Absence de dynamic import applicatif | Pas de code splitting runtime | Aucun import() detecte dans src (hors tests) | src/**/* | Introduire imports differes pour scene 3D et sous-modules |
+| computeVertexNormals par frame sur plusieurs geos | CPU eleve | orbGeometry.js:493, orbPoly.js:391, orbGround.js:241 | src/scene/modules/orbGeometry.js, orbPoly.js, orbGround.js | Cadencer/reduire recalcul via dirty flags et budgets |
+| Trails allouent memoire a chaque frame | GC churn + CPU | Float32Array.from + c1.clone().lerp dans boucles | src/scene/modules/orbParticles.js:480-505 | Ring buffer prealloue + couleurs temporaires reutilisables |
+| Spatial hash liens peut exploser en cout selon count | CPU variable et pics | Boucles imbriquees voisins 27 cellules | src/scene/modules/orbParticles.js:387-451 | Adapter maxNeighbors/dist selon profil quality |
+| Stack alpha additive cumulee | Fill-rate GPU critique mobile | volume+glow+veil+particles+fluid+bloom transparents | orbVolumes.js, orbParticles.js, orbFluidParticles.js, RitualOrchestrator.js | Profils visuels Premium/Medium/Safe governes |
+| Double rendu base+overlay chaque frame | Draw calls supplementaires | renderBaseWithComposer/renderDirectLayers | src/components/oracle/Oracle3DScene.tsx:2107-2142 | Metrics budgets par mode et degradation overlay sur faible perf |
+| applyTargetsToRuntime appele 2 fois/update | Ecritures redondantes | RitualOrchestrator.js:1308 puis 1389 | src/scene/RitualOrchestrator.js | Fusionner pipeline ou clarifier necessite avec micro-benchmark |
+| CI principale n'execute pas les audits avances | Regression perf peut passer | ci.yml lance typecheck/test/build/e2e smoke seulement | .github/workflows/ci.yml | Integrer validate-full/gate-render/audits dans CI bloquante |
+| e2e smoke non bloquant | Defauts runtime non bloquants | continue-on-error: true | .github/workflows/ci.yml | Basculer en bloquant apres stabilisation courte |
+| Logging audit verbeux | Bruit, cout console, dilution signal | Multiples console.info [AUDIT], [FluidParticles] | Oracle3DScene.tsx, orbFluidParticles.js | Logger centralise a niveaux + sampling + tags |
+| StrictMode dev double mount | Cout init double potentiel | React.StrictMode + guard __ORB_ACTIVE_SCENE__ | src/main.tsx, Oracle3DScene.tsx | Test neutralite strict mode + metriques allocations |
+| Shadow map active par defaut alors lumieres sans ombres | Cout GPU evitable | renderer.shadowMap.enabled=true, castShadow false init lights | Oracle3DScene.tsx:1018, orbLighting.js:262-270 | Desactiver shadowMap tant qu'aucune lumiere castShadow active |
+| Certification memoire long-run absente | Fuites/churn non detectes tot | seulement guard dispose ponctuel | src/scene/memory-leaks.guard.test.ts | Ajouter test longue duree + seuil drift heap/VRAM |
+| Gouvernance toNonIndexed etablie mais localisee | Risque reintroduction via futur code | Tests AST/normalization orbPoly seulement | orbPoly.js + tests associes | Etendre pattern ownership geometrique a autres modules |
+
+Conclusion staff-level
+Le projet dispose deja d'une base d'architecture et de gouvernance au-dessus de la moyenne pour un moteur front 3D: separation claire scene/orchestrateur/modules, bridge audit riche, contrats AST/integration utiles, fallback feedback render-target robuste. Ce n'est pas un systeme "fragile par conception".
+
+Le point critique est maintenant industriel: transformer cette bonne gouvernance qualitative en gouvernance quantitative certifiable (budgets CPU/GPU/memoire/bundle, profils qualite dynamiques, gates CI bloquants). Sans ce passage, les regressions de charge resteront probables malgre la qualite actuelle du code.
+
+Priorite recommandee: (1) budgeter et bloquer en CI, (2) corriger hotspots CPU evidents (trails/normals), (3) deployer Quality Governor Premium/Medium/Safe, (4) decouper le bundle sans casser la chaine 3D/audit. Cette sequence maximise le ratio impact/risque et preserve l'intention visuelle du runtime.

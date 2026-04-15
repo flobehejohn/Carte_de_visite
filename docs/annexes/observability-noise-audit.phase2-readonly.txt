@@ -1,0 +1,503 @@
+1. Titre
+Audit read-only Phase 2 - reduction du bruit d observabilite (preparation implementation)
+Projet: test_unitaire/app_llmed_wt_fix
+Date: 2026-04-14
+Auteur: Codex
+
+Notation
+- [F] Fait observe
+- [H] Hypothese fondee
+- [R] Recommandation
+- [L] Limite
+
+2. Baseline utilisee
+[F] Baselines relues avant toute analyse:
+1. docs/annexes/resource-architecture-audit.txt
+2. docs/annexes/resource-architecture-audit.phase1b-certifying.txt
+
+[F] Points baseline repris comme acquis:
+- bruit observabilite present et deja identifie (Oracle3DScene, orbFluidParticles, orbLighting, ClimateController),
+- besoin d un logger gouverne (ERROR/WARN/INFO/DEBUG_AUDIT, tags, throttle/sampling),
+- anomalies critiques jamais masquees,
+- bridge audit runtime non encore parfaitement stable pour certification,
+- objectif Phase 2 = refactor logging precise, testable, non regressif.
+
+3. Objet de cette mini-phase
+[F] Cette mini-phase est strictement preparatoire.
+[F] Aucun code source, test, config ou script n a ete modifie.
+[F] Objectif: produire une matrice de migration quasi executable pour une future implementation de logger central (`isOrbVerbose`, `orbLog`, `orbWarn`, `orbError`) sans degradation des diagnostics critiques.
+
+4. Methode et commandes executees
+[F] Methode:
+- relecture baseline,
+- scan exhaustif `console.*` sur perimetre prioritaire puis fichiers coherence,
+- lecture contextuelle ligne par ligne des occurrences,
+- verification des dependances tests/bridge,
+- classification par usage/frequence/criticite,
+- redaction d un plan de migration + plan de validation.
+
+[M] Commandes principales executees (lecture seule):
+- `Get-Content docs/annexes/resource-architecture-audit.txt`
+- `Get-Content docs/annexes/resource-architecture-audit.phase1b-certifying.txt`
+- `rg -n "console\\.(log|info|warn|error|debug)" ...` sur fichiers cibles
+- `rg -n "\\[AUDIT\\]|\\[FluidParticles\\]|\\[Light\\]|\\[Climate\\]|createThrottledLogger|statusHandler|import\\.meta\\.env|MODE === 'test'" ...`
+- extractions de contexte par plage de lignes (`Get-Content` + numerotation)
+- `rg -n "__ORB_AUDIT__|snapshot\\(|ready\\(|setVisibleSafeMode|setSeed|setProgress" src -g "**/*.test.*"`
+
+[M] Comptage global sur fichiers scannes de cette mini-phase:
+- `console.*` inventoriees: 32 occurrences
+- repartition: `info=17`, `warn=12`, `error=2`, `debug=1`
+- sur 4 fichiers prioritaires seuls: 24 occurrences (`info=15`, `warn=8`, `error=1`)
+
+5. Ce que les audits precedents ont deja etabli
+[F] Les audits precedents ont deja valide:
+- architecture runtime et gouvernance globale,
+- hotspots perf et impacts bundle,
+- necessite d une gouvernance observabilite plus stricte,
+- caractere non certifiant actuel du bridge runtime live.
+
+[F] Cette phase n a pas re-audite ces sujets de fond; elle a uniquement detaille la cible observabilite Phase 2.
+
+6. Inventaire exhaustif des logs par fichier cible
+6.1 Oracle3DScene.tsx (prioritaire, 19 occurrences)
+[F] Lignes console.* detectees:
+- 1002 `warn` - echec creation WebGL (init failure, one-shot, critique runtime)
+- 1038 `warn` - `[AUDIT] WebGL context lost` (event critique, async)
+- 1178 `info` - `[AUDIT] setVisibleSafeMode` (action bridge/debug)
+- 1319 `info` - `[AUDIT] resetSceneView` (reset frequent)
+- 1335 `warn` - `[AUDIT] render-target feedback risk detected` (critique diagnostic)
+- 1340 `info` - `[AUDIT] no render-target feedback candidates` (diagnostic routine)
+- 1352 `warn` - switch vers `direct` pour bypass feedback risk (critique mitigation)
+- 1359 `warn` - feedback scan failed (anomalie diagnostic)
+- 1982 `warn` - snapshot error (anomalie audit)
+- 1992 `info` - setRenderMode (bridge control)
+- 1999 `info` - setAutoFallbackOnFeedback (bridge control)
+- 2020 `info` - setFluidParticlesVisible (bridge control)
+- 2055 `info` - setEmergencyVisibleMode true (bridge control)
+- 2065 `info` - setEmergencyVisibleMode false (bridge control)
+- 2071 `info` - setSeed (bridge control, potentiellement frequent en test)
+- 2083 `info` - setProgress (bridge control, potentiellement tres frequent)
+- 2100 `info` - bridge ready (init one-shot)
+- 2181 `error` - animate error (critique, jamais masquer)
+- 2373 `warn` - `[AUDIT 3D] Diète appliquée...` (non critique, actuellement sureleve en warn)
+
+[F] Gating/flags observes:
+- `AUDIT_RUNTIME_ENABLED = import.meta.env.DEV || import.meta.env.MODE === 'test'` (ligne 876),
+- mais plusieurs logs ne sont pas strictement encapsules par ce flag (ex: 1319, 2373).
+
+[H] Risque bruit:
+- `setProgress`, `resetSceneView`, actions bridge => bruit elevé en dev/test et scenarios auto.
+
+[R] Destination future par occurrence (synthese):
+- `NEVER_HIDE`: 1002, 1038, 1335, 1352, 1359, 2181
+- `KEEP_VISIBLE` (warn audit): 1982
+- `AUDIT_ONLY`: 1178, 1319, 1340, 1992, 1999, 2020, 2055, 2065, 2071, 2083, 2100
+- `REMOVE_OR_MERGE` (ou baisse niveau): 2373
+
+6.2 orbFluidParticles.js (prioritaire, 3 occurrences directes)
+[F] Lignes console.* detectees:
+- 43 `info` - mode simplex wrapper (one-shot a premiere utilisation)
+- 107 `info` - wrapper `log(ctx, message, level)` (point central de bruit)
+- 580 `warn` - `Simplex fallback used frequently.` (one-shot apres seuil)
+
+[F] Appels du wrapper `log(ctx, ...)`:
+- 355 reset,
+- 388 rebuild instanced mesh,
+- 447 config updated,
+- 690 compteur periodique `Particules fluide: ${count}` (toutes ~4s).
+
+[F] Frequence:
+- reset/rebuild/config: event-driven,
+- compteur particules: periodique (hot path update).
+
+[R] Destination future:
+- wrapper `log(ctx,...)` -> `orbLog` + throttle central,
+- fallback warning (580) -> `orbWarn` `NEVER_HIDE`,
+- compteur periodique -> `VERBOSE_ONLY` ou `AUDIT_ONLY` selon mode.
+
+6.3 orbLighting.js (prioritaire, 1 occurrence directe)
+[F] Ligne console.*:
+- 25 `info` dans `logStatus`, throttle 1200ms.
+
+[F] Sites appel `logStatus`:
+- 296 init default lights,
+- 347 update `sun-main`.
+
+[H] `setLightConfig('sun-main', ...)` est appele dans update orchestrator; meme throttle, ce flux reste bruyant.
+
+[R] Destination future:
+- `logStatus` -> `orbLog` + throttle/key central,
+- conserver propagation `ctx.statusHandler` (ne pas casser compat implicite).
+
+6.4 ClimateController.ts (prioritaire, 1 occurrence directe)
+[F] Ligne console.*:
+- 684 `info` `[Climate] ...` depuis `logStatus`.
+
+[F] Gating:
+- `shouldLog()` => `debug` ou `import.meta.env.DEV`,
+- throttle 1s,
+- appele depuis `update()` (hot path).
+
+[R] Destination future:
+- `orbLog` `VERBOSE_ONLY` (DEV avec flag), conserver throttle.
+
+6.5 Fichiers coherence relus
+6.5.1 RitualOrchestrator.js (2 occurrences)
+[F]
+- 295 `warn` OrbAuditBridge init bypassed (catch init),
+- 489 `warn` spawnOracle bypassed (catch reveal).
+[R] Conserver en `orbWarn` (KEEP_VISIBLE), pas de masquage.
+
+6.5.2 OrbAuditBridge.ts (0 occurrence)
+[F] Aucun `console.*`.
+[R] Ne pas introduire de logs ici en V1 Phase 2.
+
+6.5.3 orbTextManager.js (0 occurrence)
+[F] Aucun `console.*`.
+[R] Aucun changement necessaire en V1.
+
+6.5.4 useOracle.ts (0 occurrence)
+[F] Aucun `console.*`.
+[R] Aucun changement necessaire en V1.
+
+6.5.5 RitualWizard.tsx (0 occurrence)
+[F] Aucun `console.*`.
+[R] Aucun changement necessaire en V1.
+
+6.5.6 LightSafetyGovernor.ts (3 occurrences)
+[F]
+- 294 `debug`,
+- 295 `info`,
+- 296 `warn`,
+dans un helper `log()` avec guard DEV + throttle 1s.
+[R] A traiter en V1.1 (apres noyau prioritaire) pour harmonisation globale.
+
+6.5.7 zarathustraService.ts (2 occurrences)
+[F]
+- 88 `info`,
+- 93 `warn`,
+via `createThrottledLogger` (1200ms).
+[F] Appels observes: `logger.log` (invocation), `logger.warn` (guardian/oracle errors).
+[R] A traiter en V1.1 (hors noyau scene prioritaire), sans masquer erreurs metier/API.
+
+6.5.8 geminiClient.ts (1 occurrence)
+[F]
+- 143 `error` detaille, guard `isDevRuntime()`.
+[R] Conserver visible en dev; ne pas toucher en V1 scene si objectif limite au runtime 3D.
+
+7. Classification fonctionnelle des logs
+[F] Familles identifiees:
+- Initialisation:
+  - Oracle3DScene 1002, 2100
+  - orbLighting 296
+  - orbFluidParticles 43
+- Rebuild/reset:
+  - Oracle3DScene 1319
+  - orbFluidParticles 355/388/447 via wrapper ligne 107
+- Boucle/periodes:
+  - Oracle3DScene 1340 (scan feedback signature-based, periodic scan 120 frames)
+  - orbFluidParticles 690 via wrapper ligne 107
+  - orbLighting 25 (throttle 1.2s)
+  - ClimateController 684 (throttle 1s)
+  - LightSafetyGovernor 294-296 (DEV only, throttle 1s)
+- Fallback/mitigation:
+  - Oracle3DScene 1335, 1352, 1359
+  - orbFluidParticles 580
+  - RitualOrchestrator 295, 489
+- Anomalies runtime:
+  - Oracle3DScene 1038, 2181
+  - Oracle3DScene 1982
+- Diagnostic certification / bridge:
+  - Oracle3DScene 1178, 1992, 1999, 2020, 2055, 2065, 2071, 2083, 2100
+- API / erreurs externes:
+  - geminiClient 143
+  - zarathoustraService logger.warn (guardian/oracle error)
+- Verbeux pur:
+  - Oracle3DScene 2083 setProgress
+  - Oracle3DScene 1340 no feedback candidates
+  - orbFluidParticles compteur periodique
+  - orbLighting/Climate status tick logs
+- Critiques a ne jamais masquer:
+  - WebGL init fail/context lost/animate error,
+  - feedback risk + auto fallback direct,
+  - fluid simplex fallback frequent.
+
+8. Matrice KEEP_VISIBLE / VERBOSE_ONLY / AUDIT_ONLY / THROTTLE_REQUIRED / REMOVE_OR_MERGE / NEVER_HIDE
+KEEP_VISIBLE
+- Oracle3DScene: 1982 snapshot error (warn)
+- RitualOrchestrator: 295, 489 warnings de bypass catches
+- zarathoustraService: warns metier (guardian/oracle error)
+
+VERBOSE_ONLY
+- Oracle3DScene: 1319 resetSceneView, 1340 no feedback candidate
+- orbFluidParticles: compteur periodique line 690 (via wrapper 107)
+- orbLighting: statut `Updated Sun...` via logStatus
+- ClimateController: status climat line 684
+
+AUDIT_ONLY
+- Oracle3DScene bridge actions:
+  - 1178, 1992, 1999, 2020, 2055, 2065, 2071, 2083, 2100
+- logs de pilotage test/CI qui doivent etre separables du verbose utilisateur.
+
+THROTTLE_REQUIRED
+- orbFluidParticles wrapper line 107
+- orbLighting logStatus line 25
+- ClimateController logStatus line 684
+- LightSafetyGovernor log 294-296
+- (Oracle setProgress 2083 doit etre fortement echantillonne si conserve)
+
+REMOVE_OR_MERGE
+- Oracle3DScene 2373 `[AUDIT 3D] Diète appliquée...`:
+  - non anomalie,
+  - niveau `warn` injustifie,
+  - a fusionner en log audit/verbose ou supprimer.
+
+NEVER_HIDE
+- Oracle3DScene 1002 WebGL init fail
+- Oracle3DScene 1038 WebGL context lost
+- Oracle3DScene 1335 feedback risk detected
+- Oracle3DScene 1352 switch direct mitigation
+- Oracle3DScene 1359 feedback scan failed
+- Oracle3DScene 2181 animate error
+- orbFluidParticles 580 simplex fallback frequent
+- geminiClient 143 (en dev, detail erreur critique diagnostic)
+
+9. Design recommande pour orbDebug.ts
+[R] Design cible V1 (sobre, robuste):
+- centraliser decision de visibilite (verbose/audit/warn/error),
+- centraliser throttle/sampling,
+- normaliser prefix/tags,
+- interdire la logique de niveau dans les modules appelants.
+
+[R] Principes:
+- `orbError` et `orbWarn` ne cachent jamais les anomalies critiques,
+- `orbLog` est silencieux par defaut hors verbose/audit,
+- audit certifiant separe du verbose humain (2 axes distincts),
+- signature API stable pour migration progressive sans casser runtime/tests.
+
+10. Emplacement recommande et justification
+[R] Emplacement recommande: `src/shared/debug/orbDebug.ts`
+
+Justification:
+- couvre le noyau scene (Oracle3DScene + modules scene),
+- reutilisable par services (`zarathoustraService`, `geminiClient`) sans dupliquer un second utilitaire,
+- evite une migration ulterieure de `src/scene/utils` vers `shared` quand scope s etendra.
+
+[H] Si l equipe veut une V1 ultra limitee au runtime 3D uniquement, `src/scene/utils/orbDebug.ts` reste possible, mais cree une dette de relocalisation probable.
+
+11. API minimale recommandee
+[R] API V1 minimale:
+- `isOrbVerbose(): boolean`
+- `orbLog(message: string, tags?: OrbTags, opts?: OrbLogOpts): void`
+- `orbWarn(message: string, tags?: OrbTags, opts?: OrbLogOpts): void`
+- `orbError(message: string, tags?: OrbTags, opts?: OrbLogOpts): void`
+
+[R] Types minimaux proposes:
+- `OrbTags`: `{ subsystem: string; stage?: number; seed?: string; profile?: string; event?: string }`
+- `OrbLogOpts`: `{ audit?: boolean; throttleMs?: number; throttleKey?: string; neverHide?: boolean }`
+
+[R] V1.1 optionnelle (pas en V1 si scope strict):
+- `isOrbAuditMode(): boolean`
+- `orbMetric(name: string, value: number, tags?: OrbTags): void`
+
+12. Politique de visibilite par niveau
+[R] Politique cible:
+- `orbError`: toujours visible
+- `orbWarn`: visible par defaut, sauf cas explicitement non-critiques (eviter sur-usage)
+- `orbLog`: visible uniquement si `isOrbVerbose()` ou `opts.audit === true && isOrbAuditMode()`
+- `neverHide`: force emission meme si verbose/audit off (cas critiques)
+
+[R] Convention prefixage:
+- format unique: `[ORB][<subsystem>][<level>] <message>`
+- tags serialises de facon compacte (pas d objets massifs en continu).
+
+13. Politique DEV / TEST / PROD
+[R] DEV:
+- `warn/error` visibles,
+- `info` via verbose explicite,
+- mode audit activable separement du verbose.
+
+[R] TEST:
+- par defaut limiter `info` (eviter bruit CI),
+- mode audit activable pour diagnostics ciblés,
+- `warn/error` critiques conserves.
+
+[R] PROD:
+- `warn/error` visibles (anomalies),
+- `info` off par defaut,
+- aucun log periodique de confort.
+
+[R] Reponse explicite aux questions de gouvernance:
+- separer verbose humain et audit certification: OUI (obligatoire).
+- conserver certains `warn` hors verbose: OUI (critical runtime / fallback).
+- interdire futur `console.*` direct dans modules cibles: OUI (sauf orbDebug).
+- prevoir garde-fou lint/grep/test: OUI (phase validation CI).
+
+14. Risques de regression
+[L] Risque principal non fonctionnel:
+- perte de signal critique si mauvaise classification (warn -> log masquable).
+[L] Risque secondaire:
+- rupture de tests d audit si la migration touche par erreur le bridge (API `__ORB_AUDIT__`).
+[L] Risque technique:
+- wrapper logger mal implemente peut throw et impacter hot path.
+
+[R] Mitigations:
+- migration en deux passes (prioritaires puis coherence),
+- etiqueter explicitement `neverHide` pour cas critiques,
+- aucun changement de semantics runtime dans la meme PR que le logging.
+
+15. Matrice de migration fichier par fichier
+Oracle3DScene.tsx
+- Etat actuel: 19 logs directs, melange critique + audit + bruit.
+- Logs critiques: 1002, 1038, 1335, 1352, 1359, 2181.
+- Logs bruyants: 1319, 1340, 2071, 2083, etc.
+- Strategie:
+  - migrer tous `console.*` vers orbDebug,
+  - tag `subsystem='oracle3d'`,
+  - distinguer `audit:true` pour commandes bridge,
+  - retrograder 2373 (warn -> log audit/verbose).
+- Risque: moyen (fichier central + bridge audit).
+- Ordre: P1 (apres util logger + modules simples).
+
+orbFluidParticles.js
+- Etat actuel: 3 logs directs + wrapper `log(ctx,...)` multiplie les emissions.
+- Logs critiques: 580 fallback warning.
+- Logs bruyants: compteur periodique, rebuild/reset/config infos.
+- Strategie:
+  - conserver architecture wrapper (point unique),
+  - rerouter wrapper sur orbDebug,
+  - throttle central + classification verbose/audit.
+- Risque: faible/moyen.
+- Ordre: P0 (quick win fort).
+
+orbLighting.js
+- Etat actuel: 1 log direct via `logStatus` + throttle local.
+- Logs critiques: aucun.
+- Logs bruyants: status sun update periodique.
+- Strategie:
+  - rerouter `logStatus` vers orbDebug,
+  - conserver/porter throttle,
+  - garder `statusHandler`.
+- Risque: faible.
+- Ordre: P0.
+
+ClimateController.ts
+- Etat actuel: 1 log `info` per-second en DEV/debug.
+- Logs critiques: aucun.
+- Logs bruyants: status climat periodique.
+- Strategie:
+  - migrer vers orbLog verbose,
+  - conserver `shouldLog` ou le deleguer au logger (pas double-gating incoherent).
+- Risque: faible.
+- Ordre: P0.
+
+RitualOrchestrator.js
+- Etat actuel: 2 warnings catch.
+- Logs critiques: oui (bypass exceptions).
+- Strategie:
+  - migrer en orbWarn sans downgrade.
+- Risque: faible.
+- Ordre: P1.
+
+OrbAuditBridge.ts / orbTextManager.js / useOracle.ts / RitualWizard.tsx
+- Etat actuel: 0 log direct.
+- Strategie: ne pas toucher en V1.
+- Risque: nul.
+- Ordre: hors scope V1.
+
+LightSafetyGovernor.ts (coherence)
+- Etat actuel: logger DEV throttle local (debug/info/warn).
+- Strategie:
+  - option V1.1: harmoniser sur orbDebug,
+  - conserver semantics `warn` sur trigger.
+- Risque: faible.
+- Ordre: P1/P2.
+
+zarathoustraService.ts + geminiClient.ts (coherence API)
+- Etat actuel: logger throttle existant + erreur API detaillee dev.
+- Strategie:
+  - ne pas inclure en V1 scene stricte si objectif 4 fichiers,
+  - planifier V1.1 pour unifier observabilite transversale.
+- Risque: moyen (surface metier/API).
+- Ordre: P2.
+
+16. Plan de validation post-implementation
+A. Verifications statiques
+[R] Objectif:
+- reduire/supprimer `console.*` directs dans fichiers migrés,
+- verifier presence `orbWarn/orbError` pour signaux critiques.
+
+B. Verifications runtime locales
+[R] Scenarios:
+1. demarrage normal (sans erreurs)
+2. reset/seed via bridge
+3. fallback feedback risk (render mode direct)
+4. phase avancee (stage haut, fluid actif)
+5. mode verbose off/on (et audit mode si implemente)
+
+C. Non-regression existante
+[R] Cibles minimales:
+- typecheck,
+- tests Oracle3DScene audit/cycle/emergency,
+- tests render-material/transparency,
+- audits scripts runtime/render,
+- build,
+- e2e smoke pertinent.
+
+[L] Les tests existants n asserttent pas directement les messages console, mais dependen de contracts bridge/runtime. Le risque est indirect (control flow).
+
+17. Commandes PowerShell exactes a lancer plus tard
+Pre-scan (avant migration)
+1. `rg -n "console\\.(log|info|warn|error|debug)" src/components/oracle/Oracle3DScene.tsx src/scene/modules/orbFluidParticles.js src/scene/modules/orbLighting.js src/scene/params/ClimateController.ts src/scene/RitualOrchestrator.js`
+2. `rg -n "console\\.(log|info|warn|error|debug)" src/scene/safety/LightSafetyGovernor.ts src/services/zarathustraService.ts src/lib/geminiClient.ts`
+
+Post-migration statique
+3. `rg -n "console\\.(log|info|warn|error|debug)" src/components/oracle/Oracle3DScene.tsx src/scene/modules/orbFluidParticles.js src/scene/modules/orbLighting.js src/scene/params/ClimateController.ts src/scene/RitualOrchestrator.js`
+4. `rg -n "orb(Log|Warn|Error)\\(" src/components/oracle/Oracle3DScene.tsx src/scene/modules/orbFluidParticles.js src/scene/modules/orbLighting.js src/scene/params/ClimateController.ts src/scene/RitualOrchestrator.js`
+5. `rg -n "render-target feedback risk detected|switching render mode to direct|WebGL context lost|animate error|Simplex fallback used frequently" src/components/oracle/Oracle3DScene.tsx src/scene/modules/orbFluidParticles.js`
+
+Validation technique
+6. `npm run typecheck`
+7. `npx vitest run src/components/oracle/Oracle3DScene.audit.integration.test.tsx src/components/oracle/Oracle3DScene.audit.ast.test.ts src/components/oracle/Oracle3DScene.cycle.test.tsx src/components/oracle/Oracle3DScene.emergency-shell-audit.test.tsx`
+8. `npx vitest run src/scene/render/materials/applyMaterials.integration.test.ts src/scene/render/optics/transparency.test.ts src/scene/render/materials/mapClimateToRenderParams.test.ts`
+9. `npx vitest run src/scene/params/ClimateController.test.ts src/scene/params/ClimateController.foregroundOpacityMul.test.ts`
+10. `npm run build`
+11. `pwsh -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\audit-runtime.ps1`
+12. `pwsh -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\gate-render.ps1`
+13. `pwsh -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\validate-full.ps1 -Strict`
+14. `npx playwright test --project=chromium`
+
+Validation runtime manuelle (apres impl)
+15. `npm run dev`
+16. Ouvrir app puis verifier console avec verbose OFF/ON et audit mode OFF/ON selon API implementee.
+
+18. Decision finale
+Phase 2 prete a etre implementee
+
+Justification:
+[F] inventaire exhaustif etabli sur perimetre cible + coherence,
+[F] signaux critiques identifies explicitement,
+[F] plan de migration ordonne fichier par fichier,
+[F] plan de validation concret avec commandes exactes,
+[L] aucune implementation realisee ici (strict read-only).
+
+19. Feuille de route ultra-precise en 3 blocs
+Preparation
+1. Creer `src/shared/debug/orbDebug.ts` (V1 minimale).
+2. Definir policy de niveau et tags.
+3. Valider mapping categories (NEVER_HIDE / AUDIT_ONLY / VERBOSE_ONLY).
+
+Implementation
+1. Migrer orbFluidParticles.js (wrapper central).
+2. Migrer orbLighting.js.
+3. Migrer ClimateController.ts.
+4. Migrer Oracle3DScene.tsx (dernier, avec separation critique/audit/bruit).
+5. Migrer RitualOrchestrator.js.
+6. V1.1: harmoniser LightSafetyGovernor + services API.
+
+Validation
+1. Lancer scans `rg` pre/post.
+2. Lancer typecheck + vitest ciblés + build.
+3. Lancer scripts audit-runtime/gate-render/validate-full.
+4. Verifier e2e smoke.
+5. Verifier manuellement que les warnings/errors critiques restent visibles hors verbose.

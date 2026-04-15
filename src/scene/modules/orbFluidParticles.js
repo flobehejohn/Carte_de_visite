@@ -12,6 +12,7 @@ import { orbLog, orbWarn } from '../../shared/debug/orbDebug';
  *   material.opacity / transparent / depthWrite / depthTest
  * - si la config optique change, le matériau est recréé
  * - compatibilité du handle legacy ctx.fluidParticles conservée
+ * - télémétrie runtime stable exposée dans fluidParticlesState
  */
 
 const simplex = new SimplexNoise();
@@ -206,6 +207,10 @@ function ensureState(ctx) {
       lastBurst: 0,
       lastLogTime: 0,
       rebuildCount: 0,
+      activeParticleCount: 0,
+      lastUpdateMs: null,
+      avgUpdateMs: null,
+      updateCount: 0,
       fallbackWarning: false,
       fallbackHits: 0,
       lastConfigSignature: '',
@@ -219,6 +224,36 @@ function syncLegacyHandle(ctx, mesh = null) {
   if (!ctx || typeof ctx !== 'object') return mesh ?? null;
   ctx.fluidParticles = mesh ?? null;
   return ctx.fluidParticles;
+}
+
+function nowMs() {
+  if (
+    typeof performance !== 'undefined' &&
+    typeof performance.now === 'function'
+  ) {
+    return performance.now();
+  }
+  return Date.now();
+}
+
+function finalizeRuntimeUpdate(state, startedAtMs, activeParticleCount) {
+  const elapsedMs = Math.max(0, nowMs() - startedAtMs);
+
+  state.activeParticleCount = Math.max(
+    0,
+    Math.floor(Number(activeParticleCount ?? 0)),
+  );
+  state.lastUpdateMs = elapsedMs;
+  state.updateCount = Math.max(0, Number(state.updateCount ?? 0)) + 1;
+
+  if (state.updateCount === 1 || !Number.isFinite(state.avgUpdateMs)) {
+    state.avgUpdateMs = elapsedMs;
+    return;
+  }
+
+  state.avgUpdateMs =
+    (state.avgUpdateMs * (state.updateCount - 1) + elapsedMs) /
+    state.updateCount;
 }
 
 export function ensureFluidParticlesConfig(ctx) {
@@ -363,6 +398,7 @@ export function resetFluidParticles(ctx) {
   state.lastBurst = 0;
   state.lastLogTime = 0;
   state.particles.length = 0;
+  state.activeParticleCount = 0;
 
   if (state.mesh) {
     replaceMaterialIfNeeded(state, cfg);
@@ -405,6 +441,7 @@ export function buildFluidParticles(ctx) {
   state.particles = [];
   state.spawnAccumulator = 0;
   state.lastBurst = 0;
+  state.activeParticleCount = 0;
   state.rebuildCount = (state.rebuildCount || 0) + 1;
   state.lastConfigSignature = stableConfigSignature(cfg);
   state.lastOpticalSignature = opticalConfigSignature(cfg);
@@ -596,7 +633,10 @@ function applyFlowForces(p, cfg, delta, time) {
   }
 }
 
-export function updateFluidParticles(ctx, delta) {
+export function updateFluidParticles(ctx, delta = 0) {
+  const startedAtMs = nowMs();
+  const safeDelta = Math.max(0, Number(delta ?? 0));
+
   const cfg = ensureFluidParticlesConfig(ctx);
   const state = ensureState(ctx);
 
@@ -616,7 +656,10 @@ export function updateFluidParticles(ctx, delta) {
 
   if (!state.mesh) buildFluidParticles(ctx);
   const mesh = state.mesh;
-  if (!mesh) return;
+  if (!mesh) {
+    finalizeRuntimeUpdate(state, startedAtMs, 0);
+    return;
+  }
 
   replaceMaterialIfNeeded(state, cfg);
   applyMeshRenderIsolation(mesh, cfg);
@@ -625,12 +668,14 @@ export function updateFluidParticles(ctx, delta) {
   if (!cfg.enabled) {
     mesh.visible = false;
     mesh.count = 0;
+    state.activeParticleCount = 0;
+    finalizeRuntimeUpdate(state, startedAtMs, 0);
     return;
   }
 
   mesh.visible = true;
 
-  state.spawnAccumulator += (cfg.spawnRate ?? 0) * delta;
+  state.spawnAccumulator += (cfg.spawnRate ?? 0) * safeDelta;
   while (state.spawnAccumulator >= 1) {
     spawnParticle(ctx, state, cfg);
     state.spawnAccumulator -= 1;
@@ -666,24 +711,24 @@ export function updateFluidParticles(ctx, delta) {
   for (let i = state.particles.length - 1; i >= 0; i -= 1) {
     const p = state.particles[i];
 
-    p.age += delta;
+    p.age += safeDelta;
     if (p.age >= p.lifetime) {
       state.particles.splice(i, 1);
       continue;
     }
 
-    p.velocity.y += gravity * delta;
-    applyFlowForces(p, cfg, delta, time);
+    p.velocity.y += gravity * safeDelta;
+    applyFlowForces(p, cfg, safeDelta, time);
 
     const n = cfg.noise ?? 0.4;
     p.velocity.x +=
-      noise2(p.seed + time * 0.6, p.position.y * 0.9) * n * 0.06 * delta;
+      noise2(p.seed + time * 0.6, p.position.y * 0.9) * n * 0.06 * safeDelta;
     p.velocity.z +=
-      noise2(p.position.x * 0.9, p.seed + time * 0.6) * n * 0.06 * delta;
+      noise2(p.position.x * 0.9, p.seed + time * 0.6) * n * 0.06 * safeDelta;
 
     const damp = 0.985 - energy * 0.08;
     p.velocity.multiplyScalar(damp);
-    p.position.addScaledVector(p.velocity, delta);
+    p.position.addScaledVector(p.velocity, safeDelta);
 
     dummy.position.copy(p.position);
 
@@ -715,6 +760,9 @@ export function updateFluidParticles(ctx, delta) {
   mesh.count = count;
   mesh.instanceMatrix.needsUpdate = true;
   if (attr) attr.needsUpdate = true;
+
+  state.activeParticleCount = count;
+  finalizeRuntimeUpdate(state, startedAtMs, count);
 
   if (!state.lastLogTime || now - state.lastLogTime > 4) {
     log(ctx, `Particules fluide: ${count}`);

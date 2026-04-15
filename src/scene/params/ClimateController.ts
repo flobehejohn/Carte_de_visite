@@ -20,6 +20,16 @@ export type ClimateTargets = {
   };
 };
 
+export type ClimateRuntimeTelemetry = {
+  version: 'climate-runtime-v1';
+  lastProgress: number;
+  lastDtMs: number | null;
+  updateCount: number;
+  lastUpdatedAtMs: number | null;
+  targetsVersion: number;
+  lastTargetsSnapshot: ClimateTargets | null;
+};
+
 type ClimateControllerConfig = {
   seed?: string;
   debug?: boolean;
@@ -108,6 +118,7 @@ const VARIANTS = buildPresetVariants(PRESETS_BASE, {
   perBase: 12,
   seed: 'preset-v1',
 }) satisfies Record<string, ClimatePresetDef>;
+
 const PRESETS = { ...PRESETS_BASE, ...VARIANTS } satisfies Record<
   string,
   ClimatePresetDef
@@ -120,12 +131,15 @@ const DEFAULT_PRESET = PRESETS_BASE.Cendre;
 function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Number(v) || 0));
 }
+
 function clamp01(v: number) {
   return clamp(v, 0, 1);
 }
+
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t;
 }
+
 function smoothstep(a: number, b: number, t: number) {
   const x = clamp01((t - a) / (b - a));
   return x * x * (3 - 2 * x);
@@ -203,6 +217,17 @@ function alphaForSeconds(seconds: number, dtSec: number) {
   return 1 - Math.exp(-lambda * Math.max(0, dtSec));
 }
 
+function cloneTargets(targets: ClimateTargets | null): ClimateTargets | null {
+  if (!targets) return null;
+  return {
+    presetName: targets.presetName,
+    fog: { ...targets.fog },
+    bloom: { ...targets.bloom },
+    volume: { ...targets.volume },
+    opacity: { ...targets.opacity },
+  };
+}
+
 export class ClimateController {
   private seed = 'climate-default';
   private debug = false;
@@ -225,11 +250,22 @@ export class ClimateController {
   private transitionSec = { fog: 4, bloom: 5, volume: 5, opacity: 3.5 };
   private lastLogMs = 0;
 
+  private runtimeTelemetry: ClimateRuntimeTelemetry = {
+    version: 'climate-runtime-v1',
+    lastProgress: 0,
+    lastDtMs: null,
+    updateCount: 0,
+    lastUpdatedAtMs: null,
+    targetsVersion: 0,
+    lastTargetsSnapshot: null,
+  };
+
   constructor(config: ClimateControllerConfig = {}) {
     this.debug = !!config.debug;
     if (config.seed) this.seed = String(config.seed);
     this.resetRng();
     this.refreshPresets();
+    this.runtimeTelemetry.lastProgress = this.progress;
   }
 
   setSeed(seed: string) {
@@ -245,6 +281,7 @@ export class ClimateController {
 
   setProgress(t01: number) {
     this.progress = clamp01(Number(t01) || 0);
+    this.runtimeTelemetry.lastProgress = this.progress;
   }
 
   setVisualParams(visualParams: any | null) {
@@ -254,6 +291,11 @@ export class ClimateController {
   update(dtMs: number) {
     const dt = Math.max(0, Number(dtMs) || 0);
     this.timeMs += dt;
+
+    this.runtimeTelemetry.lastDtMs = dt;
+    this.runtimeTelemetry.lastProgress = this.progress;
+    this.runtimeTelemetry.updateCount += 1;
+    this.runtimeTelemetry.lastUpdatedAtMs = Date.now();
 
     this.ensurePresetSwitch();
 
@@ -265,32 +307,44 @@ export class ClimateController {
       this.targets = this.smoothTargets(this.targets, desired, dt / 1000);
     }
 
-    // 1) Safe clamp
     this.targets = this.clampTargets(this.targets);
-
-    // 2) ✅ End-dampen POST-smoothing (le point qui manquait pour ton test)
     this.targets = this.applyEndDampen(this.targets);
-
-    // 3) Re-clamp pour rester béton
     this.targets = this.clampTargets(this.targets);
+
+    this.runtimeTelemetry.targetsVersion += 1;
+    this.runtimeTelemetry.lastTargetsSnapshot = cloneTargets(this.targets);
 
     this.logStatus(this.targets);
   }
 
   getTargets(): ClimateTargets {
-    if (this.targets) return this.targets;
+    if (this.targets) {
+      return this.targets;
+    }
+
     const base = this.clampTargets(this.computeTargets());
-    return this.clampTargets(this.applyEndDampen(base));
+    const computed = this.clampTargets(this.applyEndDampen(base));
+    this.runtimeTelemetry.lastTargetsSnapshot = cloneTargets(computed);
+    return computed;
+  }
+
+  getRuntimeTelemetry(): ClimateRuntimeTelemetry {
+    return {
+      version: this.runtimeTelemetry.version,
+      lastProgress: this.runtimeTelemetry.lastProgress,
+      lastDtMs: this.runtimeTelemetry.lastDtMs,
+      updateCount: this.runtimeTelemetry.updateCount,
+      lastUpdatedAtMs: this.runtimeTelemetry.lastUpdatedAtMs,
+      targetsVersion: this.runtimeTelemetry.targetsVersion,
+      lastTargetsSnapshot: cloneTargets(
+        this.runtimeTelemetry.lastTargetsSnapshot,
+      ),
+    };
   }
 
   private applyEndDampen(targets: ClimateTargets): ClimateTargets {
     const t = clamp01(this.progress);
-
-    // 0 -> 1 entre 0.85 et 1.0
     const endPhase = smoothstep(0.85, 1.0, t);
-
-    // Assez fort pour tuer les cas limites liés au smoothing
-    // max -50% à t=1.0
     const endMul = 1 - endPhase * 0.5;
 
     return {
@@ -354,6 +408,7 @@ export class ClimateController {
       preset.fog.peak,
       preset.fog.end,
     );
+
     const llmFogRatio = this.visualParams?.fog_density;
     const llmFogDensity =
       typeof llmFogRatio === 'number' && Number.isFinite(llmFogRatio)
@@ -513,16 +568,19 @@ export class ClimateController {
     const bloomAlpha = alphaForSeconds(this.transitionSec.bloom, dtSec);
     const volumeAlpha = alphaForSeconds(this.transitionSec.volume, dtSec);
     const opacityAlpha = alphaForSeconds(this.transitionSec.opacity, dtSec);
+
     const currentForegroundOpacity =
       typeof current.opacity.foregroundOpacity === 'number' &&
       Number.isFinite(current.opacity.foregroundOpacity)
         ? current.opacity.foregroundOpacity
         : 1.0;
+
     const nextForegroundOpacity =
       typeof next.opacity.foregroundOpacity === 'number' &&
       Number.isFinite(next.opacity.foregroundOpacity)
         ? next.opacity.foregroundOpacity
         : 1.0;
+
     const hasForegroundOpacity =
       typeof current.opacity.foregroundOpacity === 'number' ||
       typeof next.opacity.foregroundOpacity === 'number';
@@ -673,15 +731,23 @@ export class ClimateController {
 
   private logStatus(targets: ClimateTargets) {
     if (!this.shouldLog()) return;
+
     const now = Date.now();
     if (now - this.lastLogMs < 1000) return;
     this.lastLogMs = now;
+
     const b = targets.bloom;
-    const msg = `preset=${targets.presetName} fog=${targets.fog.density.toFixed(4)} bloom=(${b.strength.toFixed(
-      2,
-    )},${b.radius.toFixed(2)},${b.threshold.toFixed(2)}) glow=${targets.volume.glowIntensity.toFixed(
-      2,
-    )} bg=${targets.volume.backgroundStrength.toFixed(2)}`;
+    const msg =
+      `preset=${targets.presetName} ` +
+      `fog=${targets.fog.density.toFixed(4)} ` +
+      `bloom=(${b.strength.toFixed(2)},${b.radius.toFixed(2)},${b.threshold.toFixed(2)}) ` +
+      `glow=${targets.volume.glowIntensity.toFixed(2)} ` +
+      `bg=${targets.volume.backgroundStrength.toFixed(2)} ` +
+      `dtMs=${this.runtimeTelemetry.lastDtMs ?? 'null'} ` +
+      `progress=${this.runtimeTelemetry.lastProgress.toFixed(3)} ` +
+      `updates=${this.runtimeTelemetry.updateCount} ` +
+      `targetsVersion=${this.runtimeTelemetry.targetsVersion}`;
+
     orbLog('Climate', msg, {
       audit: true,
       key: 'climate:status',

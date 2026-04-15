@@ -91,9 +91,11 @@ function damp(current, target, lambda, dt) {
 }
 
 function normalizeClampValue(candidate, fallback = null) {
-  if (typeof candidate === 'number' && Number.isFinite(candidate))
+  if (typeof candidate === 'number' && Number.isFinite(candidate)) {
     return candidate;
+  }
   if (!candidate || typeof candidate !== 'object') return fallback;
+
   const min =
     typeof candidate.min === 'number' && Number.isFinite(candidate.min)
       ? candidate.min
@@ -102,6 +104,7 @@ function normalizeClampValue(candidate, fallback = null) {
     typeof candidate.max === 'number' && Number.isFinite(candidate.max)
       ? candidate.max
       : null;
+
   if (min !== null && max !== null) return Math.min(min, max);
   if (max !== null) return max;
   if (min !== null) return min;
@@ -124,8 +127,40 @@ function isDev() {
     return false;
   }
 }
+
 function isFn(value) {
   return typeof value === 'function';
+}
+
+function nowMs() {
+  if (
+    typeof performance !== 'undefined' &&
+    typeof performance.now === 'function'
+  ) {
+    return performance.now();
+  }
+  return Date.now();
+}
+
+function elapsedMs(startMs) {
+  return Math.max(0, nowMs() - startMs);
+}
+
+function createEmptyOrchestratorTimings() {
+  return {
+    climateMs: 0,
+    applyTargetsMs: 0,
+    motionMs: 0,
+    geometryMs: 0,
+    materialsMs: 0,
+    lightsMs: 0,
+    volumeMs: 0,
+    particlesMs: 0,
+    fluidMs: 0,
+    textMs: 0,
+    auditBridgeMs: 0,
+    totalUpdateMs: 0,
+  };
 }
 
 function buildVolumeSafe(ctx) {
@@ -135,11 +170,13 @@ function buildVolumeSafe(ctx) {
   if (isFn(orbVolumes.ensureVolumeConfig)) orbVolumes.ensureVolumeConfig(ctx);
   return null;
 }
+
 function updateVolumeSafe(ctx, time = 0) {
   if (isFn(orbVolumes.updateVolumeForFrame))
     return orbVolumes.updateVolumeForFrame(ctx, time);
   return null;
 }
+
 function setVolumeConfigSafe(ctx, patch = {}) {
   if (isFn(orbVolumes.setVolumeConfig))
     return orbVolumes.setVolumeConfig(ctx, patch);
@@ -150,6 +187,7 @@ function setVolumeConfigSafe(ctx, patch = {}) {
   }
   return ctx?.volumeConfig ?? null;
 }
+
 function ensureVolumeConfigSafe(ctx) {
   if (isFn(orbVolumes.ensureVolumeConfig))
     return orbVolumes.ensureVolumeConfig(ctx);
@@ -201,6 +239,23 @@ export class RitualOrchestrator {
     this.isVRT = false;
     this.vrtTime = null;
     this._vrtWarmedUp = false;
+
+    this.ctx.runtimeTelemetry = {
+      ...(this.ctx.runtimeTelemetry || {}),
+      orchestratorUpdateCount: Number(
+        this.ctx?.runtimeTelemetry?.orchestratorUpdateCount ?? 0,
+      ),
+      lastOrchestratorDtMs: Number(
+        this.ctx?.runtimeTelemetry?.lastOrchestratorDtMs ?? 0,
+      ),
+      lastOrchestratorTime: Number(
+        this.ctx?.runtimeTelemetry?.lastOrchestratorTime ?? 0,
+      ),
+      orchestratorTimings: {
+        ...createEmptyOrchestratorTimings(),
+        ...(this.ctx?.runtimeTelemetry?.orchestratorTimings || {}),
+      },
+    };
 
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -254,7 +309,6 @@ export class RitualOrchestrator {
     this.visualState = { shape: 'tetra', detail: 0 };
     this.visualTarget = { shape: 'tetra', detail: 0 };
 
-    // --- Moteur Typographique (Citation 3D) ---
     this.textManager = new OrbTextManager(ctx.scene);
     this.textManager.loadFont();
     this.isRevealing = false;
@@ -278,7 +332,6 @@ export class RitualOrchestrator {
       },
     };
 
-    // --- SECURITÉ ABSOLUE DE L'AUDIT BRIDGE ---
     if (typeof OrbAuditBridge !== 'undefined') {
       try {
         this.ctx.orbAuditBridge = new OrbAuditBridge(this);
@@ -455,12 +508,10 @@ export class RitualOrchestrator {
     this.updateState(0, {});
   }
 
-  // --- MÉTHODE CINÉMATIQUE DE RÉVÉLATION DÉTERMINISTE ---
   triggerFinalRevelation(oracleData) {
     if (this.isRevealing) return;
     this.isRevealing = true;
 
-    // GOUVERNANCE : Extraction sécurisée
     const quote =
       oracleData?.hermeneutic?.quote ||
       oracleData?.json?.quote ||
@@ -830,8 +881,6 @@ export class RitualOrchestrator {
       flipFaces: this.rng.bool(0.2),
     };
 
-    const isAquatic = this.rng.bool(chaos * 0.6);
-
     const fluid = {
       enabled: weatherMode !== 'void' && p > 0.4,
       maxCount: Math.floor(300 + density * 800),
@@ -892,8 +941,8 @@ export class RitualOrchestrator {
     const data = this.ctx.ritualData;
     if (!data) return;
     const len = data.textLength || 0;
-    let targetScale = 1.0,
-      targetZ = 0;
+    let targetScale = 1.0;
+    let targetZ = 0;
     if (len > 300) {
       targetScale = 0.85;
       targetZ = -1.5;
@@ -909,8 +958,9 @@ export class RitualOrchestrator {
 
     if (this.isVRT && typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      if (params.has('vrtProgress'))
+      if (params.has('vrtProgress')) {
         this.progress = parseFloat(params.get('vrtProgress'));
+      }
     }
 
     const p = this.progress;
@@ -1253,6 +1303,8 @@ export class RitualOrchestrator {
   }
 
   update(time = 0) {
+    const totalUpdateStartMs = nowMs();
+
     let dt = Math.min(0.05, Math.max(0.001, time - (this.lastTime || time)));
     if (this.isVRT && this.vrtTime !== null) {
       time = this.vrtTime;
@@ -1261,10 +1313,14 @@ export class RitualOrchestrator {
     this.lastTime = time;
     const dtMs = dt * 1000;
 
+    const orchestratorTimings = createEmptyOrchestratorTimings();
+
     if (this.ctx.climateController) {
+      const climateStartMs = nowMs();
       this.ctx.climateController.setProgress(this.progress);
       this.ctx.climateController.update(dtMs);
       this.ctx.climateTargets = this.ctx.climateController.getTargets();
+      orchestratorTimings.climateMs = elapsedMs(climateStartMs);
     }
 
     const s = this.currentState;
@@ -1289,8 +1345,9 @@ export class RitualOrchestrator {
 
     const smooth = 1.8;
     for (const k in s) {
-      if (typeof s[k] === 'number')
+      if (typeof s[k] === 'number') {
         s[k] = this.isVRT ? t[k] : damp(s[k], t[k], smooth, dt);
+      }
     }
 
     if (this.isVRT) {
@@ -1329,16 +1386,24 @@ export class RitualOrchestrator {
           currentY + sy,
           currentZ,
         );
-      } else {
-        if (!this.isRevealing) {
-          this.ctx.camera.position.copy(this.baseCameraPos);
-        }
+      } else if (!this.isRevealing) {
+        this.ctx.camera.position.copy(this.baseCameraPos);
       }
     }
 
     const volumeCfg = ensureVolumeConfigSafe(this.ctx);
-    this.applyTargetsToRuntime(this.ctx, this.ctx.climateTargets);
-    this._updateMotionMode(time, dt);
+
+    {
+      const applyTargetsStartMs = nowMs();
+      this.applyTargetsToRuntime(this.ctx, this.ctx.climateTargets);
+      orchestratorTimings.applyTargetsMs += elapsedMs(applyTargetsStartMs);
+    }
+
+    {
+      const motionStartMs = nowMs();
+      this._updateMotionMode(time, dt);
+      orchestratorTimings.motionMs = elapsedMs(motionStartMs);
+    }
 
     if (this.ctx.orbGroup && g) {
       const breath = Math.sin(time * (0.8 + g.motion.energy * 1.2)) * 0.025;
@@ -1367,38 +1432,44 @@ export class RitualOrchestrator {
         Math.sin(time * 0.45) * (s.wobble + s.turbulence * 0.35);
     }
 
-    orbGeometry.setDeformAmplitude(this.ctx, {
-      base: s.deformBase,
-      pulse: s.deformPulse,
-      dislocation: s.dislocation,
-    });
-    orbGeometry.deformPolyhedron(this.ctx, time);
+    {
+      const geometryStartMs = nowMs();
 
-    const wireOpacity = s.wireOpacity;
-    this.ctx._wireVisibilityMul = this._climateWireOpacityMul ?? 1.0;
-
-    const solidOpacity = g?.geometry?.colors?.solidOpacity ?? 1.0;
-    if (this.ctx.orbGroup) {
-      this.ctx.orbGroup.children.forEach((child) => {
-        if (child.material && child.name === 'orbMesh') {
-          const finalOpacity =
-            solidOpacity * (this._climateWireOpacityMul ?? 1.0);
-          child.material.setValues({
-            opacity: finalOpacity,
-            transparent: finalOpacity < 1.0,
-          });
-        }
+      orbGeometry.setDeformAmplitude(this.ctx, {
+        base: s.deformBase,
+        pulse: s.deformPulse,
+        dislocation: s.dislocation,
       });
-    }
+      orbGeometry.deformPolyhedron(this.ctx, time);
 
-    orbGeometry.updateWireframeStyle(
-      this.ctx,
-      s.wireColor,
-      wireOpacity,
-      time,
-      this.ctx.ritualGenome?.geometry?.turbulence ?? 0.2,
-    );
-    orbPoly.updatePolyDeformation?.(this.ctx, time);
+      const wireOpacity = s.wireOpacity;
+      this.ctx._wireVisibilityMul = this._climateWireOpacityMul ?? 1.0;
+
+      const solidOpacity = g?.geometry?.colors?.solidOpacity ?? 1.0;
+      if (this.ctx.orbGroup) {
+        this.ctx.orbGroup.children.forEach((child) => {
+          if (child.material && child.name === 'orbMesh') {
+            const finalOpacity =
+              solidOpacity * (this._climateWireOpacityMul ?? 1.0);
+            child.material.setValues({
+              opacity: finalOpacity,
+              transparent: finalOpacity < 1.0,
+            });
+          }
+        });
+      }
+
+      orbGeometry.updateWireframeStyle(
+        this.ctx,
+        s.wireColor,
+        wireOpacity,
+        time,
+        this.ctx.ritualGenome?.geometry?.turbulence ?? 0.2,
+      );
+      orbPoly.updatePolyDeformation?.(this.ctx, time);
+
+      orchestratorTimings.geometryMs = elapsedMs(geometryStartMs);
+    }
 
     const drift = g?.lighting?.drift ?? 0.2;
     const p = this.progress || 0;
@@ -1418,202 +1489,254 @@ export class RitualOrchestrator {
     const safetyFactor = safety?.safetyFactor ?? 1.0;
     this.ctx.safetyFactor = safetyFactor;
 
-    this.applyTargetsToRuntime(
-      this.ctx,
-      this.ctx.climateTargets,
-      safetyFactor,
-      safety?.bloomClamp ?? null,
-    );
-
-    if (this.ctx.climateTargets) {
-      this.ctx._foregroundOpacityBase = s.foregroundOpacity;
-      this._renderMapOpts.dt = dtMs;
-
-      const prevParams = this.ctx.renderParams ?? null;
-      const rp = mapClimateToRenderParams(
+    {
+      const applyTargetsStartMs = nowMs();
+      this.applyTargetsToRuntime(
+        this.ctx,
         this.ctx.climateTargets,
-        this._renderMapOpts,
-        prevParams,
+        safetyFactor,
+        safety?.bloomClamp ?? null,
       );
-      this.ctx.renderParams = rp;
+      orchestratorTimings.applyTargetsMs += elapsedMs(applyTargetsStartMs);
+    }
 
-      const materialsRuntimeFlags = this.ctx?.runtimeFlags?.materials ?? null;
-      applyMaterials(this.ctx, rp, dtMs, materialsRuntimeFlags);
+    {
+      const materialsStartMs = nowMs();
 
-      if (this.ctx?.runtimeFlags?.emergencyMode) {
-        if (this.foregroundMesh) {
-          this.foregroundMesh.visible = false;
-        }
-      } else {
-        if (this.foregroundMesh) {
+      if (this.ctx.climateTargets) {
+        this.ctx._foregroundOpacityBase = s.foregroundOpacity;
+        this._renderMapOpts.dt = dtMs;
+
+        const prevParams = this.ctx.renderParams ?? null;
+        const rp = mapClimateToRenderParams(
+          this.ctx.climateTargets,
+          this._renderMapOpts,
+          prevParams,
+        );
+        this.ctx.renderParams = rp;
+
+        const materialsRuntimeFlags = this.ctx?.runtimeFlags?.materials ?? null;
+        applyMaterials(this.ctx, rp, dtMs, materialsRuntimeFlags);
+
+        if (this.ctx?.runtimeFlags?.emergencyMode) {
+          if (this.foregroundMesh) {
+            this.foregroundMesh.visible = false;
+          }
+        } else if (this.foregroundMesh) {
           this.foregroundMesh.visible = rp.opacity.foregroundOpacity > 0.01;
         }
       }
-    }
 
-    if (this.ctx.renderer) {
-      let finalExposure = null;
-      if (this.ctx?.runtimeFlags?.emergencyMode) {
-        finalExposure = 2.2;
-      } else {
-        let nextExposure = null;
-        if (typeof this.ctx.baseExposure === 'number') {
-          nextExposure = Math.max(1.18, this.ctx.baseExposure * safetyFactor);
+      if (this.ctx.renderer) {
+        let finalExposure = null;
+        if (this.ctx?.runtimeFlags?.emergencyMode) {
+          finalExposure = 2.2;
+        } else {
+          let nextExposure = null;
+          if (typeof this.ctx.baseExposure === 'number') {
+            nextExposure = Math.max(1.18, this.ctx.baseExposure * safetyFactor);
+          }
+          if (safety?.exposureClamp != null) {
+            const baseValue =
+              typeof nextExposure === 'number'
+                ? nextExposure
+                : this.ctx.renderer.toneMappingExposure;
+            nextExposure =
+              typeof baseValue === 'number'
+                ? Math.min(baseValue, safety.exposureClamp)
+                : safety.exposureClamp;
+          }
+          if (typeof nextExposure === 'number') {
+            finalExposure = nextExposure;
+          }
         }
-        if (safety?.exposureClamp != null) {
-          const baseValue =
-            typeof nextExposure === 'number'
-              ? nextExposure
-              : this.ctx.renderer.toneMappingExposure;
-          nextExposure =
-            typeof baseValue === 'number'
-              ? Math.min(baseValue, safety.exposureClamp)
-              : safety.exposureClamp;
-        }
-        if (typeof nextExposure === 'number') {
-          finalExposure = nextExposure;
-        }
-      }
-      if (finalExposure !== null) {
-        this.ctx.renderer.toneMappingExposure = finalExposure;
-      }
-    }
-
-    const keyIntensity = Math.min(3.5, baseKeyIntensity * safetyFactor);
-    const fillIntensity = Math.min(1.2, baseFillIntensity * safetyFactor);
-    const rimIntensity = Math.min(2.0, baseRimIntensity * safetyFactor);
-
-    const sunPos = {
-      x: 5.6 + Math.sin(time * drift) * 2.2,
-      y: 3.2 + Math.cos(time * drift * 1.1) * 1.2,
-      z: 1.0 + Math.sin(time * drift * 0.7) * 1.2,
-    };
-
-    const warm = g?.lighting?.warmth ?? 0.0;
-    const keyColor = s.lightColor.clone().offsetHSL(warm, 0.0, 0.0);
-
-    orbLighting.setLightConfig(this.ctx, 'sun-main', {
-      intensity: keyIntensity,
-      color: keyColor,
-      position: sunPos,
-    });
-    orbLighting.setLightConfig(this.ctx, 'fill-hemi', {
-      intensity: fillIntensity,
-      color: s.lightColor.clone().multiplyScalar(0.9),
-      groundColor: s.bgColor.clone().multiplyScalar(0.9),
-    });
-    orbLighting.setLightConfig(this.ctx, 'rim-point', {
-      intensity: rimIntensity,
-      color:
-        g?.palette?.accent?.clone?.().multiplyScalar(0.9) ??
-        s.lightColor.clone().multiplyScalar(0.9),
-      position: { x: -3.4, y: 2.0, z: -4.4 },
-    });
-
-    orbLighting.updateLightsForFrame(this.ctx, time);
-
-    const baseGlowIntensity =
-      typeof volumeCfg?.glowIntensity === 'number'
-        ? volumeCfg.glowIntensity
-        : s.glowIntensity;
-    const baseBackgroundStrength =
-      typeof volumeCfg?.backgroundStrength === 'number'
-        ? volumeCfg.backgroundStrength
-        : s.backgroundStrength;
-
-    if (volumeCfg) {
-      volumeCfg.glowIntensity = Math.min(
-        1.5,
-        baseGlowIntensity + flashAdd * 0.12 * safetyFactor,
-      );
-      volumeCfg.backgroundStrength = Math.max(
-        0,
-        baseBackgroundStrength + Math.sin(time * 0.5) * 0.035 * safetyFactor,
-      );
-    }
-
-    updateVolumeSafe(this.ctx, time);
-
-    if (orbParticles.animateParticles) {
-      const turb =
-        (this.ctx.ritualGenome?.geometry?.turbulence ?? 0.2) *
-        this.ritualDNA.noiseScale;
-      orbParticles.animateParticles(this.ctx, time, turb);
-    }
-
-    orbParticles.updateParticleLinks?.(this.ctx);
-    orbParticles.updateParticleTrails?.(this.ctx);
-
-    if (this.isVRT && !this._vrtWarmedUp) {
-      this._vrtWarmedUp = true;
-      for (let i = 0; i < 150; i++) {
-        orbFluidParticles.updateFluidParticles?.(this.ctx, 0.016);
-      }
-    }
-
-    orbFluidParticles.updateFluidParticles?.(this.ctx, dt);
-
-    if (this.foregroundMesh) {
-      this.foregroundMesh.rotation.z = time * 0.02;
-      if (this.foregroundMesh.material.userData?.shader) {
-        this.foregroundMesh.material.userData.shader.uniforms.uTime.value =
-          time;
-        this.foregroundMesh.material.userData.shader.uniforms.uChaos.value =
-          s.veilChaos;
-        if (this.foregroundMesh.material.userData.shader.uniforms.uColor) {
-          this.foregroundMesh.material.userData.shader.uniforms.uColor.value.copy(
-            s.lightColor,
-          );
+        if (finalExposure !== null) {
+          this.ctx.renderer.toneMappingExposure = finalExposure;
         }
       }
+
+      orchestratorTimings.materialsMs = elapsedMs(materialsStartMs);
     }
 
-    orbGround?.updateGroundDeformation?.(this.ctx, time);
-    orbText.updateOrbTextForFrame?.(this.ctx, this.progress, s.veilChaos);
+    {
+      const lightsStartMs = nowMs();
 
-    // --- ANIMATION TEXTE 3D ---
-    if (this.isRevealing && this.textManager) {
-      try {
-        if (typeof this.textManager.animateReveal === 'function') {
-          this.textManager.animateReveal(dt);
-        }
-      } catch (e) {
-        // GOUVERNANCE : Silence intercepté pour ne pas briser la boucle de rendu 60fps
+      const keyIntensity = Math.min(3.5, baseKeyIntensity * safetyFactor);
+      const fillIntensity = Math.min(1.2, baseFillIntensity * safetyFactor);
+      const rimIntensity = Math.min(2.0, baseRimIntensity * safetyFactor);
+
+      const sunPos = {
+        x: 5.6 + Math.sin(time * drift) * 2.2,
+        y: 3.2 + Math.cos(time * drift * 1.1) * 1.2,
+        z: 1.0 + Math.sin(time * drift * 0.7) * 1.2,
+      };
+
+      const warm = g?.lighting?.warmth ?? 0.0;
+      const keyColor = s.lightColor.clone().offsetHSL(warm, 0.0, 0.0);
+
+      orbLighting.setLightConfig(this.ctx, 'sun-main', {
+        intensity: keyIntensity,
+        color: keyColor,
+        position: sunPos,
+      });
+      orbLighting.setLightConfig(this.ctx, 'fill-hemi', {
+        intensity: fillIntensity,
+        color: s.lightColor.clone().multiplyScalar(0.9),
+        groundColor: s.bgColor.clone().multiplyScalar(0.9),
+      });
+      orbLighting.setLightConfig(this.ctx, 'rim-point', {
+        intensity: rimIntensity,
+        color:
+          g?.palette?.accent?.clone?.().multiplyScalar(0.9) ??
+          s.lightColor.clone().multiplyScalar(0.9),
+        position: { x: -3.4, y: 2.0, z: -4.4 },
+      });
+
+      orbLighting.updateLightsForFrame(this.ctx, time);
+
+      orchestratorTimings.lightsMs = elapsedMs(lightsStartMs);
+    }
+
+    {
+      const volumeStartMs = nowMs();
+
+      const baseGlowIntensity =
+        typeof volumeCfg?.glowIntensity === 'number'
+          ? volumeCfg.glowIntensity
+          : s.glowIntensity;
+      const baseBackgroundStrength =
+        typeof volumeCfg?.backgroundStrength === 'number'
+          ? volumeCfg.backgroundStrength
+          : s.backgroundStrength;
+
+      if (volumeCfg) {
+        volumeCfg.glowIntensity = Math.min(
+          1.5,
+          baseGlowIntensity + flashAdd * 0.12 * safetyFactor,
+        );
+        volumeCfg.backgroundStrength = Math.max(
+          0,
+          baseBackgroundStrength + Math.sin(time * 0.5) * 0.035 * safetyFactor,
+        );
       }
 
-      // GOUVERNANCE : Extraction hyper-sécurisée du progress pour éviter un crash de la boucle render
-      if (typeof window !== 'undefined' && window.__ORACLE_3D_STATE__) {
-        let currentP = window.__ORACLE_3D_STATE__.progress || 0;
-        let extP = null;
+      updateVolumeSafe(this.ctx, time);
+
+      orchestratorTimings.volumeMs = elapsedMs(volumeStartMs);
+    }
+
+    {
+      const particlesStartMs = nowMs();
+
+      if (orbParticles.animateParticles) {
+        const turb =
+          (this.ctx.ritualGenome?.geometry?.turbulence ?? 0.2) *
+          this.ritualDNA.noiseScale;
+        orbParticles.animateParticles(this.ctx, time, turb);
+      }
+
+      orbParticles.updateParticleLinks?.(this.ctx);
+      orbParticles.updateParticleTrails?.(this.ctx);
+
+      orchestratorTimings.particlesMs = elapsedMs(particlesStartMs);
+    }
+
+    {
+      const fluidStartMs = nowMs();
+
+      if (this.isVRT && !this._vrtWarmedUp) {
+        this._vrtWarmedUp = true;
+        for (let i = 0; i < 150; i++) {
+          orbFluidParticles.updateFluidParticles?.(this.ctx, 0.016);
+        }
+      }
+
+      orbFluidParticles.updateFluidParticles?.(this.ctx, dt);
+
+      orchestratorTimings.fluidMs = elapsedMs(fluidStartMs);
+    }
+
+    {
+      const textStartMs = nowMs();
+
+      if (this.foregroundMesh) {
+        this.foregroundMesh.rotation.z = time * 0.02;
+        if (this.foregroundMesh.material.userData?.shader) {
+          this.foregroundMesh.material.userData.shader.uniforms.uTime.value =
+            time;
+          this.foregroundMesh.material.userData.shader.uniforms.uChaos.value =
+            s.veilChaos;
+          if (this.foregroundMesh.material.userData.shader.uniforms.uColor) {
+            this.foregroundMesh.material.userData.shader.uniforms.uColor.value.copy(
+              s.lightColor,
+            );
+          }
+        }
+      }
+
+      orbGround?.updateGroundDeformation?.(this.ctx, time);
+      orbText.updateOrbTextForFrame?.(this.ctx, this.progress, s.veilChaos);
+
+      if (this.isRevealing && this.textManager) {
         try {
-          extP =
-            this.textManager.revealProgress?.value ?? this.textManager.progress;
-        } catch (e) {}
+          if (typeof this.textManager.animateReveal === 'function') {
+            this.textManager.animateReveal(dt);
+          }
+        } catch {
+          // silence volontaire
+        }
 
-        // GOUVERNANCE : On force l'avancement minimal (dt * 0.25) pour empêcher le blocage
-        let fallbackP = currentP + dt * 0.25;
-        let finalP =
-          typeof extP === 'number' && !isNaN(extP) && extP > fallbackP
-            ? extP
-            : fallbackP;
+        if (typeof window !== 'undefined' && window.__ORACLE_3D_STATE__) {
+          let currentP = window.__ORACLE_3D_STATE__.progress || 0;
+          let extP = null;
+          try {
+            extP =
+              this.textManager.revealProgress?.value ??
+              this.textManager.progress;
+          } catch {}
 
-        window.__ORACLE_3D_STATE__.progress = Math.min(1.0, finalP);
+          const fallbackP = currentP + dt * 0.25;
+          const finalP =
+            typeof extP === 'number' && !isNaN(extP) && extP > fallbackP
+              ? extP
+              : fallbackP;
+
+          window.__ORACLE_3D_STATE__.progress = Math.min(1.0, finalP);
+        }
       }
+
+      orchestratorTimings.textMs = elapsedMs(textStartMs);
     }
 
-    // --- MISE À JOUR DE L'AUDIT BRIDGE ---
-    if (
-      typeof window !== 'undefined' &&
-      typeof OrbAuditBridge !== 'undefined'
-    ) {
+    {
+      const auditBridgeStartMs = nowMs();
+
       if (
-        this.ctx.orbAuditBridge &&
-        typeof this.ctx.orbAuditBridge.captureRuntimeState === 'function'
+        typeof window !== 'undefined' &&
+        typeof OrbAuditBridge !== 'undefined'
       ) {
-        this.ctx.orbAuditBridge.captureRuntimeState();
-      } else if (typeof OrbAuditBridge.captureRuntimeState === 'function') {
-        OrbAuditBridge.captureRuntimeState(this.ctx);
+        if (
+          this.ctx.orbAuditBridge &&
+          typeof this.ctx.orbAuditBridge.captureRuntimeState === 'function'
+        ) {
+          this.ctx.orbAuditBridge.captureRuntimeState();
+        } else if (typeof OrbAuditBridge.captureRuntimeState === 'function') {
+          OrbAuditBridge.captureRuntimeState(this.ctx);
+        }
       }
+
+      orchestratorTimings.auditBridgeMs = elapsedMs(auditBridgeStartMs);
     }
+
+    orchestratorTimings.totalUpdateMs = elapsedMs(totalUpdateStartMs);
+
+    this.ctx.runtimeTelemetry = {
+      ...(this.ctx.runtimeTelemetry || {}),
+      orchestratorUpdateCount:
+        Number(this.ctx?.runtimeTelemetry?.orchestratorUpdateCount ?? 0) + 1,
+      lastOrchestratorDtMs: dtMs,
+      lastOrchestratorTime: time,
+      orchestratorTimings,
+    };
   }
 }

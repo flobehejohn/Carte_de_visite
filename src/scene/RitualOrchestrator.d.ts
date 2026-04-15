@@ -1,5 +1,20 @@
 import * as THREE from 'three';
 
+export type RitualOrchestratorTimings = {
+  climateMs: number;
+  applyTargetsMs: number;
+  motionMs: number;
+  geometryMs: number;
+  materialsMs: number;
+  lightsMs: number;
+  volumeMs: number;
+  particlesMs: number;
+  fluidMs: number;
+  textMs: number;
+  auditBridgeMs: number;
+  totalUpdateMs: number;
+};
+
 export class RitualOrchestrator {
   constructor(ctx: any);
 
@@ -49,7 +64,6 @@ export class RitualOrchestrator {
   vrtTime: number | null;
   _vrtWarmedUp: boolean;
 
-  // --- Propriétés Typographiques / Cinématiques ---
   textManager: any;
   isRevealing: boolean;
   targetCameraZ: number;
@@ -57,8 +71,6 @@ export class RitualOrchestrator {
   initRitual(userName?: string, options?: any): void;
   setMood(moodName: string): void;
   setRitualData(payload?: any): void;
-
-  // --- Méthode Cinématique ---
   triggerFinalRevelation(oracleData: any): void;
 
   _buildGenome(options: { progress: number; payload: any }): any;

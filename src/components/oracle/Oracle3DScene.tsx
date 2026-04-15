@@ -170,6 +170,21 @@ type FluidParticlesConfigType = {
   opacityMul?: number;
 };
 
+type FrameWindowStats = {
+  sampleCount: number;
+  meanFrameTime: number | null;
+  worstFrameTime: number | null;
+  p50: number | null;
+  p95: number | null;
+  p99: number | null;
+  avgFpsWindow: number | null;
+};
+
+type RuntimeCounters = {
+  resetCount: number;
+  reinitCount: number;
+};
+
 const MATERIAL_TEXTURE_KEYS = [
   'map',
   'alphaMap',
@@ -196,6 +211,8 @@ const MATERIAL_TEXTURE_KEYS = [
   'iridescenceThicknessMap',
   'anisotropyMap',
 ] as const;
+
+const FRAME_WINDOW_MAX_SAMPLES = 180;
 
 function materialArray(
   material: THREE.Material | THREE.Material[] | undefined,
@@ -542,6 +559,115 @@ function sumRenderTelemetry(
   };
 }
 
+function safeGetRendererPixelRatio(renderer: THREE.WebGLRenderer): number {
+  const candidate = (renderer as any)?.getPixelRatio;
+  if (typeof candidate === 'function') {
+    try {
+      const value = Number(candidate.call(renderer));
+      if (Number.isFinite(value) && value > 0) return value;
+    } catch {
+      // noop
+    }
+  }
+
+  return 1;
+}
+
+function safeGetRendererSize(renderer: THREE.WebGLRenderer): {
+  w: number;
+  h: number;
+} {
+  const candidate = (renderer as any)?.getSize;
+  if (typeof candidate === 'function') {
+    try {
+      const size = new THREE.Vector2();
+      candidate.call(renderer, size);
+      if (Number.isFinite(size.x) && Number.isFinite(size.y)) {
+        return { w: size.x, h: size.y };
+      }
+    } catch {
+      // noop
+    }
+  }
+
+  const canvas = renderer.domElement;
+  return {
+    w: Number(canvas?.width || canvas?.clientWidth || 0),
+    h: Number(canvas?.height || canvas?.clientHeight || 0),
+  };
+}
+
+function percentile(sorted: number[], ratio: number): number | null {
+  if (sorted.length === 0) return null;
+  const index = Math.min(
+    sorted.length - 1,
+    Math.max(0, Math.ceil(sorted.length * ratio) - 1),
+  );
+  const value = sorted[index];
+  return Number.isFinite(value) ? value : null;
+}
+
+function computeFrameWindowStats(samples: number[]): FrameWindowStats {
+  const valid = samples.filter((value) => Number.isFinite(value) && value >= 0);
+  if (valid.length === 0) {
+    return {
+      sampleCount: 0,
+      meanFrameTime: null,
+      worstFrameTime: null,
+      p50: null,
+      p95: null,
+      p99: null,
+      avgFpsWindow: null,
+    };
+  }
+
+  const sorted = [...valid].sort((a, b) => a - b);
+  const sum = valid.reduce((acc, value) => acc + value, 0);
+  const meanFrameTime = sum / valid.length;
+  const worstFrameTime = sorted[sorted.length - 1];
+  const avgFpsWindow = meanFrameTime > 0 ? 1000 / meanFrameTime : null;
+
+  return {
+    sampleCount: valid.length,
+    meanFrameTime,
+    worstFrameTime,
+    p50: percentile(sorted, 0.5),
+    p95: percentile(sorted, 0.95),
+    p99: percentile(sorted, 0.99),
+    avgFpsWindow,
+  };
+}
+
+function estimateProfileCost(input: {
+  drawCalls: number;
+  triangles: number;
+  points: number;
+  lines: number;
+  dpr: number;
+  bloomEnabled: boolean;
+  fogEnabled: boolean;
+  fluidParticleCount: number;
+}): number {
+  const primitiveScore =
+    input.triangles / 150_000 + input.points / 80_000 + input.lines / 60_000;
+
+  const drawCallScore = input.drawCalls / 250;
+  const dprScore = Math.max(0, input.dpr - 1);
+  const bloomScore = input.bloomEnabled ? 0.75 : 0;
+  const fogScore = input.fogEnabled ? 0.15 : 0;
+  const fluidScore = input.fluidParticleCount / 15_000;
+
+  const total =
+    drawCallScore +
+    primitiveScore +
+    dprScore +
+    bloomScore +
+    fogScore +
+    fluidScore;
+
+  return Number(total.toFixed(3));
+}
+
 function collectSceneStats(
   scene: THREE.Scene,
   localCtx: any,
@@ -690,10 +816,11 @@ function resolvePassName(pass: any): string {
 }
 
 function collectActivePasses(composer: EffectComposer | null): string[] {
-  if (!composer || !composer.passes) return [];
-  return composer.passes
-    .filter((p) => p.enabled)
-    .map((p) => resolvePassName(p));
+  const passes = (composer as any)?.passes;
+  if (!composer || !Array.isArray(passes)) return [];
+  return passes
+    .filter((p: any) => p?.enabled)
+    .map((p: any) => resolvePassName(p));
 }
 
 function countSceneGraphTypes(scene: THREE.Scene): SceneGraphMetrics[] {
@@ -715,8 +842,8 @@ function buildUiWindowAudit(
   scene: THREE.Scene,
   visibleSafeMode: boolean,
 ): UiWindowAudit {
-  const size = new THREE.Vector2();
-  renderer.getSize(size);
+  const size = safeGetRendererSize(renderer);
+
   return {
     renderMode: resolveRenderMode(composer, bloomPass),
     visibleSafeMode,
@@ -725,9 +852,9 @@ function buildUiWindowAudit(
       overlay: ORB_OVERLAY_RENDER_LAYER,
     },
     resolution: {
-      w: size.x,
-      h: size.y,
-      pixelRatio: renderer.getPixelRatio(),
+      w: size.w,
+      h: size.h,
+      pixelRatio: safeGetRendererPixelRatio(renderer),
     },
     postprocessing: {
       composerExists: composer !== null,
@@ -735,9 +862,9 @@ function buildUiWindowAudit(
       bloomEnabled: bloomPass !== null && bloomPass.enabled,
       bloomParams: bloomPass
         ? {
-            threshold: bloomPass.threshold,
-            strength: bloomPass.strength,
-            radius: bloomPass.radius,
+            threshold: (bloomPass as any).threshold,
+            strength: (bloomPass as any).strength,
+            radius: (bloomPass as any).radius,
           }
         : undefined,
     },
@@ -750,19 +877,9 @@ function buildUiWindowAudit(
   };
 }
 
-function materialColor(
-  material: THREE.Material | undefined,
-): THREE.ColorRepresentation {
-  const candidate = (material as any)?.color;
-  if (candidate && typeof candidate === 'object' && candidate.isColor) {
-    return candidate.clone();
-  }
-  return 0xffffff;
-}
-
 function createVisibleSafeMaterial(
   obj: DrawableObject,
-  sourceMaterial: THREE.Material,
+  _sourceMaterial: THREE.Material,
 ): THREE.Material {
   const brightMeshColor = 0xff00ff;
   const brightLineColor = 0x00ffff;
@@ -883,6 +1000,8 @@ export function Oracle3DScene({
   result,
   progress,
 }: Oracle3DSceneProps) {
+  void progress;
+
   const rootRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const orchestratorRef = useRef<RitualOrchestrator | null>(null);
@@ -921,8 +1040,12 @@ export function Oracle3DScene({
   const overlayRenderTelemetryRef = useRef<RenderTelemetryInfo | null>(null);
   const lastFrameModeRef = useRef<RenderMode | null>(null);
   const renderedFramesRef = useRef(0);
+  const frameWindowRef = useRef<number[]>([]);
+  const runtimeCountersRef = useRef<RuntimeCounters>({
+    resetCount: 0,
+    reinitCount: 0,
+  });
 
-  // CLOCK REFS
   const lastTimeRef = useRef<number>(0);
   const clockRef = useRef(new THREE.Clock());
 
@@ -1013,7 +1136,6 @@ export function Oracle3DScene({
     renderer.setClearColor(0x111624, 1.0);
     renderer.autoClear = false;
     renderer.localClippingEnabled = false;
-
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.toneMapping = THREE.ReinhardToneMapping;
     renderer.toneMappingExposure = 1.6;
@@ -1066,7 +1188,7 @@ export function Oracle3DScene({
     });
 
     const composer = new EffectComposer(renderer, renderTarget);
-    composer.renderToScreen = true;
+    (composer as any).renderToScreen = true;
     composer.addPass(renderScene);
     composer.addPass(bloomPass);
 
@@ -1112,6 +1234,11 @@ export function Oracle3DScene({
       runtimeFlags: {
         emergencyMode: false,
       },
+      runtimeTelemetry: {
+        frameWindowMs: frameWindowRef.current,
+        counters: runtimeCountersRef.current,
+        snapshotVersion: 'scene-rich-v2',
+      },
     };
 
     ensureOverlayFluidIsolationConfig(ctx);
@@ -1143,6 +1270,11 @@ export function Oracle3DScene({
 
     const orchestrator = new RitualOrchestrator(ctx);
     orchestratorRef.current = orchestrator;
+
+    const callInitRitual = (seed: string) => {
+      runtimeCountersRef.current.reinitCount += 1;
+      orchestrator.initRitual(seed);
+    };
 
     const applyVisibleSafeMode = (enabled: boolean) => {
       const localCtx = (orchestratorRef.current as any)?.ctx;
@@ -1211,8 +1343,9 @@ export function Oracle3DScene({
             ? volumeState.glowMesh.visible
             : null,
         foregroundVisible:
-          typeof orchestratorRef.current?.foregroundMesh?.visible === 'boolean'
-            ? orchestratorRef.current.foregroundMesh.visible
+          typeof (orchestratorRef.current as any)?.foregroundMesh?.visible ===
+          'boolean'
+            ? (orchestratorRef.current as any).foregroundMesh.visible
             : null,
       };
     };
@@ -1235,8 +1368,8 @@ export function Oracle3DScene({
         volumeState.backgroundMesh.visible = false;
       if (volumeState.glowMesh) volumeState.glowMesh.visible = false;
 
-      if (orchestratorRef.current?.foregroundMesh) {
-        orchestratorRef.current.foregroundMesh.visible = false;
+      if ((orchestratorRef.current as any)?.foregroundMesh) {
+        (orchestratorRef.current as any).foregroundMesh.visible = false;
       }
     };
 
@@ -1267,10 +1400,10 @@ export function Oracle3DScene({
       }
 
       if (
-        orchestratorRef.current?.foregroundMesh &&
+        (orchestratorRef.current as any)?.foregroundMesh &&
         previous.foregroundVisible !== null
       ) {
-        orchestratorRef.current.foregroundMesh.visible =
+        (orchestratorRef.current as any).foregroundMesh.visible =
           previous.foregroundVisible;
       }
 
@@ -1292,7 +1425,7 @@ export function Oracle3DScene({
     };
 
     if (!initRitualRef.current) {
-      orchestrator.initRitual('');
+      callInitRitual('');
       initRitualRef.current = true;
     }
 
@@ -1300,6 +1433,7 @@ export function Oracle3DScene({
       const localCtx = (orchestratorRef.current as any)?.ctx;
       if (!localCtx) return;
 
+      runtimeCountersRef.current.resetCount += 1;
       frameCountRef.current = 0;
       feedbackCandidatesRef.current = [];
       feedbackSignatureRef.current = '';
@@ -1309,6 +1443,7 @@ export function Oracle3DScene({
       overlayRenderTelemetryRef.current = null;
       lastFrameModeRef.current = null;
       renderedFramesRef.current = 0;
+      frameWindowRef.current = [];
 
       ensureOverlayFluidIsolationConfig(localCtx);
       resetFluidParticles(localCtx);
@@ -1530,12 +1665,15 @@ export function Oracle3DScene({
           };
 
           if (orbShell.present) {
-            if (orbShell.auditCategory !== 'orb-solid')
+            if (orbShell.auditCategory !== 'orb-solid') {
               warnings.push('orb-shell-missing-audit-category');
-            if (orbShell.layerMask !== 1)
+            }
+            if (orbShell.layerMask !== 1) {
               warnings.push('orb-shell-invalid-layer');
-            if (orbShell.frustumCulled !== false)
+            }
+            if (orbShell.frustumCulled !== false) {
               warnings.push('orb-shell-invalid-culling');
+            }
           } else {
             warnings.push('orb-shell-missing');
           }
@@ -1552,6 +1690,7 @@ export function Oracle3DScene({
           const lights = getLightsSnapshot
             ? getLightsSnapshot(localCtx as any)
             : [];
+
           const volumeConfig = localCtx.volumeConfig
             ? serializeColors(localCtx.volumeConfig)
             : null;
@@ -1737,10 +1876,16 @@ export function Oracle3DScene({
             volumeEffective?.glowIntensity,
           );
 
-          const uiWindow: any = {};
+          const uiWindow = buildUiWindowAudit(
+            renderer,
+            composer,
+            bloomPass,
+            scene,
+            visibleSafeModeRef.current,
+          ) as UiWindowAudit & Record<string, unknown>;
 
           if (scene.fog) {
-            uiWindow.fog = {
+            (uiWindow as any).fog = {
               type: (scene.fog as any).isFogExp2 ? 'FogExp2' : 'Fog',
               enabled: true,
               density: (scene.fog as any).density ?? null,
@@ -1750,7 +1895,7 @@ export function Oracle3DScene({
             };
             numCheck('fogDensity', (scene.fog as any).density, 0, 2);
           } else {
-            uiWindow.fog = {
+            (uiWindow as any).fog = {
               enabled: false,
               density: null,
               near: null,
@@ -1762,18 +1907,19 @@ export function Oracle3DScene({
           }
 
           uiWindow.renderMode = renderModeRef.current;
-          uiWindow.autoFallbackOnFeedback = autoFallbackOnFeedbackRef.current;
+          (uiWindow as any).autoFallbackOnFeedback =
+            autoFallbackOnFeedbackRef.current;
           uiWindow.visibleSafeMode = visibleSafeModeRef.current;
-          uiWindow.emergencyVisibleMode =
+          (uiWindow as any).emergencyVisibleMode =
             emergencyVisualStateRef.current.active;
-          uiWindow.feedbackCandidates = feedbackCandidatesRef.current;
-          uiWindow.layers = {
+          (uiWindow as any).feedbackCandidates = feedbackCandidatesRef.current;
+          (uiWindow as any).layers = {
             composerBase: ORB_BASE_RENDER_LAYER,
             overlay: ORB_OVERLAY_RENDER_LAYER,
           };
 
           if (localCtx.bloomPass) {
-            uiWindow.blur = {
+            (uiWindow as any).blur = {
               type: 'bloom-proxy',
               enabled:
                 renderModeRef.current !== 'direct' &&
@@ -1786,7 +1932,7 @@ export function Oracle3DScene({
               note: 'proxy bloom on base layer only',
             };
           } else {
-            uiWindow.blur = {
+            (uiWindow as any).blur = {
               type: 'none',
               enabled: false,
               radius: null,
@@ -1820,6 +1966,8 @@ export function Oracle3DScene({
             let minTh = Infinity;
             let maxTh = -Infinity;
             let count = 0;
+            let roughnessCount = 0;
+            let metalnessCount = 0;
 
             materials.forEach((m: any) => {
               const t = typeof m.transmission === 'number' ? m.transmission : 0;
@@ -1831,8 +1979,14 @@ export function Oracle3DScene({
               sumT += t;
               sumO += o;
               sumTh += th;
-              if (r !== null) sumR += r;
-              if (me !== null) sumM += me;
+              if (r !== null) {
+                sumR += r;
+                roughnessCount += 1;
+              }
+              if (me !== null) {
+                sumM += me;
+                metalnessCount += 1;
+              }
 
               minT = Math.min(minT, t);
               maxT = Math.max(maxT, t);
@@ -1860,12 +2014,12 @@ export function Oracle3DScene({
               maxOpacity: maxO,
               minThickness: minTh,
               maxThickness: maxTh,
-              avgRoughness: count ? sumR / count : null,
-              avgMetalness: count ? sumM / count : null,
+              avgRoughness: roughnessCount > 0 ? sumR / roughnessCount : null,
+              avgMetalness: metalnessCount > 0 ? sumM / metalnessCount : null,
             };
           };
 
-          uiWindow.translucidity = collectTranslucidity() || {
+          (uiWindow as any).translucidity = collectTranslucidity() || {
             enabled: false,
             transmission: null,
             opacity: null,
@@ -1873,7 +2027,7 @@ export function Oracle3DScene({
             note: 'no translucent materials',
           };
 
-          uiWindow.postprocess = {
+          (uiWindow as any).postprocess = {
             bloomStrength: localCtx.bloomPass?.strength ?? null,
             toneMapping: localCtx.renderer?.toneMapping ?? null,
             toneMappingExposure:
@@ -1895,7 +2049,7 @@ export function Oracle3DScene({
             if (localCtx.volumeState?.glowMesh?.visible) {
               warnings.push('emergency-mode-glow-restored');
             }
-            if (orchestratorRef.current?.foregroundMesh?.visible) {
+            if ((orchestratorRef.current as any)?.foregroundMesh?.visible) {
               warnings.push('emergency-mode-foreground-restored');
             }
           }
@@ -1980,7 +2134,97 @@ export function Oracle3DScene({
             };
           })();
 
-          return {
+          const frameStats = computeFrameWindowStats(frameWindowRef.current);
+          const totalRender = rendererInfo.total || {
+            calls: 0,
+            triangles: 0,
+            points: 0,
+            lines: 0,
+          };
+
+          const rendererSize = safeGetRendererSize(renderer);
+          const dpr = safeGetRendererPixelRatio(renderer);
+          const bloomEnabled =
+            renderModeRef.current !== 'direct' &&
+            renderModeRef.current !== 'composer-no-bloom' &&
+            Boolean(localCtx.bloomPass?.enabled);
+          const fogEnabled = Boolean(scene.fog);
+          const fogDensity =
+            scene.fog && 'density' in scene.fog
+              ? ((scene.fog as any).density ?? null)
+              : null;
+          const fluidParticleCount =
+            Number(
+              localCtx.fluidParticlesState?.mesh?.geometry?.getAttribute?.(
+                'position',
+              )?.count ??
+                localCtx.particlesPoints?.geometry?.getAttribute?.('position')
+                  ?.count ??
+                localCtx.fluidParticlesConfig?.count ??
+                0,
+            ) || 0;
+
+          const activeQualityProfile =
+            localCtx.activeQualityProfile ??
+            localCtx.qualityProfile ??
+            localCtx.runtimeFlags?.activeQualityProfile ??
+            'unknown';
+
+          const forcedQualityProfile =
+            localCtx.forcedQualityProfile ??
+            localCtx.runtimeFlags?.forcedQualityProfile ??
+            null;
+
+          const estimatedProfileCost =
+            typeof localCtx.estimatedProfileCost === 'number'
+              ? localCtx.estimatedProfileCost
+              : estimateProfileCost({
+                  drawCalls: Number(totalRender.calls || 0),
+                  triangles: Number(totalRender.triangles || 0),
+                  points: Number(totalRender.points || 0),
+                  lines: Number(totalRender.lines || 0),
+                  dpr,
+                  bloomEnabled,
+                  fogEnabled,
+                  fluidParticleCount,
+                });
+
+          const telemetry = {
+            sampleCount: frameStats.sampleCount,
+            frameWindowSize: FRAME_WINDOW_MAX_SAMPLES,
+            meanFrameTime: frameStats.meanFrameTime,
+            worstFrameTime: frameStats.worstFrameTime,
+            p50: frameStats.p50,
+            p95: frameStats.p95,
+            p99: frameStats.p99,
+            avgFpsWindow: frameStats.avgFpsWindow,
+            drawCalls: Number(totalRender.calls || 0),
+            triangles: Number(totalRender.triangles || 0),
+            points: Number(totalRender.points || 0),
+            lines: Number(totalRender.lines || 0),
+            dpr,
+            rendererSize,
+            bloomEnabled,
+            fogEnabled,
+            fogDensity,
+            shadowMapEnabled: Boolean(renderer.shadowMap?.enabled),
+            fluidParticleCount,
+            smokeAlphaLayer:
+              localCtx.smokeAlphaLayer ??
+              localCtx.volumeConfig?.smokeAlphaLayer ??
+              localCtx.particlesConfig?.smokeAlphaLayer ??
+              null,
+            activeQualityProfile,
+            forcedQualityProfile,
+            estimatedProfileCost,
+            rebuildCount: Number(
+              localCtx.fluidParticlesState?.rebuildCount ?? 0,
+            ),
+            resetCount: runtimeCountersRef.current.resetCount,
+            reinitCount: runtimeCountersRef.current.reinitCount,
+          };
+
+          const richSnapshot = {
             time: Date.now(),
             seed: (orch as any)?.ritualDNA?.seed ?? null,
             progress: (orch as any)?.progress ?? null,
@@ -2007,6 +2251,7 @@ export function Oracle3DScene({
             appliedOpacityMuls,
             lightsSnapshot: lights,
             rendererInfo,
+            telemetry,
             sceneStats,
             dom,
             fluid: fluidState,
@@ -2014,6 +2259,16 @@ export function Oracle3DScene({
             uiWindow,
             warnings,
           };
+
+          localCtx.runtimeTelemetry = {
+            ...(localCtx.runtimeTelemetry || {}),
+            frameWindowMs: [...frameWindowRef.current],
+            counters: { ...runtimeCountersRef.current },
+            lastSnapshot: richSnapshot,
+            snapshotVersion: 'scene-rich-v2',
+          };
+
+          return richSnapshot;
         } catch (err: any) {
           orbWarn(
             'AUDIT',
@@ -2062,7 +2317,6 @@ export function Oracle3DScene({
 
         ensureOverlayFluidIsolationConfig(localCtx);
         localCtx.fluidParticlesConfig.enabled = Boolean(visible);
-
         resetFluidParticles(localCtx);
 
         if (visibleSafeModeRef.current) {
@@ -2158,7 +2412,7 @@ export function Oracle3DScene({
           resetSceneViewRef.current?.(
             seed ? 'ritual-cycle-reset' : 'manual-seed-reset',
           );
-          orchestratorRef.current?.initRitual(seed);
+          callInitRitual(seed);
           lastRitualSeedRef.current = String(seed || '');
           if (visibleSafeModeRef.current) {
             applyVisibleSafeModeRef.current(true);
@@ -2188,7 +2442,7 @@ export function Oracle3DScene({
         setEmergencyVisibleMode,
         scanFeedbackCandidates: (reason = 'manual') =>
           scanFeedbackCandidatesRef.current(reason),
-        snapshot: snapshot,
+        snapshot,
       };
 
       if (!(window as any).__ORB_AUDIT_READY__) {
@@ -2243,12 +2497,19 @@ export function Oracle3DScene({
     const animate = () => {
       try {
         const time = clockRef.current.getElapsedTime();
-        const dt = time - lastTimeRef.current;
+        const dtSeconds = time - lastTimeRef.current;
         lastTimeRef.current = time;
 
+        const dtMs = dtSeconds * 1000;
+        if (Number.isFinite(dtMs) && dtMs >= 0 && dtMs < 1000) {
+          frameWindowRef.current.push(dtMs);
+          if (frameWindowRef.current.length > FRAME_WINDOW_MAX_SAMPLES) {
+            frameWindowRef.current.shift();
+          }
+        }
+
         if (orchestratorRef.current) {
-          // Cast en any pour l'appel de `update` qui peut prendre (time, dt) ou (t)
-          (orchestratorRef.current as any).update(time, dt);
+          (orchestratorRef.current as any).update(time, dtSeconds);
         }
 
         if (emergencyVisualStateRef.current.active) {
@@ -2359,6 +2620,11 @@ export function Oracle3DScene({
       overlayRenderTelemetryRef.current = null;
       lastFrameModeRef.current = null;
       renderedFramesRef.current = 0;
+      frameWindowRef.current = [];
+      runtimeCountersRef.current = {
+        resetCount: 0,
+        reinitCount: 0,
+      };
 
       if (
         AUDIT_RUNTIME_ENABLED &&
@@ -2443,6 +2709,7 @@ export function Oracle3DScene({
 
     if (nextSeed !== lastRitualSeedRef.current) {
       resetSceneViewRef.current?.('ritual-cycle-reset');
+      runtimeCountersRef.current.reinitCount += 1;
       orch.initRitual(nextSeed);
       lastRitualSeedRef.current = nextSeed;
       if (visibleSafeModeRef.current) {
@@ -2451,12 +2718,10 @@ export function Oracle3DScene({
     }
   }, [formData?.seed, result?.seed, result?.visualParams?.seed]);
 
-  // FIX TYPECHECK: Hook d'interaction avec le texte
   useEffect(() => {
     if (!orchestratorRef.current) return;
     const orch: any = orchestratorRef.current;
 
-    // 🔴 PHASE 8 - RESET IMPLACABLE : Le panneau UI demande un reset
     if (!result) {
       if (orch.textManager && typeof orch.textManager.clear === 'function') {
         orch.textManager.clear();
@@ -2464,16 +2729,13 @@ export function Oracle3DScene({
       return;
     }
 
-    // 🔴 PHASE 8 - DIÈTE 3D : On ne passe plus la prose longue !
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
     const reveal = result.finalReveal;
 
     if (reveal) {
-      // On ne donne à la 3D qu'une fraction symbolique du modèle canonique
       const oracleData3D = {
         chapter: reveal.chapter || 'RÉVÉLATION',
         author: reveal.author || 'Zarathoustra',
-        // Sur mobile on efface le texte 3D central. Sur desktop, juste la tension.
         quote: isMobile ? '' : reveal.central_tension || '',
       };
 

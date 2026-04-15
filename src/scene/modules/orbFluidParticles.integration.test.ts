@@ -55,4 +55,14 @@ describe('orbFluidParticles integration', () => {
       'return setFluidParticlesConfig(ctx, { enabled: Boolean(enabled) });',
     );
   });
+
+  it('documents the stable runtime telemetry fields', () => {
+    const text = readFileSync(JS_FILE, 'utf8');
+
+    expect(text).toContain('activeParticleCount');
+    expect(text).toContain('lastUpdateMs');
+    expect(text).toContain('avgUpdateMs');
+    expect(text).toContain('updateCount');
+    expect(text).toContain('finalizeRuntimeUpdate');
+  });
 });
