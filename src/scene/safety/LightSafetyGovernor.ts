@@ -1,3 +1,5 @@
+import { orbLog, orbWarn } from '../../shared/debug/orbDebug';
+
 type LightSafetyThresholds = {
   bloom: number;
   exposure: number;
@@ -33,7 +35,7 @@ type LightSafetyAttach = {
   getBudgetSignals?: () => BudgetSignals | null;
 };
 
-type LightSafetyReason = "bloom" | "exposure" | "budget" | null;
+type LightSafetyReason = 'bloom' | 'exposure' | 'budget' | null;
 
 type LightSafetyUpdate = {
   active: boolean;
@@ -76,15 +78,20 @@ export class LightSafetyGovernor {
   private safetyFactor = 1.0;
   private lastReason: LightSafetyReason = null;
   private lastSignal: number | null = null;
-  private lastLogTime = 0;
   private disposed = false;
 
   constructor(config?: Partial<LightSafetyGovernorConfig>) {
     this.config = {
       ...DEFAULT_CONFIG,
       ...config,
-      highThreshold: { ...DEFAULT_CONFIG.highThreshold, ...(config?.highThreshold || {}) },
-      lowThreshold: { ...DEFAULT_CONFIG.lowThreshold, ...(config?.lowThreshold || {}) },
+      highThreshold: {
+        ...DEFAULT_CONFIG.highThreshold,
+        ...(config?.highThreshold || {}),
+      },
+      lowThreshold: {
+        ...DEFAULT_CONFIG.lowThreshold,
+        ...(config?.lowThreshold || {}),
+      },
       easing: { ...DEFAULT_CONFIG.easing, ...(config?.easing || {}) },
     };
   }
@@ -120,10 +127,15 @@ export class LightSafetyGovernor {
 
     let active = false;
     let triggeredNow = false;
+
     if (this.cooldownMsLeft > 0) {
       this.cooldownMsLeft = Math.max(0, this.cooldownMsLeft - dt);
       active = true;
-    } else if (signal != null && high != null && this.overMs > this.config.maxOverDurationMs) {
+    } else if (
+      signal != null &&
+      high != null &&
+      this.overMs > this.config.maxOverDurationMs
+    ) {
       this.cooldownMsLeft = this.config.cooldownMs;
       active = true;
       triggeredNow = true;
@@ -138,17 +150,38 @@ export class LightSafetyGovernor {
       if (this.safetyFactor > targetFactor) {
         this.safetyFactor = targetFactor;
       } else {
-        this.safetyFactor = this.ease(this.safetyFactor, targetFactor, this.config.easing.returnLambda, dtSec);
+        this.safetyFactor = this.ease(
+          this.safetyFactor,
+          targetFactor,
+          this.config.easing.returnLambda,
+          dtSec,
+        );
       }
     } else {
-      this.safetyFactor = this.ease(this.safetyFactor, 1.0, this.config.easing.returnLambda, dtSec);
+      this.safetyFactor = this.ease(
+        this.safetyFactor,
+        1.0,
+        this.config.easing.returnLambda,
+        dtSec,
+      );
     }
 
     this.safetyFactor = this.clamp(this.safetyFactor, MIN_SAFETY_FACTOR, 1.0);
 
-    this.logStatus(active, this.lastReason ?? reason, this.overMs, this.cooldownMsLeft, this.safetyFactor, triggeredNow);
+    this.logStatus(
+      active,
+      this.lastReason ?? reason,
+      this.overMs,
+      this.cooldownMsLeft,
+      this.safetyFactor,
+      triggeredNow,
+    );
 
-    const bloomClamp = active && this.bloomPass ? { strength: 1.0, radius: 0.35, threshold: 0.75 } : undefined;
+    const bloomClamp =
+      active && this.bloomPass
+        ? { strength: 1.0, radius: 0.35, threshold: 0.75 }
+        : undefined;
+
     const exposureClamp = active && this.renderer ? 1.05 : undefined;
 
     return {
@@ -182,7 +215,10 @@ export class LightSafetyGovernor {
     this.disposed = true;
   }
 
-  private buildResult(active: boolean, reason: LightSafetyReason): LightSafetyUpdate {
+  private buildResult(
+    active: boolean,
+    reason: LightSafetyReason,
+  ): LightSafetyUpdate {
     return {
       active,
       reason,
@@ -192,12 +228,17 @@ export class LightSafetyGovernor {
     };
   }
 
-  private readSignal(): { signal: number | null; reason: LightSafetyReason; high: number | null; low: number | null } {
+  private readSignal(): {
+    signal: number | null;
+    reason: LightSafetyReason;
+    high: number | null;
+    low: number | null;
+  } {
     const bloomStrength = this.toNumber(this.bloomPass?.strength);
     if (bloomStrength != null) {
       return {
         signal: bloomStrength,
-        reason: "bloom",
+        reason: 'bloom',
         high: this.config.highThreshold.bloom,
         low: this.config.lowThreshold.bloom,
       };
@@ -207,7 +248,7 @@ export class LightSafetyGovernor {
     if (exposure != null) {
       return {
         signal: exposure,
-        reason: "exposure",
+        reason: 'exposure',
         high: this.config.highThreshold.exposure,
         low: this.config.lowThreshold.exposure,
       };
@@ -217,7 +258,7 @@ export class LightSafetyGovernor {
     if (budget != null) {
       return {
         signal: budget,
-        reason: "budget",
+        reason: 'budget',
         high: this.config.highThreshold.budget,
         low: this.config.lowThreshold.budget,
       };
@@ -228,11 +269,13 @@ export class LightSafetyGovernor {
 
   private computeBudget(): number | null {
     if (!this.getBudgetSignals) return null;
+
     try {
       const signals = this.getBudgetSignals();
       if (!signals) return null;
 
       const samples: Array<{ value: number; max: number; weight: number }> = [];
+
       const push = (value: unknown, max: number, weight: number) => {
         const n = this.toNumber(value);
         if (n == null) return;
@@ -251,26 +294,38 @@ export class LightSafetyGovernor {
 
       let sum = 0;
       let weightSum = 0;
+
       for (const sample of samples) {
         const normalized = this.clamp(sample.value / sample.max, 0, 1.5);
         sum += normalized * sample.weight;
         weightSum += sample.weight;
       }
+
       return weightSum ? sum / weightSum : null;
-    } catch (err) {
-      this.log("warn", "budgetSignals indisponible");
+    } catch {
+      this.log('warn', 'budgetSignals unavailable');
       return null;
     }
   }
 
-  private computeClampFactor(signal: number | null, high: number | null): number {
+  private computeClampFactor(
+    signal: number | null,
+    high: number | null,
+  ): number {
     if (signal == null || high == null || high <= 0) return 0.85;
+
     const overshoot = Math.max(0, (signal - high) / high);
     const factor = 1.0 - overshoot * 0.35;
+
     return this.clamp(factor, MIN_SAFETY_FACTOR, 1.0);
   }
 
-  private ease(current: number, target: number, lambda: number, dtSec: number): number {
+  private ease(
+    current: number,
+    target: number,
+    lambda: number,
+    dtSec: number,
+  ): number {
     const alpha = 1 - Math.exp(-Math.max(0, lambda) * Math.max(0, dtSec));
     return current + (target - current) * alpha;
   }
@@ -285,15 +340,18 @@ export class LightSafetyGovernor {
     return Math.max(min, Math.min(max, value));
   }
 
-  private log(level: "debug" | "info" | "warn", message: string) {
-    if (!this.isDev()) return;
-    const now = Date.now();
-    if (now - this.lastLogTime < 1000) return;
-    this.lastLogTime = now;
-    const prefix = "[LightSafety]";
-    if (level === "debug") console.debug(`${prefix} ${message}`);
-    else if (level === "info") console.info(`${prefix} ${message}`);
-    else console.warn(`${prefix} ${message}`);
+  private log(level: 'debug' | 'info' | 'warn', message: string) {
+    const options = {
+      key: `light-safety:${level}:${message}`,
+      throttleMs: 1000,
+    };
+
+    if (level === 'warn') {
+      orbWarn('LightSafety', message, options);
+      return;
+    }
+
+    orbLog('LightSafety', message, options);
   }
 
   private logStatus(
@@ -302,24 +360,19 @@ export class LightSafetyGovernor {
     overMs: number,
     cooldownMsLeft: number,
     safetyFactor: number,
-    triggeredNow: boolean
+    triggeredNow: boolean,
   ) {
-    const reasonLabel = reason ?? "none";
-    const msg = `active=${active} reason=${reasonLabel} overMs=${overMs.toFixed(0)} cooldownMs=${cooldownMsLeft.toFixed(0)} factor=${safetyFactor.toFixed(2)}`;
-    if (triggeredNow) {
-      this.log("warn", msg);
-    } else if (active) {
-      this.log("info", msg);
-    } else {
-      this.log("debug", msg);
-    }
-  }
+    const reasonLabel = reason ?? 'none';
+    const msg = `active=${active} reason=${reasonLabel} overMs=${overMs.toFixed(
+      0,
+    )} cooldownMs=${cooldownMsLeft.toFixed(0)} factor=${safetyFactor.toFixed(2)}`;
 
-  private isDev(): boolean {
-    try {
-      return typeof import.meta !== "undefined" && !!(import.meta as any).env?.DEV;
-    } catch {
-      return false;
+    if (triggeredNow) {
+      this.log('warn', msg);
+    } else if (active) {
+      this.log('info', msg);
+    } else {
+      this.log('debug', msg);
     }
   }
 }

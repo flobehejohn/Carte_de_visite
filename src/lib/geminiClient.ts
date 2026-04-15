@@ -1,3 +1,5 @@
+import { orbError } from '../shared/debug/orbDebug';
+
 export type GeminiMode = 'raw' | 'oracle' | 'guardian';
 
 export type GeminiGenerateOptions = {
@@ -139,15 +141,22 @@ function logGeminiClientError(args: {
   const ctPart = args.contentType ? ` content-type=${args.contentType}` : '';
   const apiCodePart = args.apiCode ? ` apiCode=${args.apiCode}` : '';
   const bodyPart = args.bodyExcerpt ? ` body=${args.bodyExcerpt}` : '';
-  // eslint-disable-next-line no-console
-  console.error(
-    `[geminiClient] kind=${args.kind} traceId=${args.traceId} url=${args.url}${statusPart}${ctPart}${apiCodePart} ${args.message}${bodyPart}`.trim(),
+
+  orbError(
+    'geminiClient',
+    `[kind=${args.kind}] traceId=${args.traceId} url=${args.url}${statusPart}${ctPart}${apiCodePart} ${args.message}${bodyPart}`.trim(),
+    {
+      key: `gemini-client:error:${args.kind}:${args.traceId}:${args.status ?? 'na'}`,
+      throttleMs: 1200,
+    },
   );
 }
 
 function makeTraceId(prefix = 'trc'): string {
-  const g = globalThis as any;
-  const uuid = g?.crypto?.randomUUID?.();
+  const maybeRuntime = globalThis as typeof globalThis & {
+    crypto?: { randomUUID?: () => string };
+  };
+  const uuid = maybeRuntime.crypto?.randomUUID?.();
   if (typeof uuid === 'string' && uuid.length > 0) return `${prefix}_${uuid}`;
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
@@ -168,19 +177,21 @@ export async function geminiGenerate(
     maxOutputTokens: opts.maxOutputTokens ?? 600,
   };
 
-  if (opts.model && String(opts.model).trim().length > 0)
+  if (opts.model && String(opts.model).trim().length > 0) {
     payload.model = String(opts.model).trim();
+  }
   if (opts.expectJson === true) payload.expectJson = true;
 
   if (opts.ritual !== undefined) payload.ritual = opts.ritual;
-  if (opts.climateSnapshot !== undefined)
+  if (opts.climateSnapshot !== undefined) {
     payload.climateSnapshot = opts.climateSnapshot;
+  }
   if (opts.step) payload.step = opts.step;
   if (opts.value) payload.value = opts.value;
 
   let r: Response;
   try {
-    r = await fetch(API_PATH, {
+    r = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),

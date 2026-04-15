@@ -27,6 +27,21 @@ export type OrbLogOptions = {
   maxBuffer?: number;
 };
 
+type StorageLike = {
+  getItem(key: string): string | null;
+  removeItem(key: string): void;
+};
+
+type OrbGlobalRuntime = typeof globalThis & {
+  __ORB_VERBOSE__?: boolean;
+  __ORB_AUDIT_VERBOSE__?: boolean;
+  __ORB_DEBUG_BUFFER__?: OrbDebugEntry[];
+  __ORB_DEBUG_THROTTLE__?: Map<string, number>;
+  __ORB_DEBUG_ONCE__?: Set<string>;
+  localStorage?: StorageLike;
+  sessionStorage?: StorageLike;
+};
+
 declare global {
   var __ORB_VERBOSE__: boolean | undefined;
   var __ORB_AUDIT_VERBOSE__: boolean | undefined;
@@ -36,6 +51,28 @@ declare global {
 }
 
 const DEFAULT_MAX_BUFFER = 300;
+
+function getRuntime(): OrbGlobalRuntime {
+  return globalThis as OrbGlobalRuntime;
+}
+
+function getLocalStorageSafe(): StorageLike | null {
+  try {
+    const runtime = getRuntime();
+    return runtime.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function getSessionStorageSafe(): StorageLike | null {
+  try {
+    const runtime = getRuntime();
+    return runtime.sessionStorage ?? null;
+  } catch {
+    return null;
+  }
+}
 
 function isTruthyFlag(value: unknown): boolean {
   if (typeof value === 'boolean') return value;
@@ -52,19 +89,17 @@ function isTruthyFlag(value: unknown): boolean {
 
 function readStorageFlag(key: string): boolean {
   try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const value = window.localStorage.getItem(key);
-      if (isTruthyFlag(value)) return true;
-    }
+    const localStorage = getLocalStorageSafe();
+    const value = localStorage?.getItem(key);
+    if (isTruthyFlag(value)) return true;
   } catch {
     // noop
   }
 
   try {
-    if (typeof window !== 'undefined' && window.sessionStorage) {
-      const value = window.sessionStorage.getItem(key);
-      if (isTruthyFlag(value)) return true;
-    }
+    const sessionStorage = getSessionStorageSafe();
+    const value = sessionStorage?.getItem(key);
+    if (isTruthyFlag(value)) return true;
   } catch {
     // noop
   }
@@ -286,19 +321,15 @@ export function __resetOrbDebugForTests(): void {
   delete globalThis.__ORB_AUDIT_VERBOSE__;
 
   try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.removeItem('ORB_VERBOSE');
-      window.localStorage.removeItem('ORB_AUDIT_VERBOSE');
-    }
+    getLocalStorageSafe()?.removeItem('ORB_VERBOSE');
+    getLocalStorageSafe()?.removeItem('ORB_AUDIT_VERBOSE');
   } catch {
     // noop
   }
 
   try {
-    if (typeof window !== 'undefined' && window.sessionStorage) {
-      window.sessionStorage.removeItem('ORB_VERBOSE');
-      window.sessionStorage.removeItem('ORB_AUDIT_VERBOSE');
-    }
+    getSessionStorageSafe()?.removeItem('ORB_VERBOSE');
+    getSessionStorageSafe()?.removeItem('ORB_AUDIT_VERBOSE');
   } catch {
     // noop
   }

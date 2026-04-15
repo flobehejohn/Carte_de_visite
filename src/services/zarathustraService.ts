@@ -1,6 +1,7 @@
 import { mapToFinalRevealModel } from '../domain/oracleText/finalRevealModel';
 import { OracleResult, RitualInput } from '../domain/types';
 import { geminiGenerate } from '../lib/geminiClient';
+import { orbLog, orbWarn } from '../shared/debug/orbDebug';
 import {
   composeGuardianGuidanceFromPayload as composeDeterministicGuardianGuidance,
   getGuardianStepDefaults,
@@ -74,23 +75,28 @@ const GENERIC_GUARDIAN_PATTERNS = [
 ];
 
 function createThrottledLogger(prefix: string, throttleMs = LOG_THROTTLE_MS) {
-  let lastLogMs = 0;
-  const canLog = () => {
-    const now = Date.now();
-    if (now - lastLogMs < throttleMs) return false;
-    lastLogMs = now;
-    return true;
-  };
   return {
-    log: (...args: any[]) => {
-      if (!canLog()) return;
-      // eslint-disable-next-line no-console
-      console.info(`[${prefix}]`, ...args);
+    log: (message: string, ...args: unknown[]) => {
+      orbLog(
+        prefix,
+        message,
+        {
+          key: `${prefix}:info:${message}`,
+          throttleMs,
+        },
+        ...args,
+      );
     },
-    warn: (...args: any[]) => {
-      if (!canLog()) return;
-      // eslint-disable-next-line no-console
-      console.warn(`[${prefix}]`, ...args);
+    warn: (message: string, ...args: unknown[]) => {
+      orbWarn(
+        prefix,
+        message,
+        {
+          key: `${prefix}:warn:${message}`,
+          throttleMs,
+        },
+        ...args,
+      );
     },
   };
 }
@@ -543,7 +549,6 @@ function buildOracleResult(
     interpretation,
     keywords,
     ritual,
-    // INTÉGRATION DE LA PHASE 8 : Le modèle canonique
     finalReveal: mapToFinalRevealModel(env || data),
     hermeneutic: resolvedHermeneutic,
     composition: resolvedComposition,
@@ -711,7 +716,6 @@ export async function consultOracle(
       throw new Error('Oracle payload missing in API response.');
     }
 
-    // Le env est passé ici pour que mapToFinalRevealModel puisse lire les données
     const result = buildOracleResult(ritual, payload, env);
     const combined = `${result.quote} ${result.interpretation}`;
 

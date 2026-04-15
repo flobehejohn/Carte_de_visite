@@ -1,5 +1,6 @@
 import gsap from 'gsap';
 import * as THREE from 'three';
+import { orbLog, orbWarn } from '../shared/debug/orbDebug';
 import { OrbAuditBridge } from './audit/OrbAuditBridge.ts';
 import * as orbFluidParticles from './modules/orbFluidParticles.js';
 import * as orbGeometry from './modules/orbGeometry.js';
@@ -292,8 +293,14 @@ export class RitualOrchestrator {
           }
         }
       } catch (e) {
-        console.warn(
-          '[RitualOrchestrator] OrbAuditBridge init bypassé en Live.',
+        orbWarn(
+          'RitualOrchestrator',
+          'OrbAuditBridge init bypassed in live runtime.',
+          {
+            ctx: this.ctx,
+            key: 'ritual:orb-audit-bridge-init-bypass',
+            throttleMs: 3000,
+          },
           e,
         );
       }
@@ -310,6 +317,11 @@ export class RitualOrchestrator {
     const seedString =
       explicitSeed ??
       `${String(userName || 'Anonyme')}-${Date.now()}-${Math.random()}`;
+    orbLog('RitualOrchestrator', `seed prepared: ${seedString}`, {
+      ctx: this.ctx,
+      key: 'ritual:init-seed',
+      throttleMs: 1200,
+    });
     this.rng = makeRng(seedString);
     const chaosBase = this.rng.random();
 
@@ -486,7 +498,16 @@ export class RitualOrchestrator {
       try {
         this.textManager.spawnOracle({ quote, chapter });
       } catch (e) {
-        console.warn('RT_ORCHESTRATOR: spawnOracle bypassed', e);
+        orbWarn(
+          'RitualOrchestrator',
+          'spawnOracle bypassed',
+          {
+            ctx: this.ctx,
+            key: 'ritual:spawn-oracle-bypassed',
+            throttleMs: 3000,
+          },
+          e,
+        );
       }
     }
 
@@ -524,8 +545,19 @@ export class RitualOrchestrator {
         typeof performance !== 'undefined' && performance.now
           ? performance.now()
           : Date.now();
-      if (isDev() && (!this.lastLayoutLog || now - this.lastLayoutLog > 1500))
+      if (isDev() && (!this.lastLayoutLog || now - this.lastLayoutLog > 1500)) {
         this.lastLayoutLog = now;
+        orbLog(
+          'RitualOrchestrator',
+          'text metrics updated',
+          {
+            ctx: this.ctx,
+            key: 'ritual:text-metrics-updated',
+            throttleMs: 1500,
+          },
+          payload.textMetrics,
+        );
+      }
     }
     if (payload.seed && typeof payload.seed === 'string') {
       this.rng = makeRng(payload.seed);
