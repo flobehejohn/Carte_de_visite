@@ -13,6 +13,7 @@ import { getLightsSnapshot } from '../../scene/modules/orbLighting';
 import { RitualOrchestrator } from '../../scene/RitualOrchestrator';
 import { LightSafetyGovernor } from '../../scene/safety/LightSafetyGovernor';
 import { getOracleTextLength } from '../../services/zarathustraService';
+import { orbError, orbLog, orbWarn } from '../../shared/debug/orbDebug';
 
 interface Oracle3DSceneProps {
   formData: any;
@@ -999,8 +1000,10 @@ export function Oracle3DScene({
       });
     } catch (error) {
       webGLFailureRef.current = true;
-      console.warn(
-        '[Oracle3DScene] Impossible de créer le contexte WebGL. Bascule en mode lecture statique.',
+      orbWarn(
+        'Oracle3DScene',
+        'Impossible de créer le contexte WebGL. Bascule en mode lecture statique.',
+        { key: 'oracle3d:webgl-init-fail' },
         error,
       );
       setWebGLFailed(true);
@@ -1035,7 +1038,9 @@ export function Oracle3DScene({
     const handleContextLost = (event: Event) => {
       event.preventDefault?.();
       contextLost = true;
-      console.warn('[AUDIT] WebGL context lost');
+      orbWarn('AUDIT', 'WebGL context lost', {
+        key: 'audit:webgl-context-lost',
+      });
       setOverlayMessage('WebGL context lost');
     };
 
@@ -1175,7 +1180,12 @@ export function Oracle3DScene({
       });
 
       visibleSafeModeRef.current = Boolean(enabled);
-      console.info('[AUDIT] setVisibleSafeMode', visibleSafeModeRef.current);
+      orbLog(
+        'AUDIT',
+        'setVisibleSafeMode',
+        { audit: true, key: 'audit:setVisibleSafeMode' },
+        visibleSafeModeRef.current,
+      );
     };
 
     applyVisibleSafeModeRef.current = applyVisibleSafeMode;
@@ -1316,7 +1326,15 @@ export function Oracle3DScene({
         applyVisibleSafeModeRef.current(true);
       }
 
-      console.info('[AUDIT] resetSceneView', reason);
+      orbLog(
+        'AUDIT',
+        'resetSceneView',
+        {
+          audit: true,
+          key: `audit:resetSceneView:${reason}`,
+        },
+        reason,
+      );
       scanFeedbackCandidatesRef.current(`reset:${reason}`);
     };
 
@@ -1332,13 +1350,21 @@ export function Oracle3DScene({
           feedbackSignatureRef.current = signature;
 
           if (candidates.length > 0) {
-            console.warn(
-              `[AUDIT] render-target feedback risk detected (${reason})`,
+            orbWarn(
+              'AUDIT',
+              `render-target feedback risk detected (${reason})`,
+              { key: `audit:feedback-risk:${reason}`, throttleMs: 1500 },
               candidates,
             );
           } else {
-            console.info(
-              `[AUDIT] no render-target feedback candidates (${reason})`,
+            orbLog(
+              'AUDIT',
+              `no render-target feedback candidates (${reason})`,
+              {
+                audit: true,
+                key: `audit:no-feedback:${reason}`,
+                throttleMs: 1500,
+              },
             );
           }
         }
@@ -1349,14 +1375,24 @@ export function Oracle3DScene({
           renderModeRef.current !== 'direct'
         ) {
           renderModeRef.current = 'direct';
-          console.warn(
-            '[AUDIT] switching render mode to direct to bypass WebGL feedback risk',
+          orbWarn(
+            'AUDIT',
+            'switching render mode to direct to bypass WebGL feedback risk',
+            { key: 'audit:fallback-direct-feedback-risk', throttleMs: 2000 },
           );
         }
 
         return candidates;
       } catch (error) {
-        console.warn('[AUDIT] feedback scan failed', error);
+        orbWarn(
+          'AUDIT',
+          'feedback scan failed',
+          {
+            key: 'audit:feedback-scan-failed',
+            throttleMs: 1500,
+          },
+          error,
+        );
         return feedbackCandidatesRef.current;
       }
     };
@@ -1979,7 +2015,15 @@ export function Oracle3DScene({
             warnings,
           };
         } catch (err: any) {
-          console.warn('[AUDIT] snapshot error', err);
+          orbWarn(
+            'AUDIT',
+            'snapshot error',
+            {
+              key: 'audit:snapshot-error',
+              throttleMs: 1000,
+            },
+            err,
+          );
           return {
             time: Date.now(),
             warnings: ['snapshot error', String(err?.message || err)],
@@ -1989,15 +2033,25 @@ export function Oracle3DScene({
 
       const setRenderMode = (mode: RenderMode) => {
         renderModeRef.current = mode;
-        console.info('[AUDIT] setRenderMode', mode);
+        orbLog(
+          'AUDIT',
+          'setRenderMode',
+          {
+            audit: true,
+            key: 'audit:set-render-mode',
+          },
+          mode,
+        );
       };
 
       const getRenderMode = () => renderModeRef.current;
 
       const setAutoFallbackOnFeedback = (enabled: boolean) => {
         autoFallbackOnFeedbackRef.current = Boolean(enabled);
-        console.info(
-          '[AUDIT] setAutoFallbackOnFeedback',
+        orbLog(
+          'AUDIT',
+          'setAutoFallbackOnFeedback',
+          { audit: true, key: 'audit:set-auto-fallback' },
           autoFallbackOnFeedbackRef.current,
         );
       };
@@ -2017,7 +2071,15 @@ export function Oracle3DScene({
 
         scanFeedbackCandidatesRef.current('fluid-visibility-update');
 
-        console.info('[AUDIT] setFluidParticlesVisible', visible);
+        orbLog(
+          'AUDIT',
+          'setFluidParticlesVisible',
+          {
+            audit: true,
+            key: 'audit:set-fluid-particles-visible',
+          },
+          visible,
+        );
       };
 
       const setEmergencyVisibleMode = (enabled: boolean) => {
@@ -2052,7 +2114,15 @@ export function Oracle3DScene({
             localCtx.camera.updateProjectionMatrix?.();
           }
 
-          console.info('[AUDIT] setEmergencyVisibleMode', true);
+          orbLog(
+            'AUDIT',
+            'setEmergencyVisibleMode',
+            {
+              audit: true,
+              key: 'audit:set-emergency-visible-mode:on',
+            },
+            true,
+          );
           return;
         }
 
@@ -2062,13 +2132,29 @@ export function Oracle3DScene({
         applyVisibleSafeModeRef.current(false);
         setFluidParticlesVisible(true);
         setRenderMode('composer-bloom');
-        console.info('[AUDIT] setEmergencyVisibleMode', false);
+        orbLog(
+          'AUDIT',
+          'setEmergencyVisibleMode',
+          {
+            audit: true,
+            key: 'audit:set-emergency-visible-mode:off',
+          },
+          false,
+        );
       };
 
       (window as any).__ORB_AUDIT__ = {
         ready: () => !!orchestratorRef.current,
         setSeed: (seed: string) => {
-          console.info('[AUDIT] setSeed', seed);
+          orbLog(
+            'AUDIT',
+            'setSeed',
+            {
+              audit: true,
+              key: 'audit:set-seed',
+            },
+            seed,
+          );
           resetSceneViewRef.current?.(
             seed ? 'ritual-cycle-reset' : 'manual-seed-reset',
           );
@@ -2080,7 +2166,16 @@ export function Oracle3DScene({
         },
         setProgress: (p: number) => {
           const clamped = Math.max(0, Math.min(1, Number(p) || 0));
-          console.info('[AUDIT] setProgress', clamped);
+          orbLog(
+            'AUDIT',
+            'setProgress',
+            {
+              audit: true,
+              key: 'audit:set-progress',
+              throttleMs: 250,
+            },
+            clamped,
+          );
           (orchestratorRef.current as any)?.updateState(clamped);
         },
         resetScene: (reason = 'manual') => resetSceneViewRef.current?.(reason),
@@ -2097,7 +2192,11 @@ export function Oracle3DScene({
       };
 
       if (!(window as any).__ORB_AUDIT_READY__) {
-        console.info('[AUDIT] bridge ready');
+        orbLog('AUDIT', 'bridge ready', {
+          audit: true,
+          key: 'audit:bridge-ready',
+          once: true,
+        });
         (window as any).__ORB_AUDIT_READY__ = true;
       }
     }
@@ -2178,7 +2277,15 @@ export function Oracle3DScene({
         frameIdRef.current = requestAnimationFrame(animate);
         if (activeRefs) activeRefs.frameId = frameIdRef.current;
       } catch (err) {
-        console.error('[AUDIT] animate error', err);
+        orbError(
+          'AUDIT',
+          'animate error',
+          {
+            key: 'audit:animate-error',
+            throttleMs: 500,
+          },
+          err,
+        );
         cancelAnimationFrame(frameIdRef.current);
         setOverlayMessage('Rendering halted (error). See console.');
       }
@@ -2370,8 +2477,14 @@ export function Oracle3DScene({
         quote: isMobile ? '' : reveal.central_tension || '',
       };
 
-      console.warn(
-        '[AUDIT 3D] Diète appliquée. Envoi des fragments symboliques :',
+      orbLog(
+        'AUDIT 3D',
+        'Diète appliquée. Envoi des fragments symboliques :',
+        {
+          audit: true,
+          key: 'audit3d:diet-applied',
+          throttleMs: 1500,
+        },
         oracleData3D,
       );
       if (typeof orch.triggerFinalRevelation === 'function') {

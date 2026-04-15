@@ -1,3 +1,4 @@
+import { orbLog } from '../../shared/debug/orbDebug';
 import { SAFE_RANGES, buildPresetVariants } from './presetLibrary';
 
 export type ClimateTargets = {
@@ -681,7 +682,11 @@ export class ClimateController {
     )},${b.radius.toFixed(2)},${b.threshold.toFixed(2)}) glow=${targets.volume.glowIntensity.toFixed(
       2,
     )} bg=${targets.volume.backgroundStrength.toFixed(2)}`;
-    console.info(`[Climate] ${msg}`);
+    orbLog('Climate', msg, {
+      audit: true,
+      key: 'climate:status',
+      throttleMs: 1000,
+    });
   }
 
   private shouldLog() {

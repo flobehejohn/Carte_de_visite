@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { SimplexNoise } from 'three/examples/jsm/math/SimplexNoise.js';
+import { orbLog, orbWarn } from '../../shared/debug/orbDebug';
 
 /**
  * orbFluidParticles — version stabilisée, overlay-safe et conforme à l'audit
@@ -40,8 +41,14 @@ function logSimplexMode() {
   const mode3 = noiseFn3 ? noiseFn3.name || 'custom3' : 'fallback';
   const mode4 = noiseFn4 ? noiseFn4.name || 'custom4' : 'fallback';
 
-  console.info(
-    `[FluidParticles] simplex wrapper mode: 2->${mode2}, 3->${mode3}, 4->${mode4}`,
+  orbLog(
+    'FluidParticles',
+    `simplex wrapper mode: 2->${mode2}, 3->${mode3}, 4->${mode4}`,
+    {
+      key: 'fluid:simplex-wrapper-mode',
+      once: true,
+      audit: true,
+    },
   );
 }
 
@@ -104,8 +111,27 @@ function clamp01(value) {
 }
 
 function log(ctx, message, level = 'info') {
-  console.info(`[FluidParticles] ${message}`);
-  if (ctx?.statusHandler) ctx.statusHandler(message, level);
+  const throttleMs = message.startsWith('Particules fluide:')
+    ? 4000
+    : message.includes('Config particules fluide')
+      ? 1200
+      : message.includes('Rebuild instanced mesh')
+        ? 1200
+        : 0;
+
+  const options = {
+    ctx,
+    key: `fluid:${level}:${message}`,
+    throttleMs,
+    level,
+  };
+
+  if (level === 'warn') {
+    orbWarn('FluidParticles', message, options);
+    return;
+  }
+
+  orbLog('FluidParticles', message, options);
 }
 
 function getRng(ctx) {
@@ -577,7 +603,11 @@ export function updateFluidParticles(ctx, delta) {
   state.fallbackHits = fallbackHits;
   if (fallbackHits > 10 && !state.fallbackWarning) {
     state.fallbackWarning = true;
-    console.warn('[FluidParticles] Simplex fallback used frequently.');
+    orbWarn('FluidParticles', 'Simplex fallback used frequently.', {
+      ctx,
+      key: 'fluid:simplex-fallback-warning',
+      throttleMs: 4000,
+    });
   }
 
   if (ctx.orbGroup) {

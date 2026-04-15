@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { orbError, orbLog, orbWarn } from '../../shared/debug/orbDebug';
 import * as lightChoreo from './lightChoreo.js';
 
 /**
@@ -16,15 +17,25 @@ const DEFAULT_HELPER_COLOR = 0x4dbfff;
 const MIN_SHADOW_MAP = 256;
 const MAX_SHADOW_MAP = 4096;
 
-let lastLog = 0;
-
 function logStatus(ctx, message, level = 'info') {
-  const now = (typeof performance !== 'undefined' && performance?.now) ? performance.now() : Date.now();
-  if (now - lastLog > 1200) {
-    lastLog = now;
-    console.info(`[Light] ${message}`);
+  const options = {
+    ctx,
+    key: `light:${level}:${message}`,
+    throttleMs: 1200,
+    level,
+  };
+
+  if (level === 'error') {
+    orbError('Light', message, options);
+    return;
   }
-  if (ctx.statusHandler) ctx.statusHandler(message, level);
+
+  if (level === 'warn') {
+    orbWarn('Light', message, options);
+    return;
+  }
+
+  orbLog('Light', message, options);
 }
 
 function sanitizeShadowSize(value) {
@@ -51,8 +62,10 @@ function ensureLightState(ctx) {
     ctx.lightTargetsRoot.name = 'LightTargets';
     ctx.scene.add(ctx.lightTargetsRoot);
   }
-  if (!ctx.lightsRegistry || !(ctx.lightsRegistry instanceof Map)) ctx.lightsRegistry = new Map();
-  if (!ctx.lightHelpers || !(ctx.lightHelpers instanceof Map)) ctx.lightHelpers = new Map();
+  if (!ctx.lightsRegistry || !(ctx.lightsRegistry instanceof Map))
+    ctx.lightsRegistry = new Map();
+  if (!ctx.lightHelpers || !(ctx.lightHelpers instanceof Map))
+    ctx.lightHelpers = new Map();
   if (!ctx.lightAnchors) ctx.lightAnchors = {};
 
   if (!ctx.lightAnchors.scene) {
@@ -69,7 +82,7 @@ function ensureLightState(ctx) {
   }
   ctx.lightAnchors.orb = ctx.orbGroup;
 
-  (ctx.meshSlots || []).forEach(slot => {
+  (ctx.meshSlots || []).forEach((slot) => {
     if (slot?.id && slot.group) ctx.lightAnchors[slot.id] = slot.group;
   });
 }
@@ -85,7 +98,6 @@ function normalizeColor(input, fallback = 0xffffff) {
 
 function clampIntensity(type, intensity) {
   const v = Math.max(0, Number(intensity) || 0);
-  // Garde-fous doux (évite les brûlures)
   if (type === 'directional') return Math.min(2.2, v);
   if (type === 'hemisphere') return Math.min(1.35, v);
   if (type === 'point') return Math.min(1.4, v);
@@ -105,14 +117,19 @@ function getAnchorObject(ctx, anchorId) {
 
 function createHelper(entry) {
   let helper = null;
-  if (entry.type === 'directional') helper = new THREE.DirectionalLightHelper(entry.light, 1);
-  else if (entry.type === 'hemisphere') helper = new THREE.HemisphereLightHelper(entry.light, 0.75);
-  else if (entry.type === 'point') helper = new THREE.PointLightHelper(entry.light, 0.35);
-  else if (entry.type === 'spot') helper = new THREE.SpotLightHelper(entry.light);
+  if (entry.type === 'directional')
+    helper = new THREE.DirectionalLightHelper(entry.light, 1);
+  else if (entry.type === 'hemisphere')
+    helper = new THREE.HemisphereLightHelper(entry.light, 0.75);
+  else if (entry.type === 'point')
+    helper = new THREE.PointLightHelper(entry.light, 0.35);
+  else if (entry.type === 'spot')
+    helper = new THREE.SpotLightHelper(entry.light);
 
   if (helper) {
     helper.visible = !!entry.helperVisible;
-    if (helper.material?.color) helper.material.color.setHex(entry.config.helperColor.getHex());
+    if (helper.material?.color)
+      helper.material.color.setHex(entry.config.helperColor.getHex());
   }
   return helper;
 }
@@ -135,10 +152,30 @@ function instantiateLight(entry) {
   const colorHex = cfg.color.getHex();
   let light;
 
-  if (entry.type === 'directional') light = new THREE.DirectionalLight(colorHex, cfg.intensity);
-  else if (entry.type === 'hemisphere') light = new THREE.HemisphereLight(colorHex, cfg.groundColor.getHex(), cfg.intensity);
-  else if (entry.type === 'point') light = new THREE.PointLight(colorHex, cfg.intensity, cfg.distance, cfg.decay);
-  else if (entry.type === 'spot') light = new THREE.SpotLight(colorHex, cfg.intensity, cfg.distance, cfg.angle, cfg.penumbra, cfg.decay);
+  if (entry.type === 'directional')
+    light = new THREE.DirectionalLight(colorHex, cfg.intensity);
+  else if (entry.type === 'hemisphere')
+    light = new THREE.HemisphereLight(
+      colorHex,
+      cfg.groundColor.getHex(),
+      cfg.intensity,
+    );
+  else if (entry.type === 'point')
+    light = new THREE.PointLight(
+      colorHex,
+      cfg.intensity,
+      cfg.distance,
+      cfg.decay,
+    );
+  else if (entry.type === 'spot')
+    light = new THREE.SpotLight(
+      colorHex,
+      cfg.intensity,
+      cfg.distance,
+      cfg.angle,
+      cfg.penumbra,
+      cfg.decay,
+    );
   else light = new THREE.DirectionalLight(colorHex, cfg.intensity);
 
   light.name = entry.name;
@@ -176,13 +213,11 @@ function applyConfigToLight(ctx, entry) {
 
   applyShadowSettings(entry);
 
-  // target
   if (entry.light.isDirectionalLight || entry.light.isSpotLight) {
     const anchor = getAnchorObject(ctx, entry.anchor);
     if (anchor) entry.light.target = anchor;
   }
 
-  // helper
   if (!entry.helper && entry.helperVisible) {
     entry.helper = createHelper(entry);
     if (entry.helper) ctx.lightHelpersGroup.add(entry.helper);
@@ -196,7 +231,9 @@ function applyConfigToLight(ctx, entry) {
 function createEntry(ctx, config) {
   ensureLightState(ctx);
 
-  const id = config.id || `light-${Math.floor(Date.now())}-${Math.floor(Math.random() * 1000)}`;
+  const id =
+    config.id ||
+    `light-${Math.floor(Date.now())}-${Math.floor(Math.random() * 1000)}`;
   const type = LIGHT_TYPES.includes(config.type) ? config.type : 'directional';
 
   const entry = {
@@ -214,18 +251,25 @@ function createEntry(ctx, config) {
       intensity: clampIntensity(type, config.intensity ?? 1),
       color: normalizeColor(config.color, 0xffffff),
       groundColor: normalizeColor(config.groundColor ?? 0x222244, 0x222244),
-      position: { x: config.position?.x ?? 0, y: config.position?.y ?? 0, z: config.position?.z ?? 0 },
+      position: {
+        x: config.position?.x ?? 0,
+        y: config.position?.y ?? 0,
+        z: config.position?.z ?? 0,
+      },
       distance: Number(config.distance ?? 0),
       decay: Number(config.decay ?? 1),
       angle: Number(config.angle ?? Math.PI / 4),
       penumbra: Number(config.penumbra ?? 0.2),
       castShadow: !!config.castShadow,
-      helperColor: normalizeColor(config.helperColor ?? DEFAULT_HELPER_COLOR, DEFAULT_HELPER_COLOR),
+      helperColor: normalizeColor(
+        config.helperColor ?? DEFAULT_HELPER_COLOR,
+        DEFAULT_HELPER_COLOR,
+      ),
       shadowMapSize: sanitizeShadowSize(config.shadowMapSize ?? 1024),
       shadowRadius: Number(config.shadowRadius ?? 1.2),
       shadowBias: Number(config.shadowBias ?? -0.0001),
-      shadowNormalBias: Number(config.shadowNormalBias ?? 0)
-    }
+      shadowNormalBias: Number(config.shadowNormalBias ?? 0),
+    },
   };
 
   entry.light = instantiateLight(entry);
@@ -254,11 +298,9 @@ function disposeEntry(ctx, entry) {
 export function initDefaultLights(ctx) {
   ensureLightState(ctx);
 
-  // clear
   for (const entry of ctx.lightsRegistry.values()) disposeEntry(ctx, entry);
   ctx.lightsRegistry.clear();
 
-  // Key (sun)
   createEntry(ctx, {
     id: 'sun-main',
     name: 'SunMain',
@@ -267,10 +309,9 @@ export function initDefaultLights(ctx) {
     color: 0xffffff,
     position: { x: 6, y: 4, z: 2 },
     castShadow: false,
-    anchor: 'orb'
+    anchor: 'orb',
   });
 
-  // Fill (hemi)
   createEntry(ctx, {
     id: 'fill-hemi',
     name: 'FillHemi',
@@ -278,10 +319,9 @@ export function initDefaultLights(ctx) {
     intensity: 0.35,
     color: 0xffffff,
     groundColor: 0x07070a,
-    position: { x: 0, y: 1, z: 0 }
+    position: { x: 0, y: 1, z: 0 },
   });
 
-  // Rim (point)
   createEntry(ctx, {
     id: 'rim-point',
     name: 'RimPoint',
@@ -290,7 +330,7 @@ export function initDefaultLights(ctx) {
     color: 0xaaccff,
     position: { x: -3.4, y: 2.0, z: -4.4 },
     distance: 0,
-    decay: 1.2
+    decay: 1.2,
   });
 
   logStatus(ctx, 'Default lights initialized.');
@@ -316,10 +356,12 @@ export function setLightConfig(ctx, id, patch = {}) {
 
   const cfg = entry.config;
 
-  // patch -> cfg (avec clamp)
-  if (patch.intensity !== undefined) cfg.intensity = clampIntensity(entry.type, patch.intensity);
-  if (patch.color !== undefined) cfg.color = normalizeColor(patch.color, cfg.color);
-  if (patch.groundColor !== undefined) cfg.groundColor = normalizeColor(patch.groundColor, cfg.groundColor);
+  if (patch.intensity !== undefined)
+    cfg.intensity = clampIntensity(entry.type, patch.intensity);
+  if (patch.color !== undefined)
+    cfg.color = normalizeColor(patch.color, cfg.color);
+  if (patch.groundColor !== undefined)
+    cfg.groundColor = normalizeColor(patch.groundColor, cfg.groundColor);
 
   if (patch.position) {
     cfg.position.x = Number(patch.position.x ?? cfg.position.x);
@@ -334,17 +376,23 @@ export function setLightConfig(ctx, id, patch = {}) {
   if (patch.penumbra !== undefined) cfg.penumbra = Number(patch.penumbra);
 
   if (patch.castShadow !== undefined) cfg.castShadow = !!patch.castShadow;
-  if (patch.shadowMapSize !== undefined) cfg.shadowMapSize = sanitizeShadowSize(patch.shadowMapSize);
-  if (patch.shadowRadius !== undefined) cfg.shadowRadius = Number(patch.shadowRadius);
+  if (patch.shadowMapSize !== undefined)
+    cfg.shadowMapSize = sanitizeShadowSize(patch.shadowMapSize);
+  if (patch.shadowRadius !== undefined)
+    cfg.shadowRadius = Number(patch.shadowRadius);
   if (patch.shadowBias !== undefined) cfg.shadowBias = Number(patch.shadowBias);
-  if (patch.shadowNormalBias !== undefined) cfg.shadowNormalBias = Number(patch.shadowNormalBias);
+  if (patch.shadowNormalBias !== undefined)
+    cfg.shadowNormalBias = Number(patch.shadowNormalBias);
 
-  if (patch.helperVisible !== undefined) entry.helperVisible = !!patch.helperVisible;
-  if (patch.helperColor !== undefined) cfg.helperColor = normalizeColor(patch.helperColor, cfg.helperColor);
+  if (patch.helperVisible !== undefined)
+    entry.helperVisible = !!patch.helperVisible;
+  if (patch.helperColor !== undefined)
+    cfg.helperColor = normalizeColor(patch.helperColor, cfg.helperColor);
 
   applyConfigToLight(ctx, entry);
 
-  if (id === 'sun-main') logStatus(ctx, `Updated Sun: intensity=${cfg.intensity.toFixed(2)}`);
+  if (id === 'sun-main')
+    logStatus(ctx, `Updated Sun: intensity=${cfg.intensity.toFixed(2)}`);
 
   return cfg;
 }
@@ -405,8 +453,8 @@ export function getLightsSnapshot(ctx) {
         angle: entry.config.angle,
         penumbra: entry.config.penumbra,
         castShadow: entry.config.castShadow,
-        shadowMapSize: entry.config.shadowMapSize
-      }
+        shadowMapSize: entry.config.shadowMapSize,
+      },
     });
   }
   return out;
@@ -424,19 +472,25 @@ export function getLightAnchors() {
 export function updateLightsForFrame(ctx, time = 0) {
   ensureLightState(ctx);
 
-  // light choreo (safe)
   try {
     lightChoreo?.updateLightChoreographies?.(ctx, time);
   } catch (e) {
-    // silencieux: la scène doit vivre même si le choreo casse
+    orbWarn(
+      'Light',
+      'lightChoreo update failed; keeping scene alive.',
+      {
+        ctx,
+        key: 'light:choreo-update-failed',
+        throttleMs: 3000,
+      },
+      e,
+    );
   }
 
-  // helpers
   for (const entry of ctx.lightsRegistry.values()) {
     entry.helper?.update?.();
   }
 }
 
-/* --------- Ré-export des configs de lightChoreo (compat) --------- */
 export const setLightChoreoConfig = lightChoreo.setLightChoreoConfig;
 export const getLightChoreoConfig = lightChoreo.getLightChoreoConfig;
