@@ -10,6 +10,16 @@ const orchestratorSpies = vi.hoisted(() => ({
   update: vi.fn(),
 }));
 
+const qualityProfileHarness = vi.hoisted(() => ({
+  activeQualityProfile: 'balanced' as string | null,
+  forcedQualityProfile: undefined as string | null | undefined,
+  estimatedProfileCost: 1.234,
+}));
+
+const smokeAlphaHarness = vi.hoisted(() => ({
+  value: 0.42 as number | null | undefined,
+}));
+
 vi.mock('three', async () => {
   const actual = await vi.importActual<typeof import('three')>('three');
 
@@ -263,14 +273,24 @@ vi.mock('../../scene/RitualOrchestrator', async () => {
         opacity: 0.75,
       };
 
-      ctx.activeQualityProfile = 'balanced';
-      ctx.estimatedProfileCost = 1.234;
+      ctx.activeQualityProfile =
+        qualityProfileHarness.activeQualityProfile ?? 'balanced';
+
+      if (qualityProfileHarness.forcedQualityProfile !== undefined) {
+        ctx.forcedQualityProfile = qualityProfileHarness.forcedQualityProfile;
+      }
+
+      ctx.estimatedProfileCost = qualityProfileHarness.estimatedProfileCost;
+
       ctx.climateTargets = {
         fogDensity: 0.003,
         bloomStrength: 0.9,
       };
 
-      ctx.smokeAlphaLayer = 0.42;
+      if (smokeAlphaHarness.value !== undefined) {
+        ctx.smokeAlphaLayer = smokeAlphaHarness.value;
+      }
+
       ctx.appliedSafetyFactor = 0.93;
       ctx.appliedFogDensity = 0.003;
       ctx.appliedBloomStrength = 0.9;
@@ -297,6 +317,11 @@ describe('Oracle3DScene snapshot rich contract', () => {
 
   beforeEach(() => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+    qualityProfileHarness.activeQualityProfile = 'balanced';
+    qualityProfileHarness.forcedQualityProfile = undefined;
+    qualityProfileHarness.estimatedProfileCost = 1.234;
+    smokeAlphaHarness.value = 0.42;
 
     container = document.createElement('div');
     Object.defineProperty(container, 'clientWidth', {
@@ -385,12 +410,149 @@ describe('Oracle3DScene snapshot rich contract', () => {
     ).toBe(true);
   }
 
+  type StructuralShape =
+    | 'null'
+    | 'string'
+    | 'number'
+    | 'boolean'
+    | 'array'
+    | {
+        [key: string]: StructuralShape;
+      };
+
+  function advanceSceneRuntime(ms = 96) {
+    act(() => {
+      vi.advanceTimersByTime(ms);
+    });
+  }
+
+  function toStructuralShape(value: unknown): StructuralShape {
+    if (value === null) return 'null';
+    if (Array.isArray(value)) return 'array';
+
+    const valueType = typeof value;
+
+    if (
+      valueType === 'string' ||
+      valueType === 'number' ||
+      valueType === 'boolean'
+    ) {
+      return valueType;
+    }
+
+    if (valueType !== 'object') {
+      return 'string';
+    }
+
+    return Object.keys(value as Record<string, unknown>)
+      .sort()
+      .reduce(
+        (acc, key) => {
+          acc[key] = toStructuralShape((value as Record<string, unknown>)[key]);
+          return acc;
+        },
+        {} as Record<string, StructuralShape>,
+      );
+  }
+
+  function snapshotStructuralSignature(snapshot: any) {
+    return {
+      root: Object.keys(snapshot).sort(),
+      telemetry: Object.keys(snapshot.telemetry || {}).sort(),
+      sceneStats: Object.keys(snapshot.sceneStats || {}).sort(),
+      uiWindow: Object.keys(snapshot.uiWindow || {}).sort(),
+      uiWindowLayers: Object.keys(snapshot.uiWindow?.layers || {}).sort(),
+      dom: Object.keys(snapshot.dom || {}).sort(),
+      fluid: Object.keys(snapshot.fluid || {}).sort(),
+      shape: toStructuralShape(snapshot),
+    };
+  }
+
+  function readRuntimeSnapshotVersion() {
+    const activeScene = (window as any).__ORB_ACTIVE_SCENE__;
+    return activeScene?.orchestrator?.ctx?.runtimeTelemetry?.snapshotVersion;
+  }
+
+  function expectQualityProfileContract(
+    telemetry: any,
+    expected: {
+      activeQualityProfile?: string | null;
+      forcedQualityProfile?: string | null;
+    } = {},
+  ) {
+    expect(telemetry).toBeDefined();
+    expect(typeof telemetry).toBe('object');
+
+    expect(
+      Object.prototype.hasOwnProperty.call(telemetry, 'activeQualityProfile'),
+    ).toBe(true);
+    expect(
+      Object.prototype.hasOwnProperty.call(telemetry, 'forcedQualityProfile'),
+    ).toBe(true);
+    expect(
+      Object.prototype.hasOwnProperty.call(telemetry, 'estimatedProfileCost'),
+    ).toBe(true);
+
+    expect(
+      telemetry.activeQualityProfile === null ||
+        typeof telemetry.activeQualityProfile === 'string',
+    ).toBe(true);
+
+    expect(
+      telemetry.forcedQualityProfile === null ||
+        typeof telemetry.forcedQualityProfile === 'string',
+    ).toBe(true);
+
+    expect(
+      typeof telemetry.estimatedProfileCost === 'number' &&
+        Number.isFinite(telemetry.estimatedProfileCost),
+    ).toBe(true);
+
+    if (
+      Object.prototype.hasOwnProperty.call(expected, 'activeQualityProfile')
+    ) {
+      expect(telemetry.activeQualityProfile).toBe(
+        expected.activeQualityProfile,
+      );
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(expected, 'forcedQualityProfile')
+    ) {
+      expect(telemetry.forcedQualityProfile).toBe(
+        expected.forcedQualityProfile,
+      );
+    }
+  }
+
+  function expectSmokeAlphaLayerContract(
+    telemetry: any,
+    expected: {
+      smokeAlphaLayer?: number | null;
+    } = {},
+  ) {
+    expect(telemetry).toBeDefined();
+    expect(typeof telemetry).toBe('object');
+
+    expect(
+      Object.prototype.hasOwnProperty.call(telemetry, 'smokeAlphaLayer'),
+    ).toBe(true);
+
+    expect(
+      telemetry.smokeAlphaLayer === null ||
+        (typeof telemetry.smokeAlphaLayer === 'number' &&
+          Number.isFinite(telemetry.smokeAlphaLayer)),
+    ).toBe(true);
+
+    if (Object.prototype.hasOwnProperty.call(expected, 'smokeAlphaLayer')) {
+      expect(telemetry.smokeAlphaLayer).toBe(expected.smokeAlphaLayer);
+    }
+  }
+
   it('locks the enriched telemetry structure exposed by snapshot()', () => {
     renderScene();
 
-    act(() => {
-      vi.advanceTimersByTime(96);
-    });
+    advanceSceneRuntime();
 
     const audit = getAuditBridge();
     const snapshot = audit.snapshot();
@@ -407,12 +569,12 @@ describe('Oracle3DScene snapshot rich contract', () => {
       expect.objectContaining({
         sampleCount: expect.any(Number),
         frameWindowSize: expect.any(Number),
-        meanFrameTime: expect.anything(),
-        worstFrameTime: expect.anything(),
-        p50: expect.anything(),
-        p95: expect.anything(),
-        p99: expect.anything(),
-        avgFpsWindow: expect.anything(),
+        meanFrameTime: expect.any(Number),
+        worstFrameTime: expect.any(Number),
+        p50: expect.any(Number),
+        p95: expect.any(Number),
+        p99: expect.any(Number),
+        avgFpsWindow: expect.any(Number),
         drawCalls: expect.any(Number),
         triangles: expect.any(Number),
         points: expect.any(Number),
@@ -426,7 +588,6 @@ describe('Oracle3DScene snapshot rich contract', () => {
         fogEnabled: expect.any(Boolean),
         shadowMapEnabled: expect.any(Boolean),
         fluidParticleCount: expect.any(Number),
-        activeQualityProfile: expect.anything(),
         estimatedProfileCost: expect.any(Number),
         rebuildCount: expect.any(Number),
         resetCount: expect.any(Number),
@@ -455,10 +616,8 @@ describe('Oracle3DScene snapshot rich contract', () => {
     expect(telemetry.resetCount).toBeGreaterThanOrEqual(0);
     expect(telemetry.reinitCount).toBeGreaterThanOrEqual(0);
 
-    expect(
-      typeof telemetry.activeQualityProfile === 'string' ||
-        telemetry.activeQualityProfile === null,
-    ).toBe(true);
+    expectQualityProfileContract(telemetry);
+    expectSmokeAlphaLayerContract(telemetry, { smokeAlphaLayer: 0.42 });
 
     expect(snapshot.uiWindow.layers).toEqual(
       expect.objectContaining({
@@ -471,9 +630,7 @@ describe('Oracle3DScene snapshot rich contract', () => {
   it('persists the rich snapshot in runtimeTelemetry.lastSnapshot with a stable version marker', () => {
     renderScene();
 
-    act(() => {
-      vi.advanceTimersByTime(96);
-    });
+    advanceSceneRuntime();
 
     const audit = getAuditBridge();
     const snapshot = audit.snapshot();
@@ -493,12 +650,12 @@ describe('Oracle3DScene snapshot rich contract', () => {
 
     expect(ctx.runtimeTelemetry.lastSnapshot.telemetry).toEqual(
       expect.objectContaining({
-        meanFrameTime: expect.anything(),
-        worstFrameTime: expect.anything(),
-        p50: expect.anything(),
-        p95: expect.anything(),
-        p99: expect.anything(),
-        avgFpsWindow: expect.anything(),
+        meanFrameTime: expect.any(Number),
+        worstFrameTime: expect.any(Number),
+        p50: expect.any(Number),
+        p95: expect.any(Number),
+        p99: expect.any(Number),
+        avgFpsWindow: expect.any(Number),
         drawCalls: expect.any(Number),
         triangles: expect.any(Number),
         points: expect.any(Number),
@@ -512,12 +669,315 @@ describe('Oracle3DScene snapshot rich contract', () => {
         fogEnabled: expect.any(Boolean),
         shadowMapEnabled: expect.any(Boolean),
         fluidParticleCount: expect.any(Number),
-        activeQualityProfile: expect.anything(),
         estimatedProfileCost: expect.any(Number),
         rebuildCount: expect.any(Number),
         resetCount: expect.any(Number),
         reinitCount: expect.any(Number),
       }),
     );
+
+    expectQualityProfileContract(ctx.runtimeTelemetry.lastSnapshot.telemetry);
+    expectSmokeAlphaLayerContract(ctx.runtimeTelemetry.lastSnapshot.telemetry, {
+      smokeAlphaLayer: 0.42,
+    });
+  });
+
+  it('keeps snapshot() structurally stable across reset, reseed and live reinit cycles', () => {
+    renderScene({
+      formData: { seed: 'alpha' },
+      stage: 2,
+      loading: false,
+      result: { seed: 'alpha', visualParams: { seed: 'alpha' } },
+    });
+
+    advanceSceneRuntime();
+
+    const audit = getAuditBridge();
+
+    const beforeReset = audit.snapshot();
+    expect(beforeReset).toBeDefined();
+    expect(beforeReset.telemetry).toBeDefined();
+    expect(readRuntimeSnapshotVersion()).toBe('scene-rich-v2');
+
+    const baselineSignature = snapshotStructuralSignature(beforeReset);
+    const baselineResetCount = beforeReset.telemetry.resetCount;
+    const baselineReinitCount = beforeReset.telemetry.reinitCount;
+
+    act(() => {
+      audit.resetScene('snapshot-contract-reset');
+      vi.advanceTimersByTime(48);
+    });
+
+    const afterReset = audit.snapshot();
+    expect(afterReset).toBeDefined();
+    expect(afterReset.telemetry.resetCount).toBeGreaterThan(baselineResetCount);
+    expect(afterReset.telemetry.reinitCount).toBeGreaterThanOrEqual(
+      baselineReinitCount,
+    );
+    expect(snapshotStructuralSignature(afterReset)).toEqual(baselineSignature);
+    expect(readRuntimeSnapshotVersion()).toBe('scene-rich-v2');
+
+    const afterResetCount = afterReset.telemetry.resetCount;
+    const afterResetReinitCount = afterReset.telemetry.reinitCount;
+
+    act(() => {
+      audit.setSeed('beta');
+      vi.advanceTimersByTime(48);
+    });
+
+    const afterReseed = audit.snapshot();
+    expect(afterReseed).toBeDefined();
+    expect(afterReseed.telemetry.resetCount).toBeGreaterThan(afterResetCount);
+    expect(afterReseed.telemetry.reinitCount).toBeGreaterThan(
+      afterResetReinitCount,
+    );
+    expect(snapshotStructuralSignature(afterReseed)).toEqual(baselineSignature);
+    expect(readRuntimeSnapshotVersion()).toBe('scene-rich-v2');
+
+    const afterReseedResetCount = afterReseed.telemetry.resetCount;
+    const afterReseedReinitCount = afterReseed.telemetry.reinitCount;
+
+    renderScene({
+      formData: { seed: 'gamma' },
+      stage: 2,
+      loading: false,
+      result: { seed: 'gamma', visualParams: { seed: 'gamma' } },
+    });
+
+    advanceSceneRuntime();
+
+    const afterLiveReinit = audit.snapshot();
+    expect(afterLiveReinit).toBeDefined();
+    expect(afterLiveReinit.telemetry.resetCount).toBeGreaterThan(
+      afterReseedResetCount,
+    );
+    expect(afterLiveReinit.telemetry.reinitCount).toBeGreaterThan(
+      afterReseedReinitCount,
+    );
+    expect(snapshotStructuralSignature(afterLiveReinit)).toEqual(
+      baselineSignature,
+    );
+    expect(readRuntimeSnapshotVersion()).toBe('scene-rich-v2');
+  });
+
+  it('keeps activeQualityProfile and forcedQualityProfile stable without a governor', () => {
+    renderScene({
+      formData: { seed: 'alpha' },
+      stage: 2,
+      loading: false,
+      result: { seed: 'alpha', visualParams: { seed: 'alpha' } },
+    });
+
+    advanceSceneRuntime();
+
+    const audit = getAuditBridge();
+
+    const beforeReset = audit.snapshot();
+    expectQualityProfileContract(beforeReset.telemetry, {
+      activeQualityProfile: 'balanced',
+      forcedQualityProfile: null,
+    });
+
+    act(() => {
+      audit.resetScene('quality-profile-reset');
+      vi.advanceTimersByTime(48);
+    });
+
+    const afterReset = audit.snapshot();
+    expectQualityProfileContract(afterReset.telemetry, {
+      activeQualityProfile: 'balanced',
+      forcedQualityProfile: null,
+    });
+
+    act(() => {
+      audit.setSeed('beta');
+      vi.advanceTimersByTime(48);
+    });
+
+    const afterReseed = audit.snapshot();
+    expectQualityProfileContract(afterReseed.telemetry, {
+      activeQualityProfile: 'balanced',
+      forcedQualityProfile: null,
+    });
+
+    renderScene({
+      formData: { seed: 'gamma' },
+      stage: 2,
+      loading: false,
+      result: { seed: 'gamma', visualParams: { seed: 'gamma' } },
+    });
+
+    advanceSceneRuntime();
+
+    const afterLiveReinit = audit.snapshot();
+    expectQualityProfileContract(afterLiveReinit.telemetry, {
+      activeQualityProfile: 'balanced',
+      forcedQualityProfile: null,
+    });
+  });
+
+  it('documents forcedQualityProfile when injected without over-specifying future governor logic', () => {
+    qualityProfileHarness.activeQualityProfile = 'balanced';
+    qualityProfileHarness.forcedQualityProfile = 'quality-forced:test';
+    qualityProfileHarness.estimatedProfileCost = 2.468;
+
+    renderScene({
+      formData: { seed: 'alpha' },
+      stage: 2,
+      loading: false,
+      result: { seed: 'alpha', visualParams: { seed: 'alpha' } },
+    });
+
+    advanceSceneRuntime();
+
+    const audit = getAuditBridge();
+
+    const beforeReset = audit.snapshot();
+    expectQualityProfileContract(beforeReset.telemetry, {
+      activeQualityProfile: 'balanced',
+      forcedQualityProfile: 'quality-forced:test',
+    });
+    expect(beforeReset.telemetry.estimatedProfileCost).toBeCloseTo(2.468, 3);
+
+    act(() => {
+      audit.resetScene('forced-quality-reset');
+      vi.advanceTimersByTime(48);
+    });
+
+    const afterReset = audit.snapshot();
+    expectQualityProfileContract(afterReset.telemetry, {
+      activeQualityProfile: 'balanced',
+      forcedQualityProfile: 'quality-forced:test',
+    });
+
+    act(() => {
+      audit.setSeed('beta');
+      vi.advanceTimersByTime(48);
+    });
+
+    const afterReseed = audit.snapshot();
+    expectQualityProfileContract(afterReseed.telemetry, {
+      activeQualityProfile: 'balanced',
+      forcedQualityProfile: 'quality-forced:test',
+    });
+  });
+
+  it('keeps smokeAlphaLayer stable when a runtime source exists', () => {
+    smokeAlphaHarness.value = 0.42;
+
+    renderScene({
+      formData: { seed: 'alpha' },
+      stage: 2,
+      loading: false,
+      result: { seed: 'alpha', visualParams: { seed: 'alpha' } },
+    });
+
+    advanceSceneRuntime();
+
+    const audit = getAuditBridge();
+
+    const beforeReset = audit.snapshot();
+    expectSmokeAlphaLayerContract(beforeReset.telemetry, {
+      smokeAlphaLayer: 0.42,
+    });
+
+    act(() => {
+      audit.resetScene('smoke-alpha-reset');
+      vi.advanceTimersByTime(48);
+    });
+
+    const afterReset = audit.snapshot();
+    expectSmokeAlphaLayerContract(afterReset.telemetry, {
+      smokeAlphaLayer: 0.42,
+    });
+
+    act(() => {
+      audit.setSeed('beta');
+      vi.advanceTimersByTime(48);
+    });
+
+    const afterReseed = audit.snapshot();
+    expectSmokeAlphaLayerContract(afterReseed.telemetry, {
+      smokeAlphaLayer: 0.42,
+    });
+
+    renderScene({
+      formData: { seed: 'gamma' },
+      stage: 2,
+      loading: false,
+      result: { seed: 'gamma', visualParams: { seed: 'gamma' } },
+    });
+
+    advanceSceneRuntime();
+
+    const afterLiveReinit = audit.snapshot();
+    expectSmokeAlphaLayerContract(afterLiveReinit.telemetry, {
+      smokeAlphaLayer: 0.42,
+    });
+  });
+
+  it('accepts smokeAlphaLayer as nullable without crash when no runtime source is present', () => {
+    smokeAlphaHarness.value = undefined;
+
+    renderScene({
+      formData: { seed: 'alpha' },
+      stage: 2,
+      loading: false,
+      result: { seed: 'alpha', visualParams: { seed: 'alpha' } },
+    });
+
+    advanceSceneRuntime();
+
+    const audit = getAuditBridge();
+
+    const beforeReset = audit.snapshot();
+    expect(beforeReset).toBeDefined();
+    expectSmokeAlphaLayerContract(beforeReset.telemetry, {
+      smokeAlphaLayer: null,
+    });
+
+    act(() => {
+      audit.resetScene('smoke-alpha-null-reset');
+      vi.advanceTimersByTime(48);
+    });
+
+    const afterReset = audit.snapshot();
+    expect(afterReset).toBeDefined();
+    expectSmokeAlphaLayerContract(afterReset.telemetry, {
+      smokeAlphaLayer: null,
+    });
+
+    act(() => {
+      audit.setSeed('beta');
+      vi.advanceTimersByTime(48);
+    });
+
+    const afterReseed = audit.snapshot();
+    expect(afterReseed).toBeDefined();
+    expectSmokeAlphaLayerContract(afterReseed.telemetry, {
+      smokeAlphaLayer: null,
+    });
+
+    renderScene({
+      formData: { seed: 'gamma' },
+      stage: 2,
+      loading: false,
+      result: { seed: 'gamma', visualParams: { seed: 'gamma' } },
+    });
+
+    advanceSceneRuntime();
+
+    const afterLiveReinit = audit.snapshot();
+    expect(afterLiveReinit).toBeDefined();
+    expectSmokeAlphaLayerContract(afterLiveReinit.telemetry, {
+      smokeAlphaLayer: null,
+    });
+
+    const activeScene = (window as any).__ORB_ACTIVE_SCENE__;
+    const ctx = activeScene?.orchestrator?.ctx;
+    expect(ctx?.runtimeTelemetry?.lastSnapshot?.telemetry).toBeDefined();
+    expectSmokeAlphaLayerContract(ctx.runtimeTelemetry.lastSnapshot.telemetry, {
+      smokeAlphaLayer: null,
+    });
   });
 });

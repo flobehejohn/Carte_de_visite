@@ -421,6 +421,15 @@ function objectUsesLayer(
   return (obj.layers.mask & mask) === mask;
 }
 
+function resolveLayerMaskForSnapshot(
+  explicitMask: number | null | undefined,
+  fallbackLayer: number | null | undefined,
+): number | null {
+  if (typeof explicitMask === 'number') return explicitMask;
+  if (typeof fallbackLayer !== 'number') return null;
+  return 1 << fallbackLayer;
+}
+
 function ensureOverlayFluidIsolationConfig(localCtx: any) {
   ensureFluidParticlesConfig(localCtx);
   localCtx.fluidParticlesConfig.excludeFromComposer = true;
@@ -777,14 +786,14 @@ function collectSceneStats(
         : null,
     fluidMeshVisible: Boolean(localCtx.fluidParticlesState?.mesh?.visible),
     particlesPointsVisible: Boolean(localCtx.particlesPoints?.visible),
-    fluidMeshLayerMask:
-      typeof localCtx.fluidParticlesState?.mesh?.layers?.mask === 'number'
-        ? localCtx.fluidParticlesState.mesh.layers.mask
-        : null,
-    particlesPointsLayerMask:
-      typeof localCtx.particlesPoints?.layers?.mask === 'number'
-        ? localCtx.particlesPoints.layers.mask
-        : null,
+    fluidMeshLayerMask: resolveLayerMaskForSnapshot(
+      localCtx.fluidParticlesState?.mesh?.layers?.mask,
+      localCtx.fluidParticlesConfig?.renderLayer ?? ORB_OVERLAY_RENDER_LAYER,
+    ),
+    particlesPointsLayerMask: resolveLayerMaskForSnapshot(
+      localCtx.particlesPoints?.layers?.mask,
+      localCtx.fluidParticlesConfig?.renderLayer ?? ORB_OVERLAY_RENDER_LAYER,
+    ),
     sceneChildren: scene.children.length,
     cameraLayerMask:
       typeof localCtx.camera?.layers?.mask === 'number'
@@ -1762,13 +1771,19 @@ export function Oracle3DScene({
             warnings.push('webgl context lost');
           }
 
-          const fluidState = localCtx.fluidParticlesState
-            ? {
-                rebuildCount: localCtx.fluidParticlesState.rebuildCount ?? 0,
-                meshVisible: localCtx.fluidParticlesState.mesh?.visible ?? null,
-                configEnabled: localCtx.fluidParticlesConfig?.enabled ?? null,
-              }
-            : null;
+          const fluidState = {
+            rebuildCount: Number(
+              localCtx.fluidParticlesState?.rebuildCount ?? 0,
+            ),
+            meshVisible: Boolean(
+              localCtx.fluidParticlesState?.mesh?.visible ??
+              localCtx.particlesPoints?.visible ??
+              false,
+            ),
+            configEnabled: Boolean(
+              localCtx.fluidParticlesConfig?.enabled ?? true,
+            ),
+          };
 
           const particlesRuntime = (() => {
             const pw: string[] = [];
