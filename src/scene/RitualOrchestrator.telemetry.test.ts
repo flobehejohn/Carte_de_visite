@@ -10,6 +10,7 @@ const {
   climateSetMoodMock,
   climateSetVisualParamsMock,
   climateSetSeedMock,
+  climateGetRuntimeTelemetryMock,
   orbAuditCaptureStaticMock,
   applyMaterialsMock,
   mapClimateToRenderParamsMock,
@@ -47,6 +48,7 @@ const {
   climateSetMoodMock: vi.fn(),
   climateSetVisualParamsMock: vi.fn(),
   climateSetSeedMock: vi.fn(),
+  climateGetRuntimeTelemetryMock: vi.fn(),
 
   orbAuditCaptureStaticMock: vi.fn(),
 
@@ -178,6 +180,7 @@ vi.mock('./params/ClimateController', () => ({
     getTargets = climateGetTargetsMock;
     setProgress = climateSetProgressMock;
     setSeed = climateSetSeedMock;
+    getRuntimeTelemetry = climateGetRuntimeTelemetryMock;
   },
 }));
 
@@ -240,6 +243,39 @@ function createCtx() {
   return ctx;
 }
 
+function expectFiniteNonNegativeNumber(value: unknown) {
+  expect(typeof value).toBe('number');
+  expect(Number.isFinite(value)).toBe(true);
+  expect((value as number) >= 0).toBe(true);
+}
+
+function expectExactTimingShape(timings: Record<string, unknown>) {
+  const expectedKeys = [
+    'applyTargetsMs',
+    'auditBridgeMs',
+    'climateMs',
+    'fluidMs',
+    'geometryMs',
+    'lightsMs',
+    'materialsMs',
+    'motionMs',
+    'particlesMs',
+    'textMs',
+    'totalUpdateMs',
+    'volumeMs',
+  ].sort();
+
+  expect(Object.keys(timings).sort()).toEqual(expectedKeys);
+
+  for (const key of expectedKeys) {
+    expectFiniteNonNegativeNumber(timings[key]);
+  }
+
+  const zoneKeys = expectedKeys.filter((key) => key !== 'totalUpdateMs');
+  const maxZone = Math.max(...zoneKeys.map((key) => Number(timings[key])));
+  expect(Number(timings.totalUpdateMs)).toBeGreaterThanOrEqual(maxZone);
+}
+
 describe('RitualOrchestrator telemetry contract', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -268,6 +304,26 @@ describe('RitualOrchestrator telemetry contract', () => {
         particlesOpacityMul: 0.25,
         foregroundOpacity: 0.2,
       },
+    });
+
+    climateGetRuntimeTelemetryMock.mockReturnValue({
+      version: 'climate-runtime-v1',
+      updateCount: 3,
+      lastProgress: 0.6,
+      lastDtMs: 16,
+      lastUpdatedAtMs: 1234,
+      targetsVersion: 'targets-v1',
+      safetyFactor: 0.8,
+      appliedFogDensity: 0.02,
+      appliedBloomStrength: 0.7,
+      appliedVignette: 1.08,
+      appliedOpacityMuls: {
+        wireOpacityMul: 0.5,
+        particlesOpacityMul: 0.25,
+        foregroundOpacity: 0.2,
+      },
+      lastTargetsSnapshot:
+        climateGetTargetsMock.mock.results.at(-1)?.value ?? null,
     });
 
     ensureVolumeConfigMock.mockImplementation((ctx: any) => ctx.volumeConfig);
@@ -463,7 +519,7 @@ describe('RitualOrchestrator telemetry contract', () => {
     expect(ctx.bloomPass.threshold).toBeCloseTo(0.95);
   });
 
-  it('expose les timings par zone dans ctx.runtimeTelemetry.orchestratorTimings', () => {
+  it('expose les timings par zone dans ctx.runtimeTelemetry.orchestratorTimings avec une forme stable et finie', () => {
     const ctx = createCtx();
     const orch = new RitualOrchestrator(ctx);
 
@@ -476,28 +532,56 @@ describe('RitualOrchestrator telemetry contract', () => {
     expect(ctx.runtimeTelemetry.orchestratorUpdateCount).toBeGreaterThanOrEqual(
       1,
     );
-    expect(ctx.runtimeTelemetry.lastOrchestratorDtMs).toBeGreaterThan(0);
+    expectFiniteNonNegativeNumber(ctx.runtimeTelemetry.lastOrchestratorDtMs);
     expect(ctx.runtimeTelemetry.lastOrchestratorTime).toBeCloseTo(6.016);
 
-    expect(ctx.runtimeTelemetry.orchestratorTimings).toEqual(
-      expect.objectContaining({
-        climateMs: expect.any(Number),
-        applyTargetsMs: expect.any(Number),
-        motionMs: expect.any(Number),
-        geometryMs: expect.any(Number),
-        materialsMs: expect.any(Number),
-        lightsMs: expect.any(Number),
-        volumeMs: expect.any(Number),
-        particlesMs: expect.any(Number),
-        fluidMs: expect.any(Number),
-        textMs: expect.any(Number),
-        auditBridgeMs: expect.any(Number),
-        totalUpdateMs: expect.any(Number),
-      }),
+    expect(ctx.runtimeTelemetry.orchestratorTimings).toBeDefined();
+    expectExactTimingShape(ctx.runtimeTelemetry.orchestratorTimings);
+  });
+
+  it('normalise un bloc runtimeTelemetry partiel et réémet un contrat timings complet après update', () => {
+    const ctx = createCtx();
+    ctx.runtimeTelemetry = {
+      orchestratorUpdateCount: 5,
+      lastOrchestratorDtMs: 999,
+      lastOrchestratorTime: 9.99,
+      orchestratorTimings: {
+        climateMs: 42,
+      },
+    };
+
+    const orch = new RitualOrchestrator(ctx);
+
+    expect(ctx.runtimeTelemetry.orchestratorUpdateCount).toBe(5);
+    expect(ctx.runtimeTelemetry.orchestratorTimings).toBeDefined();
+    expect(
+      Object.keys(ctx.runtimeTelemetry.orchestratorTimings).sort(),
+    ).toEqual(
+      [
+        'applyTargetsMs',
+        'auditBridgeMs',
+        'climateMs',
+        'fluidMs',
+        'geometryMs',
+        'lightsMs',
+        'materialsMs',
+        'motionMs',
+        'particlesMs',
+        'textMs',
+        'totalUpdateMs',
+        'volumeMs',
+      ].sort(),
     );
 
-    expect(
-      ctx.runtimeTelemetry.orchestratorTimings.totalUpdateMs,
-    ).toBeGreaterThanOrEqual(0);
+    orch.lastTime = 7.0;
+    orch.progress = 0.55;
+    orch.update(7.016);
+
+    expect(ctx.runtimeTelemetry.orchestratorUpdateCount).toBeGreaterThanOrEqual(
+      6,
+    );
+    expectFiniteNonNegativeNumber(ctx.runtimeTelemetry.lastOrchestratorDtMs);
+    expect(ctx.runtimeTelemetry.lastOrchestratorTime).toBeCloseTo(7.016);
+    expectExactTimingShape(ctx.runtimeTelemetry.orchestratorTimings);
   });
 });

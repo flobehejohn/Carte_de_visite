@@ -295,9 +295,54 @@ vi.mock('../../scene/RitualOrchestrator', async () => {
       ctx.appliedFogDensity = 0.003;
       ctx.appliedBloomStrength = 0.9;
       ctx.appliedVignette = 0.15;
-      ctx.appliedOpacityWireMul = 0.88;
-      ctx.appliedOpacityParticlesMul = 0.9;
-      ctx.appliedOpacityForeground = 0.95;
+      ctx.runtimeTelemetry = {
+        ...(ctx.runtimeTelemetry || {}),
+        orchestratorUpdateCount: 3,
+        lastOrchestratorDtMs: 16.6,
+        lastOrchestratorTime: 6.016,
+        orchestratorTimings: {
+          climateMs: 0.4,
+          applyTargetsMs: 0.7,
+          motionMs: 0.9,
+          geometryMs: 1.4,
+          materialsMs: 0.8,
+          lightsMs: 0.5,
+          volumeMs: 1.2,
+          particlesMs: 1.0,
+          fluidMs: 0.6,
+          textMs: 0.4,
+          auditBridgeMs: 0.3,
+          totalUpdateMs: 8.9,
+        },
+      };
+
+      ctx.climateController = {
+        setMood: vi.fn(),
+        setVisualParams: vi.fn(),
+        setProgress: vi.fn(),
+        setSeed: vi.fn(),
+        update: vi.fn(),
+        getTargets: vi.fn(() => ctx.climateTargets),
+        getRuntimeTelemetry: vi.fn(() => ({
+          version: 'climate-runtime-v1',
+          lastProgress: 0.42,
+          lastDtMs: 16.6,
+          updateCount: 3,
+          lastUpdatedAtMs: 1700000000123,
+          targetsVersion: 2,
+          lastTargetsSnapshot: {
+            presetName: 'Aurore',
+            fog: { density: 0.003 },
+            bloom: { strength: 0.9 },
+            volume: { backgroundStrength: 0.8 },
+            opacity: {
+              wireOpacityMul: 0.88,
+              particlesOpacityMul: 0.9,
+              foregroundOpacity: 0.95,
+            },
+          },
+        })),
+      };
     }
 
     initRitual = orchestratorSpies.initRitual;
@@ -549,6 +594,207 @@ describe('Oracle3DScene snapshot rich contract', () => {
     }
   }
 
+  function expectOrchestratorTimingsContract(orchestratorTimings: any) {
+    expect(orchestratorTimings).toEqual(
+      expect.objectContaining({
+        climateMs: expect.any(Number),
+        applyTargetsMs: expect.any(Number),
+        motionMs: expect.any(Number),
+        geometryMs: expect.any(Number),
+        materialsMs: expect.any(Number),
+        lightsMs: expect.any(Number),
+        volumeMs: expect.any(Number),
+        particlesMs: expect.any(Number),
+        fluidMs: expect.any(Number),
+        textMs: expect.any(Number),
+        auditBridgeMs: expect.any(Number),
+        totalUpdateMs: expect.any(Number),
+      }),
+    );
+
+    Object.values(orchestratorTimings).forEach((value) => {
+      expect(typeof value).toBe('number');
+      expect(Number.isFinite(value)).toBe(true);
+      expect(value).toBeGreaterThanOrEqual(0);
+    });
+  }
+
+  function expectFluidMetricsContract(fluidMetrics: any) {
+    expect(fluidMetrics).toEqual(
+      expect.objectContaining({
+        activeParticleCount: expect.any(Number),
+        updateCount: expect.any(Number),
+        rebuildCount: expect.any(Number),
+        enabled: expect.any(Boolean),
+        visible: expect.any(Boolean),
+        fallbackWarning: expect.any(Boolean),
+        fallbackHits: expect.any(Number),
+        particlePoolSize: expect.any(Number),
+        meshCount: expect.any(Number),
+        excludeFromComposer: expect.any(Boolean),
+      }),
+    );
+
+    expect(fluidMetrics.activeParticleCount).toBeGreaterThanOrEqual(0);
+    expect(fluidMetrics.updateCount).toBeGreaterThanOrEqual(0);
+    expect(fluidMetrics.rebuildCount).toBeGreaterThanOrEqual(0);
+    expect(fluidMetrics.fallbackHits).toBeGreaterThanOrEqual(0);
+    expect(fluidMetrics.particlePoolSize).toBeGreaterThanOrEqual(0);
+    expect(fluidMetrics.meshCount).toBeGreaterThanOrEqual(0);
+
+    expectNumberOrNull(fluidMetrics.lastUpdateMs);
+    expectNumberOrNull(fluidMetrics.avgUpdateMs);
+  }
+
+  function expectClimateRuntimeContract(climateRuntime: any) {
+    expect(climateRuntime).toBeDefined();
+    expect(typeof climateRuntime).toBe('object');
+
+    expect(
+      Object.prototype.hasOwnProperty.call(climateRuntime, 'version'),
+    ).toBe(true);
+    expect(
+      Object.prototype.hasOwnProperty.call(climateRuntime, 'lastProgress'),
+    ).toBe(true);
+    expect(
+      Object.prototype.hasOwnProperty.call(climateRuntime, 'lastDtMs'),
+    ).toBe(true);
+    expect(
+      Object.prototype.hasOwnProperty.call(climateRuntime, 'updateCount'),
+    ).toBe(true);
+    expect(
+      Object.prototype.hasOwnProperty.call(climateRuntime, 'lastUpdatedAtMs'),
+    ).toBe(true);
+    expect(
+      Object.prototype.hasOwnProperty.call(climateRuntime, 'targetsVersion'),
+    ).toBe(true);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        climateRuntime,
+        'lastTargetsSnapshot',
+      ),
+    ).toBe(true);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        climateRuntime,
+        'appliedOpacityMuls',
+      ),
+    ).toBe(true);
+    expect(
+      Object.prototype.hasOwnProperty.call(climateRuntime, 'safetyFactor'),
+    ).toBe(true);
+
+    expect(
+      climateRuntime.version === null ||
+        typeof climateRuntime.version === 'string',
+    ).toBe(true);
+    expectNumberOrNull(climateRuntime.lastProgress);
+    expectNumberOrNull(climateRuntime.lastDtMs);
+    expectNumberOrNull(climateRuntime.lastUpdatedAtMs);
+    expectNumberOrNull(climateRuntime.appliedFogDensity);
+    expectNumberOrNull(climateRuntime.appliedBloomStrength);
+    expectNumberOrNull(climateRuntime.appliedVignette);
+    expectNumberOrNull(climateRuntime.safetyFactor);
+
+    expect(climateRuntime.updateCount).toBeGreaterThanOrEqual(0);
+    expect(climateRuntime.targetsVersion).toBeGreaterThanOrEqual(0);
+    expect(climateRuntime.lastTargetsSnapshot).toBeDefined();
+
+    expect(climateRuntime.appliedOpacityMuls).toBeDefined();
+    expect(typeof climateRuntime.appliedOpacityMuls).toBe('object');
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        climateRuntime.appliedOpacityMuls,
+        'wireOpacityMul',
+      ),
+    ).toBe(true);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        climateRuntime.appliedOpacityMuls,
+        'particlesOpacityMul',
+      ),
+    ).toBe(true);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        climateRuntime.appliedOpacityMuls,
+        'foregroundOpacity',
+      ),
+    ).toBe(true);
+    expectNumberOrNull(climateRuntime.appliedOpacityMuls.wireOpacityMul);
+    expectNumberOrNull(climateRuntime.appliedOpacityMuls.particlesOpacityMul);
+    expectNumberOrNull(climateRuntime.appliedOpacityMuls.foregroundOpacity);
+  }
+
+  function expectPhase22RuntimeContract(snapshot: any) {
+    expect(snapshot).toEqual(
+      expect.objectContaining({
+        orchestratorTimings: expect.any(Object),
+        fluidMetrics: expect.any(Object),
+        climateRuntime: expect.any(Object),
+        climateTargets: expect.any(Object),
+        qualityProfiles: expect.any(Object),
+        counters: expect.any(Object),
+      }),
+    );
+
+    expect(
+      snapshot.qualityProfile === null ||
+        typeof snapshot.qualityProfile === 'string',
+    ).toBe(true);
+    expect(snapshot.qualityProfiles).toBeDefined();
+    expect(typeof snapshot.qualityProfiles).toBe('object');
+    expect(
+      Object.prototype.hasOwnProperty.call(snapshot.qualityProfiles, 'current'),
+    ).toBe(true);
+    expect(
+      Object.prototype.hasOwnProperty.call(snapshot.qualityProfiles, 'forced'),
+    ).toBe(true);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        snapshot.qualityProfiles,
+        'estimatedCost',
+      ),
+    ).toBe(true);
+    expect(
+      snapshot.qualityProfiles.current === null ||
+        typeof snapshot.qualityProfiles.current === 'string',
+    ).toBe(true);
+    expect(
+      snapshot.qualityProfiles.forced === null ||
+        typeof snapshot.qualityProfiles.forced === 'string',
+    ).toBe(true);
+    expect(
+      typeof snapshot.qualityProfiles.estimatedCost === 'number' &&
+        Number.isFinite(snapshot.qualityProfiles.estimatedCost),
+    ).toBe(true);
+    expect(snapshot.counters).toEqual(
+      expect.objectContaining({
+        reset: expect.any(Number),
+        reinit: expect.any(Number),
+      }),
+    );
+
+    expectOrchestratorTimingsContract(snapshot.orchestratorTimings);
+    expectFluidMetricsContract(snapshot.fluidMetrics);
+    expectClimateRuntimeContract(snapshot.climateRuntime);
+
+    expect(snapshot.counters.reset).toBe(snapshot.telemetry.resetCount);
+    expect(snapshot.counters.reinit).toBe(snapshot.telemetry.reinitCount);
+    expect(snapshot.qualityProfile).toBe(
+      snapshot.telemetry.activeQualityProfile,
+    );
+    expect(snapshot.qualityProfiles.current).toBe(
+      snapshot.telemetry.activeQualityProfile,
+    );
+    expect(snapshot.qualityProfiles.forced).toBe(
+      snapshot.telemetry.forcedQualityProfile,
+    );
+    expect(snapshot.qualityProfiles.estimatedCost).toBeCloseTo(
+      snapshot.telemetry.estimatedProfileCost,
+      6,
+    );
+  }
+
   it('locks the enriched telemetry structure exposed by snapshot()', () => {
     renderScene();
 
@@ -618,6 +864,7 @@ describe('Oracle3DScene snapshot rich contract', () => {
 
     expectQualityProfileContract(telemetry);
     expectSmokeAlphaLayerContract(telemetry, { smokeAlphaLayer: 0.42 });
+    expectPhase22RuntimeContract(snapshot);
 
     expect(snapshot.uiWindow.layers).toEqual(
       expect.objectContaining({
@@ -644,7 +891,7 @@ describe('Oracle3DScene snapshot rich contract', () => {
     const ctx = activeScene.orchestrator?.ctx;
     expect(ctx).toBeDefined();
     expect(ctx.runtimeTelemetry).toBeDefined();
-    expect(ctx.runtimeTelemetry.snapshotVersion).toBe('scene-rich-v2');
+    expect(ctx.runtimeTelemetry.snapshotVersion).toBe('scene-rich-v3');
     expect(ctx.runtimeTelemetry.lastSnapshot).toBeDefined();
     expect(ctx.runtimeTelemetry.lastSnapshot.telemetry).toBeDefined();
 
@@ -680,6 +927,7 @@ describe('Oracle3DScene snapshot rich contract', () => {
     expectSmokeAlphaLayerContract(ctx.runtimeTelemetry.lastSnapshot.telemetry, {
       smokeAlphaLayer: 0.42,
     });
+    expectPhase22RuntimeContract(ctx.runtimeTelemetry.lastSnapshot);
   });
 
   it('keeps snapshot() structurally stable across reset, reseed and live reinit cycles', () => {
@@ -697,7 +945,7 @@ describe('Oracle3DScene snapshot rich contract', () => {
     const beforeReset = audit.snapshot();
     expect(beforeReset).toBeDefined();
     expect(beforeReset.telemetry).toBeDefined();
-    expect(readRuntimeSnapshotVersion()).toBe('scene-rich-v2');
+    expect(readRuntimeSnapshotVersion()).toBe('scene-rich-v3');
 
     const baselineSignature = snapshotStructuralSignature(beforeReset);
     const baselineResetCount = beforeReset.telemetry.resetCount;
@@ -715,7 +963,7 @@ describe('Oracle3DScene snapshot rich contract', () => {
       baselineReinitCount,
     );
     expect(snapshotStructuralSignature(afterReset)).toEqual(baselineSignature);
-    expect(readRuntimeSnapshotVersion()).toBe('scene-rich-v2');
+    expect(readRuntimeSnapshotVersion()).toBe('scene-rich-v3');
 
     const afterResetCount = afterReset.telemetry.resetCount;
     const afterResetReinitCount = afterReset.telemetry.reinitCount;
@@ -732,7 +980,7 @@ describe('Oracle3DScene snapshot rich contract', () => {
       afterResetReinitCount,
     );
     expect(snapshotStructuralSignature(afterReseed)).toEqual(baselineSignature);
-    expect(readRuntimeSnapshotVersion()).toBe('scene-rich-v2');
+    expect(readRuntimeSnapshotVersion()).toBe('scene-rich-v3');
 
     const afterReseedResetCount = afterReseed.telemetry.resetCount;
     const afterReseedReinitCount = afterReseed.telemetry.reinitCount;
@@ -757,7 +1005,7 @@ describe('Oracle3DScene snapshot rich contract', () => {
     expect(snapshotStructuralSignature(afterLiveReinit)).toEqual(
       baselineSignature,
     );
-    expect(readRuntimeSnapshotVersion()).toBe('scene-rich-v2');
+    expect(readRuntimeSnapshotVersion()).toBe('scene-rich-v3');
   });
 
   it('keeps activeQualityProfile and forcedQualityProfile stable without a governor', () => {

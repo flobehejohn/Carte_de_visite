@@ -1246,7 +1246,7 @@ export function Oracle3DScene({
       runtimeTelemetry: {
         frameWindowMs: frameWindowRef.current,
         counters: runtimeCountersRef.current,
-        snapshotVersion: 'scene-rich-v2',
+        snapshotVersion: 'scene-rich-v3',
       },
     };
 
@@ -2204,6 +2204,115 @@ export function Oracle3DScene({
                   fluidParticleCount,
                 });
 
+          const orchestratorTimings = (() => {
+            const rawTimings =
+              localCtx.runtimeTelemetry?.orchestratorTimings || {};
+            const toFiniteNumber = (value: any) => {
+              const num = Number(value);
+              return Number.isFinite(num) ? Math.max(0, num) : 0;
+            };
+
+            return {
+              climateMs: toFiniteNumber(rawTimings.climateMs),
+              applyTargetsMs: toFiniteNumber(rawTimings.applyTargetsMs),
+              motionMs: toFiniteNumber(rawTimings.motionMs),
+              geometryMs: toFiniteNumber(rawTimings.geometryMs),
+              materialsMs: toFiniteNumber(rawTimings.materialsMs),
+              lightsMs: toFiniteNumber(rawTimings.lightsMs),
+              volumeMs: toFiniteNumber(rawTimings.volumeMs),
+              particlesMs: toFiniteNumber(rawTimings.particlesMs),
+              fluidMs: toFiniteNumber(rawTimings.fluidMs),
+              textMs: toFiniteNumber(rawTimings.textMs),
+              auditBridgeMs: toFiniteNumber(rawTimings.auditBridgeMs),
+              totalUpdateMs: toFiniteNumber(rawTimings.totalUpdateMs),
+            };
+          })();
+
+          const fluidMetrics = (() => {
+            const rawState = localCtx.fluidParticlesState || {};
+            const mesh = rawState.mesh;
+            const toFiniteNumberOrNull = (value: any) => {
+              const num = Number(value);
+              return Number.isFinite(num) ? Math.max(0, num) : null;
+            };
+
+            return {
+              activeParticleCount: Number(rawState.activeParticleCount ?? 0),
+              updateCount: Number(rawState.updateCount ?? 0),
+              lastUpdateMs: toFiniteNumberOrNull(rawState.lastUpdateMs),
+              avgUpdateMs: toFiniteNumberOrNull(rawState.avgUpdateMs),
+              rebuildCount: Number(rawState.rebuildCount ?? 0),
+              enabled: Boolean(localCtx.fluidParticlesConfig?.enabled ?? true),
+              visible: Boolean(
+                mesh?.visible ?? fluidState.meshVisible ?? false,
+              ),
+              fallbackWarning: Boolean(rawState.fallbackWarning ?? false),
+              fallbackHits: Number(rawState.fallbackHits ?? 0),
+              particlePoolSize: Number(rawState.particles?.length ?? 0),
+              meshCount: Number(mesh?.count ?? 0),
+              renderLayer:
+                typeof localCtx.fluidParticlesConfig?.renderLayer === 'number'
+                  ? localCtx.fluidParticlesConfig.renderLayer
+                  : null,
+              excludeFromComposer: Boolean(
+                localCtx.fluidParticlesConfig?.excludeFromComposer ?? true,
+              ),
+            };
+          })();
+
+          const climateRuntime = (() => {
+            const rawClimateRuntime =
+              typeof localCtx.climateController?.getRuntimeTelemetry ===
+              'function'
+                ? localCtx.climateController.getRuntimeTelemetry()
+                : null;
+            const toFiniteNumberOrNull = (value: any) => {
+              const num = Number(value);
+              return Number.isFinite(num) ? num : null;
+            };
+
+            return {
+              version:
+                typeof rawClimateRuntime?.version === 'string'
+                  ? rawClimateRuntime.version
+                  : null,
+              lastProgress: toFiniteNumberOrNull(
+                rawClimateRuntime?.lastProgress,
+              ),
+              lastDtMs: toFiniteNumberOrNull(rawClimateRuntime?.lastDtMs),
+              updateCount: Number(rawClimateRuntime?.updateCount ?? 0),
+              lastUpdatedAtMs: toFiniteNumberOrNull(
+                rawClimateRuntime?.lastUpdatedAtMs,
+              ),
+              targetsVersion: Number(rawClimateRuntime?.targetsVersion ?? 0),
+              lastTargetsSnapshot: rawClimateRuntime?.lastTargetsSnapshot
+                ? serializeColors(rawClimateRuntime.lastTargetsSnapshot)
+                : climateTargets,
+              appliedFogDensity,
+              appliedBloomStrength,
+              appliedVignette,
+              appliedOpacityMuls,
+              safetyFactor,
+            };
+          })();
+
+          const qualityProfile =
+            activeQualityProfile === null ? null : String(activeQualityProfile);
+
+          const qualityProfiles = {
+            current: qualityProfile,
+            forced:
+              forcedQualityProfile === null
+                ? null
+                : String(forcedQualityProfile),
+            estimatedCost: estimatedProfileCost,
+          };
+
+          const counters = {
+            reset: runtimeCountersRef.current.resetCount,
+            reinit: runtimeCountersRef.current.reinitCount,
+          };
+
           const telemetry = {
             sampleCount: frameStats.sampleCount,
             frameWindowSize: FRAME_WINDOW_MAX_SAMPLES,
@@ -2259,6 +2368,12 @@ export function Oracle3DScene({
             volumeEffective,
             targets: climateTargets,
             climateTargets,
+            orchestratorTimings,
+            fluidMetrics,
+            climateRuntime,
+            qualityProfile,
+            qualityProfiles,
+            counters,
             safetyFactor,
             appliedFogDensity,
             appliedBloomStrength,
@@ -2279,8 +2394,13 @@ export function Oracle3DScene({
             ...(localCtx.runtimeTelemetry || {}),
             frameWindowMs: [...frameWindowRef.current],
             counters: { ...runtimeCountersRef.current },
+            orchestratorTimings,
+            fluidMetrics,
+            climateRuntime,
+            qualityProfile,
+            qualityProfiles,
             lastSnapshot: richSnapshot,
-            snapshotVersion: 'scene-rich-v2',
+            snapshotVersion: 'scene-rich-v3',
           };
 
           return richSnapshot;
