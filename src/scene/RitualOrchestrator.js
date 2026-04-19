@@ -163,6 +163,220 @@ function createEmptyOrchestratorTimings() {
   };
 }
 
+
+function createEmptyQualityProfilesTelemetry() {
+  return {
+    current: null,
+    active: null,
+    forced: null,
+    source: 'unknown',
+    reason: null,
+    estimatedCost: null,
+    dprBucket: 'normal',
+    deviceClass: 'unknown',
+    rendererArea: null,
+  };
+}
+
+function createEmptyTimingDiagnostics() {
+  return {
+    bootElapsedMs: 0,
+    isWarmup: true,
+    warmupPhase: 'boot',
+    dominantTimingKey: null,
+    dominantTimingMs: null,
+    recentRebuilds: {
+      geometry: false,
+      fluid: false,
+      materials: false,
+    },
+  };
+}
+
+function normalizeFiniteNumber(value, fallback = null) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function clampNonNegative(value, fallback = 0) {
+  const finite = normalizeFiniteNumber(value, fallback);
+  return finite == null ? fallback : Math.max(0, finite);
+}
+
+function classifyDprBucket(dpr) {
+  const safeDpr = normalizeFiniteNumber(dpr, null);
+  if (safeDpr == null) return 'normal';
+  if (safeDpr >= 2.5) return 'ultra';
+  if (safeDpr >= 1.5) return 'high';
+  return 'normal';
+}
+
+function inferDeviceClass(rendererWidth, rendererHeight) {
+  const width = normalizeFiniteNumber(rendererWidth, null);
+  const height = normalizeFiniteNumber(rendererHeight, null);
+  const minSide =
+    width != null && height != null ? Math.min(width, height) : null;
+  const maxSide =
+    width != null && height != null ? Math.max(width, height) : null;
+
+  if (minSide == null || maxSide == null) return 'unknown';
+  if (minSide <= 480) return 'mobile';
+  if (minSide <= 900 && maxSide <= 1180) return 'tablet';
+  return 'desktop';
+}
+
+function deriveFallbackQualityProfile(deviceClass, dprBucket) {
+  if (deviceClass === 'mobile') {
+    if (dprBucket === 'ultra') return 'mobile-ultra-safe';
+    if (dprBucket === 'high') return 'mobile-high-dpr';
+    return 'mobile-safe';
+  }
+  if (deviceClass === 'tablet') {
+    if (dprBucket === 'ultra') return 'tablet-ultra-balanced';
+    if (dprBucket === 'high') return 'tablet-high-dpr';
+    return 'tablet-balanced';
+  }
+  if (deviceClass === 'desktop') {
+    if (dprBucket === 'ultra') return 'desktop-ultra-dpr';
+    if (dprBucket === 'high') return 'desktop-high-dpr';
+    return 'desktop-standard';
+  }
+  return 'fallback-balanced';
+}
+
+function readRendererMetrics(ctx) {
+  const renderer = ctx?.renderer;
+  const fromTelemetry = ctx?.runtimeTelemetry?.rendererSize ?? ctx?.rendererSize ?? null;
+
+  let width = normalizeFiniteNumber(fromTelemetry?.w ?? fromTelemetry?.width, null);
+  let height = normalizeFiniteNumber(fromTelemetry?.h ?? fromTelemetry?.height, null);
+  let dpr = normalizeFiniteNumber(ctx?.runtimeTelemetry?.dpr ?? ctx?.dpr, null);
+
+  if (renderer && typeof renderer.getPixelRatio === 'function') {
+    dpr = normalizeFiniteNumber(renderer.getPixelRatio(), dpr);
+  }
+
+  if (renderer && typeof renderer.getSize === 'function') {
+    try {
+      const size = renderer.getSize(new THREE.Vector2());
+      width = normalizeFiniteNumber(size?.x, width);
+      height = normalizeFiniteNumber(size?.y, height);
+    } catch {
+      // silence volontaire
+    }
+  }
+
+  if ((width == null || height == null) && typeof window !== 'undefined') {
+    width = normalizeFiniteNumber(window.innerWidth, width);
+    height = normalizeFiniteNumber(window.innerHeight, height);
+  }
+
+  if (dpr == null && typeof window !== 'undefined') {
+    dpr = normalizeFiniteNumber(window.devicePixelRatio, 1);
+  }
+
+  const rendererArea =
+    width != null && height != null ? Math.max(0, Math.round(width * height)) : null;
+
+  return {
+    width,
+    height,
+    dpr,
+    rendererArea,
+    dprBucket: classifyDprBucket(dpr),
+    deviceClass: inferDeviceClass(width, height),
+  };
+}
+
+function buildQualityProfileTelemetry(ctx) {
+  const metrics = readRendererMetrics(ctx);
+  const existing = ctx?.qualityProfiles ?? ctx?.runtimeTelemetry?.qualityProfiles ?? {};
+
+  const forced =
+    typeof existing?.forced === 'string' && existing.forced.trim()
+      ? existing.forced.trim()
+      : typeof ctx?.forcedQualityProfile === 'string' && ctx.forcedQualityProfile.trim()
+        ? ctx.forcedQualityProfile.trim()
+        : null;
+
+  const declaredCurrent =
+    typeof existing?.current === 'string' && existing.current.trim()
+      ? existing.current.trim()
+      : typeof ctx?.qualityProfile === 'string' && ctx.qualityProfile.trim()
+        ? ctx.qualityProfile.trim()
+        : null;
+
+  const active = forced ?? declaredCurrent ?? deriveFallbackQualityProfile(metrics.deviceClass, metrics.dprBucket);
+
+  const source = forced
+    ? 'forced'
+    : declaredCurrent
+      ? 'auto-detected'
+      : 'fallback';
+
+  const reason = forced
+    ? 'ctx forced quality profile'
+    : declaredCurrent
+      ? 'ctx current quality profile'
+      : `derived from ${metrics.deviceClass}/${metrics.dprBucket}`;
+
+  const estimatedCost = normalizeFiniteNumber(existing?.estimatedCost, null);
+
+  return {
+    current: active,
+    active,
+    forced,
+    source,
+    reason,
+    estimatedCost,
+    dprBucket: metrics.dprBucket,
+    deviceClass: metrics.deviceClass,
+    rendererArea: metrics.rendererArea,
+  };
+}
+
+function buildTimingDiagnostics({
+  timings,
+  frameCount,
+  bootElapsedMs,
+  geometryRecent = false,
+  fluidRecent = false,
+  materialsRecent = false,
+}) {
+  const candidates = Object.entries({
+    climateMs: timings?.climateMs ?? 0,
+    applyTargetsMs: timings?.applyTargetsMs ?? 0,
+    motionMs: timings?.motionMs ?? 0,
+    geometryMs: timings?.geometryMs ?? 0,
+    materialsMs: timings?.materialsMs ?? 0,
+    lightsMs: timings?.lightsMs ?? 0,
+    volumeMs: timings?.volumeMs ?? 0,
+    particlesMs: timings?.particlesMs ?? 0,
+    fluidMs: timings?.fluidMs ?? 0,
+    textMs: timings?.textMs ?? 0,
+    auditBridgeMs: timings?.auditBridgeMs ?? 0,
+  }).sort((a, b) => Number(b[1]) - Number(a[1]));
+
+  const dominantTimingKey = candidates[0]?.[0] ?? null;
+  const dominantTimingMs = normalizeFiniteNumber(candidates[0]?.[1], null);
+
+  let warmupPhase = 'steady';
+  if (frameCount < 5) warmupPhase = 'boot';
+  else if (frameCount < 20) warmupPhase = 'warming';
+
+  return {
+    bootElapsedMs: clampNonNegative(bootElapsedMs, 0),
+    isWarmup: frameCount < 20,
+    warmupPhase,
+    dominantTimingKey,
+    dominantTimingMs,
+    recentRebuilds: {
+      geometry: !!geometryRecent,
+      fluid: !!fluidRecent,
+      materials: !!materialsRecent,
+    },
+  };
+}
+
 function buildVolumeSafe(ctx) {
   if (isFn(orbVolumes.buildVolume)) return orbVolumes.buildVolume(ctx);
   if (isFn(orbVolumes.setVolumeConfig))
@@ -239,6 +453,10 @@ export class RitualOrchestrator {
     this.isVRT = false;
     this.vrtTime = null;
     this._vrtWarmedUp = false;
+    this._bootStartedAtMs = nowMs();
+    this._lastGeometryRebuildFrame = -1;
+    this._lastFluidRebuildFrame = -1;
+    this._lastMaterialsWriteFrame = -1;
 
     this.ctx.runtimeTelemetry = {
       ...(this.ctx.runtimeTelemetry || {}),
@@ -255,6 +473,23 @@ export class RitualOrchestrator {
         ...createEmptyOrchestratorTimings(),
         ...(this.ctx?.runtimeTelemetry?.orchestratorTimings || {}),
       },
+      qualityProfiles: {
+        ...createEmptyQualityProfilesTelemetry(),
+        ...(this.ctx?.runtimeTelemetry?.qualityProfiles || {}),
+      },
+      timingDiagnostics: {
+        ...createEmptyTimingDiagnostics(),
+        ...(this.ctx?.runtimeTelemetry?.timingDiagnostics || {}),
+      },
+    };
+
+    this.ctx.qualityProfiles = {
+      ...createEmptyQualityProfilesTelemetry(),
+      ...(this.ctx?.qualityProfiles || {}),
+    };
+    this.ctx.timingDiagnostics = {
+      ...createEmptyTimingDiagnostics(),
+      ...(this.ctx?.timingDiagnostics || {}),
     };
 
     if (typeof window !== 'undefined') {
@@ -1320,6 +1555,10 @@ export class RitualOrchestrator {
       this.ctx.climateController.setProgress(this.progress);
       this.ctx.climateController.update(dtMs);
       this.ctx.climateTargets = this.ctx.climateController.getTargets();
+      if (typeof this.ctx.climateController.getRuntimeTelemetry === 'function') {
+        this.ctx.climateRuntime =
+          this.ctx.climateController.getRuntimeTelemetry() ?? null;
+      }
       orchestratorTimings.climateMs = elapsedMs(climateStartMs);
     }
 
@@ -1469,6 +1708,14 @@ export class RitualOrchestrator {
       orbPoly.updatePolyDeformation?.(this.ctx, time);
 
       orchestratorTimings.geometryMs = elapsedMs(geometryStartMs);
+      if (
+        orchestratorTimings.geometryMs >= 2.0 ||
+        this.hatchPulse > 0.01 ||
+        this.progress >= 0.82
+      ) {
+        this._lastGeometryRebuildFrame =
+          Number(this.ctx?.runtimeTelemetry?.orchestratorUpdateCount ?? 0) + 1;
+      }
     }
 
     const drift = g?.lighting?.drift ?? 0.2;
@@ -1517,6 +1764,8 @@ export class RitualOrchestrator {
 
         const materialsRuntimeFlags = this.ctx?.runtimeFlags?.materials ?? null;
         applyMaterials(this.ctx, rp, dtMs, materialsRuntimeFlags);
+        this._lastMaterialsWriteFrame =
+          Number(this.ctx?.runtimeTelemetry?.orchestratorUpdateCount ?? 0) + 1;
 
         if (this.ctx?.runtimeFlags?.emergencyMode) {
           if (this.foregroundMesh) {
@@ -1654,6 +1903,14 @@ export class RitualOrchestrator {
       orbFluidParticles.updateFluidParticles?.(this.ctx, dt);
 
       orchestratorTimings.fluidMs = elapsedMs(fluidStartMs);
+      if (
+        this.ctx?.ritualGenome?.fluid?.enabled ||
+        orchestratorTimings.fluidMs >= 0.75 ||
+        (this.isVRT && this._vrtWarmedUp)
+      ) {
+        this._lastFluidRebuildFrame =
+          Number(this.ctx?.runtimeTelemetry?.orchestratorUpdateCount ?? 0) + 1;
+      }
     }
 
     {
@@ -1730,13 +1987,37 @@ export class RitualOrchestrator {
 
     orchestratorTimings.totalUpdateMs = elapsedMs(totalUpdateStartMs);
 
+    const nextFrameCount =
+      Number(this.ctx?.runtimeTelemetry?.orchestratorUpdateCount ?? 0) + 1;
+    const qualityProfiles = buildQualityProfileTelemetry(this.ctx);
+    const timingDiagnostics = buildTimingDiagnostics({
+      timings: orchestratorTimings,
+      frameCount: nextFrameCount,
+      bootElapsedMs: elapsedMs(this._bootStartedAtMs),
+      geometryRecent: this._lastGeometryRebuildFrame === nextFrameCount,
+      fluidRecent: this._lastFluidRebuildFrame === nextFrameCount,
+      materialsRecent: this._lastMaterialsWriteFrame === nextFrameCount,
+    });
+
+    this.ctx.activeQualityProfile = qualityProfiles.active;
+    this.ctx.forcedQualityProfile = qualityProfiles.forced;
+    this.ctx.qualityProfile = qualityProfiles.current;
+    this.ctx.qualityProfileSource = qualityProfiles.source;
+    this.ctx.qualityProfileReason = qualityProfiles.reason;
+    this.ctx.dprBucket = qualityProfiles.dprBucket;
+    this.ctx.deviceClass = qualityProfiles.deviceClass;
+    this.ctx.rendererArea = qualityProfiles.rendererArea;
+    this.ctx.qualityProfiles = qualityProfiles;
+    this.ctx.timingDiagnostics = timingDiagnostics;
+
     this.ctx.runtimeTelemetry = {
       ...(this.ctx.runtimeTelemetry || {}),
-      orchestratorUpdateCount:
-        Number(this.ctx?.runtimeTelemetry?.orchestratorUpdateCount ?? 0) + 1,
+      orchestratorUpdateCount: nextFrameCount,
       lastOrchestratorDtMs: dtMs,
       lastOrchestratorTime: time,
       orchestratorTimings,
+      qualityProfiles,
+      timingDiagnostics,
     };
   }
 }

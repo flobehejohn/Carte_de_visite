@@ -201,6 +201,8 @@ function createCtx() {
 
   const renderer = {
     toneMappingExposure: 1.6,
+    getPixelRatio: vi.fn(() => 2),
+    getSize: vi.fn(() => ({ x: 1280, y: 720 })),
   };
 
   const bloomPass = {
@@ -583,5 +585,52 @@ describe('RitualOrchestrator telemetry contract', () => {
     expectFiniteNonNegativeNumber(ctx.runtimeTelemetry.lastOrchestratorDtMs);
     expect(ctx.runtimeTelemetry.lastOrchestratorTime).toBeCloseTo(7.016);
     expectExactTimingShape(ctx.runtimeTelemetry.orchestratorTimings);
+  });
+
+  it('expose des profils qualité explicites et un diagnostic de timings attribuable', () => {
+    const ctx = createCtx();
+    ctx.qualityProfiles = {
+      current: 'desktop-standard',
+      forced: null,
+      estimatedCost: 1.25,
+    };
+
+    const orch = new RitualOrchestrator(ctx);
+    orch.lastTime = 8.0;
+    orch.progress = 0.88;
+    orch.hatchPulse = 0.3;
+
+    orch.update(8.016);
+
+    expect(ctx.qualityProfile).toBe('desktop-standard');
+    expect(ctx.activeQualityProfile).toBe('desktop-standard');
+    expect(ctx.forcedQualityProfile).toBeNull();
+    expect(ctx.qualityProfileSource).toBe('auto-detected');
+    expect(ctx.dprBucket).toBe('high');
+    expect(ctx.deviceClass).toBe('desktop');
+    expect(ctx.rendererArea).toBe(921600);
+
+    expect(ctx.runtimeTelemetry.qualityProfiles).toMatchObject({
+      current: 'desktop-standard',
+      active: 'desktop-standard',
+      source: 'auto-detected',
+      dprBucket: 'high',
+      deviceClass: 'desktop',
+      rendererArea: 921600,
+    });
+
+    expect(ctx.timingDiagnostics).toBeDefined();
+    expectFiniteNonNegativeNumber(ctx.timingDiagnostics.bootElapsedMs);
+    expect(typeof ctx.timingDiagnostics.isWarmup).toBe('boolean');
+    expect(['boot', 'warming', 'steady']).toContain(
+      ctx.timingDiagnostics.warmupPhase,
+    );
+    expect(typeof ctx.timingDiagnostics.dominantTimingKey).toBe('string');
+    expectFiniteNonNegativeNumber(ctx.timingDiagnostics.dominantTimingMs);
+    expect(ctx.timingDiagnostics.recentRebuilds).toMatchObject({
+      geometry: expect.any(Boolean),
+      fluid: expect.any(Boolean),
+      materials: expect.any(Boolean),
+    });
   });
 });

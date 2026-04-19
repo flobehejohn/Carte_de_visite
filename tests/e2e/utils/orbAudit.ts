@@ -264,7 +264,7 @@ export async function readSerializableSnapshot(
 ): Promise<Record<string, JsonValue>> {
   const snapshot = await page.evaluate(() => {
     const win = window as Window & {
-      __ORB_AUDIT__?: {
+      __ORB_AUDIT__?: Record<string, unknown> & {
         snapshot?: () => unknown;
       };
     };
@@ -275,7 +275,167 @@ export async function readSerializableSnapshot(
     }
 
     const raw = audit.snapshot();
-    return JSON.parse(JSON.stringify(raw));
+    const snapshotBase =
+      raw && !Array.isArray(raw) && typeof raw === 'object'
+        ? (raw as Record<string, unknown>)
+        : {};
+
+    const snapshotQualityProfiles =
+      snapshotBase.qualityProfiles &&
+      typeof snapshotBase.qualityProfiles === 'object' &&
+      !Array.isArray(snapshotBase.qualityProfiles)
+        ? (snapshotBase.qualityProfiles as Record<string, unknown>)
+        : {};
+
+    const auditQualityProfiles =
+      audit.qualityProfiles &&
+      typeof audit.qualityProfiles === 'object' &&
+      !Array.isArray(audit.qualityProfiles)
+        ? (audit.qualityProfiles as Record<string, unknown>)
+        : {};
+
+    const snapshotTimingDiagnostics =
+      snapshotBase.timingDiagnostics &&
+      typeof snapshotBase.timingDiagnostics === 'object' &&
+      !Array.isArray(snapshotBase.timingDiagnostics)
+        ? (snapshotBase.timingDiagnostics as Record<string, unknown>)
+        : {};
+
+    const auditTimingDiagnostics =
+      audit.timingDiagnostics &&
+      typeof audit.timingDiagnostics === 'object' &&
+      !Array.isArray(audit.timingDiagnostics)
+        ? (audit.timingDiagnostics as Record<string, unknown>)
+        : {};
+
+    const merged = {
+      ...snapshotBase,
+      activeQualityProfile:
+        snapshotBase.activeQualityProfile ??
+        audit.activeQualityProfile ??
+        snapshotQualityProfiles.active ??
+        auditQualityProfiles.active ??
+        snapshotBase.qualityProfile ??
+        snapshotQualityProfiles.current ??
+        audit.qualityProfile ??
+        auditQualityProfiles.current ??
+        'unknown',
+      forcedQualityProfile:
+        snapshotBase.forcedQualityProfile ??
+        audit.forcedQualityProfile ??
+        snapshotQualityProfiles.forced ??
+        auditQualityProfiles.forced ??
+        null,
+      qualityProfileSource:
+        snapshotBase.qualityProfileSource ??
+        audit.qualityProfileSource ??
+        snapshotQualityProfiles.source ??
+        auditQualityProfiles.source ??
+        'unknown',
+      qualityProfileReason:
+        snapshotBase.qualityProfileReason ??
+        audit.qualityProfileReason ??
+        snapshotQualityProfiles.reason ??
+        auditQualityProfiles.reason ??
+        null,
+      dprBucket:
+        snapshotBase.dprBucket ??
+        audit.dprBucket ??
+        snapshotQualityProfiles.dprBucket ??
+        auditQualityProfiles.dprBucket ??
+        'normal',
+      deviceClass:
+        snapshotBase.deviceClass ??
+        audit.deviceClass ??
+        snapshotQualityProfiles.deviceClass ??
+        auditQualityProfiles.deviceClass ??
+        'unknown',
+      rendererArea:
+        snapshotBase.rendererArea ??
+        audit.rendererArea ??
+        snapshotQualityProfiles.rendererArea ??
+        auditQualityProfiles.rendererArea ??
+        null,
+      qualityProfiles: {
+        ...auditQualityProfiles,
+        ...snapshotQualityProfiles,
+        current:
+          snapshotQualityProfiles.current ??
+          auditQualityProfiles.current ??
+          snapshotBase.qualityProfile ??
+          audit.qualityProfile ??
+          'unknown',
+        active:
+          snapshotQualityProfiles.active ??
+          auditQualityProfiles.active ??
+          snapshotBase.activeQualityProfile ??
+          audit.activeQualityProfile ??
+          snapshotQualityProfiles.current ??
+          auditQualityProfiles.current ??
+          snapshotBase.qualityProfile ??
+          audit.qualityProfile ??
+          'unknown',
+        forced:
+          snapshotQualityProfiles.forced ??
+          auditQualityProfiles.forced ??
+          snapshotBase.forcedQualityProfile ??
+          audit.forcedQualityProfile ??
+          null,
+        source:
+          snapshotQualityProfiles.source ??
+          auditQualityProfiles.source ??
+          snapshotBase.qualityProfileSource ??
+          audit.qualityProfileSource ??
+          'unknown',
+        reason:
+          snapshotQualityProfiles.reason ??
+          auditQualityProfiles.reason ??
+          snapshotBase.qualityProfileReason ??
+          audit.qualityProfileReason ??
+          null,
+        estimatedCost:
+          snapshotQualityProfiles.estimatedCost ??
+          auditQualityProfiles.estimatedCost ??
+          null,
+        dprBucket:
+          snapshotQualityProfiles.dprBucket ??
+          auditQualityProfiles.dprBucket ??
+          snapshotBase.dprBucket ??
+          audit.dprBucket ??
+          'normal',
+        deviceClass:
+          snapshotQualityProfiles.deviceClass ??
+          auditQualityProfiles.deviceClass ??
+          snapshotBase.deviceClass ??
+          audit.deviceClass ??
+          'unknown',
+        rendererArea:
+          snapshotQualityProfiles.rendererArea ??
+          auditQualityProfiles.rendererArea ??
+          snapshotBase.rendererArea ??
+          audit.rendererArea ??
+          null,
+      },
+      timingDiagnostics: {
+        ...auditTimingDiagnostics,
+        ...snapshotTimingDiagnostics,
+        recentRebuilds: {
+          ...(typeof auditTimingDiagnostics.recentRebuilds === 'object' &&
+          auditTimingDiagnostics.recentRebuilds
+            ? (auditTimingDiagnostics.recentRebuilds as Record<string, unknown>)
+            : {}),
+          ...(typeof snapshotTimingDiagnostics.recentRebuilds === 'object' &&
+          snapshotTimingDiagnostics.recentRebuilds
+            ? (snapshotTimingDiagnostics.recentRebuilds as Record<
+                string,
+                unknown
+              >)
+            : {}),
+        },
+      },
+    };
+
+    return JSON.parse(JSON.stringify(merged));
   });
 
   if (!snapshot || Array.isArray(snapshot) || typeof snapshot !== 'object') {

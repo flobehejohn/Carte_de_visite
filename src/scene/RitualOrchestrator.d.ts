@@ -15,6 +15,31 @@ export type RitualOrchestratorTimings = {
   totalUpdateMs: number;
 };
 
+export type RitualQualityProfilesTelemetry = {
+  current: string | null;
+  active: string | null;
+  forced: string | null;
+  source: 'forced' | 'auto-detected' | 'fallback' | 'unknown';
+  reason: string | null;
+  estimatedCost: number | null;
+  dprBucket: 'normal' | 'high' | 'ultra';
+  deviceClass: 'desktop' | 'mobile' | 'tablet' | 'unknown';
+  rendererArea: number | null;
+};
+
+export type RitualTimingDiagnostics = {
+  bootElapsedMs: number;
+  isWarmup: boolean;
+  warmupPhase: 'boot' | 'warming' | 'steady';
+  dominantTimingKey: string | null;
+  dominantTimingMs: number | null;
+  recentRebuilds: {
+    geometry: boolean;
+    fluid: boolean;
+    materials: boolean;
+  };
+};
+
 export class RitualOrchestrator {
   constructor(ctx: any);
 
@@ -63,6 +88,10 @@ export class RitualOrchestrator {
   isVRT: boolean;
   vrtTime: number | null;
   _vrtWarmedUp: boolean;
+  _bootStartedAtMs: number;
+  _lastGeometryRebuildFrame: number;
+  _lastFluidRebuildFrame: number;
+  _lastMaterialsWriteFrame: number;
 
   textManager: any;
   isRevealing: boolean;
