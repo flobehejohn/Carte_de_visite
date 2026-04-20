@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { getQualityProfileFromContext } from '../performance/QualityGovernor';
 
 /**
  * orbVolumes — version "Ultime"
@@ -29,6 +30,26 @@ const DEFAULT_VOLUME_CONFIG = {
     amount: 0.08,
   },
 };
+
+
+function getRuntimeFrameIndex(ctx) {
+  return Math.max(
+    0,
+    Number(
+      ctx?.runtimeFrameIndex ??
+        ctx?.runtimeTelemetry?.orchestratorUpdateCount ??
+        0,
+    ) || 0,
+  );
+}
+
+function shouldSkipVolumeUpdate(ctx) {
+  const qualityProfile = getQualityProfileFromContext(ctx, 'high');
+  const divisor = Math.max(1, Number(qualityProfile.partialUpdateDivisors?.volumes ?? 1));
+  const frameIndex = getRuntimeFrameIndex(ctx);
+  if (divisor <= 1 || frameIndex <= 0) return false;
+  return frameIndex % divisor !== 0;
+}
 
 function mergeDeep(target, patch) {
   if (!patch || typeof patch !== 'object') return target;
@@ -87,7 +108,12 @@ export function ensureVolumeConfig(ctx) {
       { ...DEFAULT_VOLUME_CONFIG },
       ctx.volumeConfig,
     );
-  return normalizeConfig(ctx.volumeConfig);
+
+  const cfg = normalizeConfig(ctx.volumeConfig);
+  const qualityProfile = getQualityProfileFromContext(ctx, 'high');
+  cfg.backgroundStrength = Math.min(cfg.backgroundStrength, qualityProfile.volumetricBackgroundStrength);
+  cfg.glowIntensity = Math.min(cfg.glowIntensity, qualityProfile.glowIntensityMax);
+  return cfg;
 }
 
 function toColor(input, fallback) {
@@ -220,6 +246,16 @@ const GLOW_FRAGMENT = /* glsl */ `
 
 export function buildVolume(ctx) {
   const cfg = ensureVolumeConfig(ctx);
+  const qualityProfile = getQualityProfileFromContext(ctx, 'high');
+
+  cfg.backgroundStrength = Math.min(
+    cfg.backgroundStrength,
+    qualityProfile.volumetricBackgroundStrength,
+  );
+  cfg.glowIntensity = Math.min(
+    cfg.glowIntensity,
+    qualityProfile.glowIntensityMax,
+  );
   const state = ensureVolumeState(ctx);
 
   if (state.backgroundMesh) {
@@ -307,6 +343,16 @@ export function updateVolumeForFrame(ctx, time = 0) {
   }
 
   const cfg = ensureVolumeConfig(ctx);
+  const qualityProfile = getQualityProfileFromContext(ctx, 'high');
+
+  cfg.backgroundStrength = Math.min(
+    cfg.backgroundStrength,
+    qualityProfile.volumetricBackgroundStrength,
+  );
+  cfg.glowIntensity = Math.min(
+    cfg.glowIntensity,
+    qualityProfile.glowIntensityMax,
+  );
   if (!state.backgroundMesh || !state.glowMesh) buildVolume(ctx);
   if (!state.backgroundMesh || !state.glowMesh) return;
 
@@ -325,7 +371,10 @@ export function updateVolumeForFrame(ctx, time = 0) {
 
   if (state.uniforms?.bg) {
     state.uniforms.bg.uLightColor.value.copy(lightColor);
-    state.uniforms.bg.uStrength.value = cfg.backgroundStrength * strengthBoost;
+    state.uniforms.bg.uStrength.value = Math.min(
+      cfg.backgroundStrength * strengthBoost,
+      qualityProfile.volumetricBackgroundStrength,
+    );
     state.uniforms.bg.uVignette.value = cfg.vignette;
     state.uniforms.bg.uTime.value = time * noiseSpeed;
     state.uniforms.bg.uNoiseScale.value = cfg.noise.scale;
@@ -346,9 +395,11 @@ export function updateVolumeForFrame(ctx, time = 0) {
     state.uniforms.glow.uColor.value.copy(
       toColor(cfg.glowColor ?? cfg.backgroundColor, 0xffffff),
     );
-    state.uniforms.glow.uIntensity.value =
+    state.uniforms.glow.uIntensity.value = Math.min(
       cfg.glowIntensity *
-      (0.8 + Math.sin(time * cfg.glowPulseSpeed) * cfg.glowPulseAmp);
+        (0.8 + Math.sin(time * cfg.glowPulseSpeed) * cfg.glowPulseAmp),
+      qualityProfile.glowIntensityMax,
+    );
     state.uniforms.glow.uSoftness.value = cfg.softness;
     state.uniforms.glow.uTime.value = time * noiseSpeed;
     state.uniforms.glow.uNoiseScale.value = cfg.noise.scale;
@@ -358,6 +409,16 @@ export function updateVolumeForFrame(ctx, time = 0) {
 
 export function setVolumeConfig(ctx, patch = {}) {
   const cfg = ensureVolumeConfig(ctx);
+  const qualityProfile = getQualityProfileFromContext(ctx, 'high');
+
+  cfg.backgroundStrength = Math.min(
+    cfg.backgroundStrength,
+    qualityProfile.volumetricBackgroundStrength,
+  );
+  cfg.glowIntensity = Math.min(
+    cfg.glowIntensity,
+    qualityProfile.glowIntensityMax,
+  );
   mergeDeep(cfg, patch);
   normalizeConfig(cfg);
 

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { orbError, orbLog, orbWarn } from '../../shared/debug/orbDebug';
 import * as lightChoreo from './lightChoreo.js';
+import { getQualityProfileFromContext, resolveShadowMapEnabled } from '../performance/QualityGovernor';
 
 /**
  * orbLighting — version "Ultime"
@@ -464,6 +465,60 @@ export function getLightAnchors() {
   return [...TARGET_ANCHORS];
 }
 
+
+export function getUsefulShadowCasterCount(ctx) {
+  ensureLightState(ctx);
+
+  let count = 0;
+  for (const entry of ctx.lightsRegistry.values()) {
+    if (!entry?.light) continue;
+    if (entry.active === false) continue;
+    if (!entry.config?.castShadow) continue;
+    if (!isShadowCapable(entry.type)) continue;
+    if (entry.light.visible === false) continue;
+    count += 1;
+  }
+
+  return count;
+}
+
+function applyQualityGovernance(ctx) {
+  const qualityProfile = getQualityProfileFromContext(ctx, 'high');
+  const usefulShadowCasterCount = getUsefulShadowCasterCount(ctx);
+  const shadowMapEnabled = resolveShadowMapEnabled(
+    qualityProfile.shadowMapEnabled,
+    usefulShadowCasterCount,
+  );
+  const shadowMapResolution = shadowMapEnabled
+    ? sanitizeShadowSize(qualityProfile.shadowMapResolution)
+    : 0;
+
+  if (ctx.renderer?.shadowMap) {
+    ctx.renderer.shadowMap.enabled = shadowMapEnabled;
+  }
+
+  for (const entry of ctx.lightsRegistry.values()) {
+    if (!entry?.light || !isShadowCapable(entry.type)) continue;
+    entry.light.castShadow = shadowMapEnabled && !!entry.config.castShadow;
+
+    if (entry.light.castShadow && shadowMapResolution > 0) {
+      entry.light.shadow.mapSize.set(shadowMapResolution, shadowMapResolution);
+      entry.light.shadow.radius = Number(entry.config.shadowRadius ?? 1.2);
+      entry.light.shadow.bias = Number(entry.config.shadowBias ?? -0.0001);
+      entry.light.shadow.normalBias = Number(entry.config.shadowNormalBias ?? 0);
+    }
+  }
+
+  ctx.usefulShadowCasterCount = usefulShadowCasterCount;
+  ctx.lightingTelemetry = {
+    ...(ctx.lightingTelemetry || {}),
+    usefulShadowCasterCount,
+    shadowMapEnabled,
+    shadowMapResolution,
+    qualityProfile: qualityProfile.name,
+  };
+}
+
 /**
  * Tick/Frame update:
  * - synchronise helpers
@@ -486,6 +541,8 @@ export function updateLightsForFrame(ctx, time = 0) {
       e,
     );
   }
+
+  applyQualityGovernance(ctx);
 
   for (const entry of ctx.lightsRegistry.values()) {
     entry.helper?.update?.();

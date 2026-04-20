@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { SimplexNoise } from 'three/examples/jsm/math/SimplexNoise.js';
 import { orbLog, orbWarn } from '../../shared/debug/orbDebug';
+import { getQualityProfileFromContext } from '../performance/QualityGovernor';
 
 /**
  * orbFluidParticles — version stabilisée, overlay-safe et conforme à l'audit
@@ -197,6 +198,51 @@ function opticalConfigSignature(cfg) {
   });
 }
 
+
+function getRuntimeFrameIndex(ctx) {
+  return Math.max(
+    0,
+    Number(
+      ctx?.runtimeFrameIndex ??
+        ctx?.runtimeTelemetry?.orchestratorUpdateCount ??
+        0,
+    ) || 0,
+  );
+}
+
+function getGovernedFluidConfig(ctx, rawCfg) {
+  const qualityProfile = getQualityProfileFromContext(ctx, 'high');
+  const maxCount = Math.max(
+    0,
+    Math.min(
+      Math.max(0, Math.floor(Number(rawCfg?.maxCount ?? DEFAULT_FLUID_CONFIG.maxCount))),
+      Math.max(0, Math.floor(Number(qualityProfile.fluidParticleCount ?? 0))),
+    ),
+  );
+
+  const updateRate = Math.max(1, Number(qualityProfile.fluidUpdateRate ?? 1));
+  const divisor = Math.max(1, Number(qualityProfile.partialUpdateDivisors?.fluid ?? 1));
+  const enabled = Boolean(rawCfg?.enabled !== false && maxCount > 0);
+
+  return {
+    ...rawCfg,
+    enabled,
+    maxCount,
+    spawnRate: enabled ? Math.min(Number(rawCfg?.spawnRate ?? 0), maxCount) : 0,
+    lifetime: Number(rawCfg?.lifetime ?? DEFAULT_FLUID_CONFIG.lifetime),
+    __qualityProfile: qualityProfile.name,
+    __qualityUpdateRate: updateRate,
+    __qualityUpdateDivisor: divisor,
+  };
+}
+
+function shouldUpdateFluidFrame(ctx, cfg) {
+  const divisor = Math.max(1, Number(cfg?.__qualityUpdateDivisor ?? 1));
+  const frameIndex = getRuntimeFrameIndex(ctx);
+  if (divisor <= 1 || frameIndex <= 0) return true;
+  return frameIndex % divisor === 0;
+}
+
 function ensureState(ctx) {
   if (!ctx.fluidParticlesState) {
     ctx.fluidParticlesState = {
@@ -215,6 +261,7 @@ function ensureState(ctx) {
       fallbackHits: 0,
       lastConfigSignature: '',
       lastOpticalSignature: '',
+      meshCapacity: 0,
     };
   }
   return ctx.fluidParticlesState;
@@ -391,7 +438,7 @@ function replaceMaterialIfNeeded(state, cfg) {
 }
 
 export function resetFluidParticles(ctx) {
-  const cfg = ensureFluidParticlesConfig(ctx);
+  const cfg = getGovernedFluidConfig(ctx, ensureFluidParticlesConfig(ctx));
   const state = ensureState(ctx);
 
   state.spawnAccumulator = 0;
@@ -417,8 +464,8 @@ export function resetFluidParticles(ctx) {
   log(ctx, 'Reset particules fluide.');
 }
 
-export function buildFluidParticles(ctx) {
-  const cfg = ensureFluidParticlesConfig(ctx);
+export function buildFluidParticles(ctx, overrideConfig = null) {
+  const cfg = getGovernedFluidConfig(ctx, overrideConfig || ensureFluidParticlesConfig(ctx));
   const state = ensureState(ctx);
 
   disposeMesh(ctx, state);
@@ -445,6 +492,7 @@ export function buildFluidParticles(ctx) {
   state.rebuildCount = (state.rebuildCount || 0) + 1;
   state.lastConfigSignature = stableConfigSignature(cfg);
   state.lastOpticalSignature = opticalConfigSignature(cfg);
+  state.meshCapacity = cfg.maxCount;
 
   syncLegacyHandle(ctx, mesh);
 
@@ -486,7 +534,8 @@ export function setFluidParticlesConfig(ctx, patch = {}) {
   mergeConfig(cfg, patch);
   ensureFluidParticlesConfig(ctx);
 
-  const nextSignature = stableConfigSignature(cfg);
+  const governedCfg = getGovernedFluidConfig(ctx, cfg);
+  const nextSignature = stableConfigSignature(governedCfg);
   const changed = nextSignature !== state.lastConfigSignature;
 
   const structuralChanged =
@@ -496,12 +545,12 @@ export function setFluidParticlesConfig(ctx, patch = {}) {
       cfg.excludeFromComposer !== prevExclude) ||
     ('renderLayer' in patch && cfg.renderLayer !== prevLayer);
 
-  if (!state.mesh || structuralChanged) {
-    buildFluidParticles(ctx);
+  if (!state.mesh || structuralChanged || state.meshCapacity !== governedCfg.maxCount) {
+    buildFluidParticles(ctx, governedCfg);
   } else if (state.mesh) {
-    replaceMaterialIfNeeded(state, cfg);
-    state.mesh.visible = !!cfg.enabled;
-    applyMeshRenderIsolation(state.mesh, cfg);
+    replaceMaterialIfNeeded(state, governedCfg);
+    state.mesh.visible = !!governedCfg.enabled;
+    applyMeshRenderIsolation(state.mesh, governedCfg);
     syncLegacyHandle(ctx, state.mesh);
   }
 
@@ -637,7 +686,8 @@ export function updateFluidParticles(ctx, delta = 0) {
   const startedAtMs = nowMs();
   const safeDelta = Math.max(0, Number(delta ?? 0));
 
-  const cfg = ensureFluidParticlesConfig(ctx);
+  const rawCfg = ensureFluidParticlesConfig(ctx);
+  const cfg = getGovernedFluidConfig(ctx, rawCfg);
   const state = ensureState(ctx);
 
   state.fallbackHits = fallbackHits;
@@ -654,7 +704,7 @@ export function updateFluidParticles(ctx, delta = 0) {
     cfg.flowCenter = { x: 0, y: 0, z: 0 };
   }
 
-  if (!state.mesh) buildFluidParticles(ctx);
+  if (!state.mesh || state.meshCapacity !== cfg.maxCount) buildFluidParticles(ctx, cfg);
   const mesh = state.mesh;
   if (!mesh) {
     finalizeRuntimeUpdate(state, startedAtMs, 0);
@@ -675,7 +725,14 @@ export function updateFluidParticles(ctx, delta = 0) {
 
   mesh.visible = true;
 
-  state.spawnAccumulator += (cfg.spawnRate ?? 0) * safeDelta;
+  if (!shouldUpdateFluidFrame(ctx, cfg)) {
+    finalizeRuntimeUpdate(state, startedAtMs, state.activeParticleCount ?? 0);
+    return;
+  }
+
+  const effectiveDelta = safeDelta * Math.max(1, Number(cfg.__qualityUpdateRate ?? 1));
+
+  state.spawnAccumulator += (cfg.spawnRate ?? 0) * effectiveDelta;
   while (state.spawnAccumulator >= 1) {
     spawnParticle(ctx, state, cfg);
     state.spawnAccumulator -= 1;
@@ -711,24 +768,24 @@ export function updateFluidParticles(ctx, delta = 0) {
   for (let i = state.particles.length - 1; i >= 0; i -= 1) {
     const p = state.particles[i];
 
-    p.age += safeDelta;
+    p.age += effectiveDelta;
     if (p.age >= p.lifetime) {
       state.particles.splice(i, 1);
       continue;
     }
 
-    p.velocity.y += gravity * safeDelta;
-    applyFlowForces(p, cfg, safeDelta, time);
+    p.velocity.y += gravity * effectiveDelta;
+    applyFlowForces(p, cfg, effectiveDelta, time);
 
     const n = cfg.noise ?? 0.4;
     p.velocity.x +=
-      noise2(p.seed + time * 0.6, p.position.y * 0.9) * n * 0.06 * safeDelta;
+      noise2(p.seed + time * 0.6, p.position.y * 0.9) * n * 0.06 * effectiveDelta;
     p.velocity.z +=
-      noise2(p.position.x * 0.9, p.seed + time * 0.6) * n * 0.06 * safeDelta;
+      noise2(p.position.x * 0.9, p.seed + time * 0.6) * n * 0.06 * effectiveDelta;
 
     const damp = 0.985 - energy * 0.08;
     p.velocity.multiplyScalar(damp);
-    p.position.addScaledVector(p.velocity, safeDelta);
+    p.position.addScaledVector(p.velocity, effectiveDelta);
 
     dummy.position.copy(p.position);
 

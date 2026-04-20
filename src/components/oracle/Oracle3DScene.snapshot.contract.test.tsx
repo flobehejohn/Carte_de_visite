@@ -11,7 +11,7 @@ const orchestratorSpies = vi.hoisted(() => ({
 }));
 
 const qualityProfileHarness = vi.hoisted(() => ({
-  activeQualityProfile: 'balanced' as string | null,
+  activeQualityProfile: 'high' as string | null,
   forcedQualityProfile: undefined as string | null | undefined,
   estimatedProfileCost: 1.234,
 }));
@@ -274,7 +274,7 @@ vi.mock('../../scene/RitualOrchestrator', async () => {
       };
 
       ctx.activeQualityProfile =
-        qualityProfileHarness.activeQualityProfile ?? 'balanced';
+        qualityProfileHarness.activeQualityProfile ?? 'high';
 
       if (qualityProfileHarness.forcedQualityProfile !== undefined) {
         ctx.forcedQualityProfile = qualityProfileHarness.forcedQualityProfile;
@@ -363,7 +363,7 @@ describe('Oracle3DScene snapshot rich contract', () => {
   beforeEach(() => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
-    qualityProfileHarness.activeQualityProfile = 'balanced';
+    qualityProfileHarness.activeQualityProfile = 'high';
     qualityProfileHarness.forcedQualityProfile = undefined;
     qualityProfileHarness.estimatedProfileCost = 1.234;
     smokeAlphaHarness.value = 0.42;
@@ -1022,7 +1022,7 @@ describe('Oracle3DScene snapshot rich contract', () => {
 
     const beforeReset = audit.snapshot();
     expectQualityProfileContract(beforeReset.telemetry, {
-      activeQualityProfile: 'balanced',
+      activeQualityProfile: 'high',
       forcedQualityProfile: null,
     });
 
@@ -1033,7 +1033,7 @@ describe('Oracle3DScene snapshot rich contract', () => {
 
     const afterReset = audit.snapshot();
     expectQualityProfileContract(afterReset.telemetry, {
-      activeQualityProfile: 'balanced',
+      activeQualityProfile: 'high',
       forcedQualityProfile: null,
     });
 
@@ -1044,7 +1044,7 @@ describe('Oracle3DScene snapshot rich contract', () => {
 
     const afterReseed = audit.snapshot();
     expectQualityProfileContract(afterReseed.telemetry, {
-      activeQualityProfile: 'balanced',
+      activeQualityProfile: 'high',
       forcedQualityProfile: null,
     });
 
@@ -1059,14 +1059,14 @@ describe('Oracle3DScene snapshot rich contract', () => {
 
     const afterLiveReinit = audit.snapshot();
     expectQualityProfileContract(afterLiveReinit.telemetry, {
-      activeQualityProfile: 'balanced',
+      activeQualityProfile: 'high',
       forcedQualityProfile: null,
     });
   });
 
   it('documents forcedQualityProfile when injected without over-specifying future governor logic', () => {
-    qualityProfileHarness.activeQualityProfile = 'balanced';
-    qualityProfileHarness.forcedQualityProfile = 'quality-forced:test';
+    qualityProfileHarness.activeQualityProfile = 'high';
+    qualityProfileHarness.forcedQualityProfile = 'safe';
     qualityProfileHarness.estimatedProfileCost = 2.468;
 
     renderScene({
@@ -1082,8 +1082,8 @@ describe('Oracle3DScene snapshot rich contract', () => {
 
     const beforeReset = audit.snapshot();
     expectQualityProfileContract(beforeReset.telemetry, {
-      activeQualityProfile: 'balanced',
-      forcedQualityProfile: 'quality-forced:test',
+      activeQualityProfile: 'high',
+      forcedQualityProfile: 'safe',
     });
     expect(beforeReset.telemetry.estimatedProfileCost).toBeCloseTo(2.468, 3);
 
@@ -1094,8 +1094,8 @@ describe('Oracle3DScene snapshot rich contract', () => {
 
     const afterReset = audit.snapshot();
     expectQualityProfileContract(afterReset.telemetry, {
-      activeQualityProfile: 'balanced',
-      forcedQualityProfile: 'quality-forced:test',
+      activeQualityProfile: 'high',
+      forcedQualityProfile: 'safe',
     });
 
     act(() => {
@@ -1105,8 +1105,8 @@ describe('Oracle3DScene snapshot rich contract', () => {
 
     const afterReseed = audit.snapshot();
     expectQualityProfileContract(afterReseed.telemetry, {
-      activeQualityProfile: 'balanced',
-      forcedQualityProfile: 'quality-forced:test',
+      activeQualityProfile: 'high',
+      forcedQualityProfile: 'safe',
     });
   });
 

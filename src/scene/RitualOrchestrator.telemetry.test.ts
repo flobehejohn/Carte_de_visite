@@ -590,7 +590,7 @@ describe('RitualOrchestrator telemetry contract', () => {
   it('expose des profils qualité explicites et un diagnostic de timings attribuable', () => {
     const ctx = createCtx();
     ctx.qualityProfiles = {
-      current: 'desktop-standard',
+      current: 'high',
       forced: null,
       estimatedCost: 1.25,
     };
@@ -602,8 +602,8 @@ describe('RitualOrchestrator telemetry contract', () => {
 
     orch.update(8.016);
 
-    expect(ctx.qualityProfile).toBe('desktop-standard');
-    expect(ctx.activeQualityProfile).toBe('desktop-standard');
+    expect(ctx.qualityProfile).toBe('high');
+    expect(ctx.activeQualityProfile).toBe('high');
     expect(ctx.forcedQualityProfile).toBeNull();
     expect(ctx.qualityProfileSource).toBe('auto-detected');
     expect(ctx.dprBucket).toBe('high');
@@ -611,8 +611,8 @@ describe('RitualOrchestrator telemetry contract', () => {
     expect(ctx.rendererArea).toBe(921600);
 
     expect(ctx.runtimeTelemetry.qualityProfiles).toMatchObject({
-      current: 'desktop-standard',
-      active: 'desktop-standard',
+      current: 'high',
+      active: 'high',
       source: 'auto-detected',
       dprBucket: 'high',
       deviceClass: 'desktop',

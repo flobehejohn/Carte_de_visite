@@ -12,6 +12,11 @@ import * as orbText from './modules/orbText.js';
 import { OrbTextManager } from './modules/orbTextManager.js';
 import * as orbVolumes from './modules/orbVolumes.js';
 import { ClimateController } from './params/ClimateController';
+import {
+  QualityGovernor,
+  getQualityProfileFromContext,
+  writeQualitySnapshotToContext,
+} from './performance/QualityGovernor';
 import { applyMaterials } from './render/materials/applyMaterials';
 import { mapClimateToRenderParams } from './render/materials/mapClimateToRenderParams';
 
@@ -163,7 +168,6 @@ function createEmptyOrchestratorTimings() {
   };
 }
 
-
 function createEmptyQualityProfilesTelemetry() {
   return {
     current: null,
@@ -245,10 +249,17 @@ function deriveFallbackQualityProfile(deviceClass, dprBucket) {
 
 function readRendererMetrics(ctx) {
   const renderer = ctx?.renderer;
-  const fromTelemetry = ctx?.runtimeTelemetry?.rendererSize ?? ctx?.rendererSize ?? null;
+  const fromTelemetry =
+    ctx?.runtimeTelemetry?.rendererSize ?? ctx?.rendererSize ?? null;
 
-  let width = normalizeFiniteNumber(fromTelemetry?.w ?? fromTelemetry?.width, null);
-  let height = normalizeFiniteNumber(fromTelemetry?.h ?? fromTelemetry?.height, null);
+  let width = normalizeFiniteNumber(
+    fromTelemetry?.w ?? fromTelemetry?.width,
+    null,
+  );
+  let height = normalizeFiniteNumber(
+    fromTelemetry?.h ?? fromTelemetry?.height,
+    null,
+  );
   let dpr = normalizeFiniteNumber(ctx?.runtimeTelemetry?.dpr ?? ctx?.dpr, null);
 
   if (renderer && typeof renderer.getPixelRatio === 'function') {
@@ -275,7 +286,9 @@ function readRendererMetrics(ctx) {
   }
 
   const rendererArea =
-    width != null && height != null ? Math.max(0, Math.round(width * height)) : null;
+    width != null && height != null
+      ? Math.max(0, Math.round(width * height))
+      : null;
 
   return {
     width,
@@ -289,45 +302,67 @@ function readRendererMetrics(ctx) {
 
 function buildQualityProfileTelemetry(ctx) {
   const metrics = readRendererMetrics(ctx);
-  const existing = ctx?.qualityProfiles ?? ctx?.runtimeTelemetry?.qualityProfiles ?? {};
+  const governorSnapshot = ctx?.runtime?.quality ?? null;
+  const existing =
+    ctx?.qualityProfiles ?? ctx?.runtimeTelemetry?.qualityProfiles ?? {};
 
-  const forced =
-    typeof existing?.forced === 'string' && existing.forced.trim()
-      ? existing.forced.trim()
-      : typeof ctx?.forcedQualityProfile === 'string' && ctx.forcedQualityProfile.trim()
-        ? ctx.forcedQualityProfile.trim()
-        : null;
-
-  const declaredCurrent =
+  const fallbackCurrent =
     typeof existing?.current === 'string' && existing.current.trim()
       ? existing.current.trim()
       : typeof ctx?.qualityProfile === 'string' && ctx.qualityProfile.trim()
         ? ctx.qualityProfile.trim()
+        : deriveFallbackQualityProfile(metrics.deviceClass, metrics.dprBucket);
+
+  const fallbackForced =
+    typeof existing?.forced === 'string' && existing.forced.trim()
+      ? existing.forced.trim()
+      : typeof ctx?.forcedQualityProfile === 'string' &&
+          ctx.forcedQualityProfile.trim()
+        ? ctx.forcedQualityProfile.trim()
         : null;
 
-  const active = forced ?? declaredCurrent ?? deriveFallbackQualityProfile(metrics.deviceClass, metrics.dprBucket);
-
-  const source = forced
+  const fallbackSource = fallbackForced
     ? 'forced'
-    : declaredCurrent
+    : fallbackCurrent
       ? 'auto-detected'
       : 'fallback';
 
-  const reason = forced
-    ? 'ctx forced quality profile'
-    : declaredCurrent
-      ? 'ctx current quality profile'
-      : `derived from ${metrics.deviceClass}/${metrics.dprBucket}`;
-
-  const estimatedCost = normalizeFiniteNumber(existing?.estimatedCost, null);
+  const source = governorSnapshot?.source
+    ? governorSnapshot.source === 'auto-detect'
+      ? 'auto-detected'
+      : governorSnapshot.source
+    : fallbackSource;
 
   return {
-    current: active,
-    active,
-    forced,
+    current:
+      typeof governorSnapshot?.activeProfile === 'string'
+        ? governorSnapshot.activeProfile
+        : fallbackCurrent,
+    active:
+      typeof governorSnapshot?.activeProfile === 'string'
+        ? governorSnapshot.activeProfile
+        : fallbackCurrent,
+    forced:
+      typeof governorSnapshot?.forcedProfile === 'string'
+        ? governorSnapshot.forcedProfile
+        : fallbackForced,
+    autoDetected:
+      typeof governorSnapshot?.autoDetectedProfile === 'string'
+        ? governorSnapshot.autoDetectedProfile
+        : null,
     source,
-    reason,
-    estimatedCost,
+    reason:
+      typeof governorSnapshot?.source === 'string'
+        ? `quality governor (${governorSnapshot.source})`
+        : fallbackForced
+          ? 'ctx forced quality profile'
+          : 'ctx current quality profile',
+    estimatedCost: normalizeFiniteNumber(
+      governorSnapshot?.estimatedCost,
+      normalizeFiniteNumber(existing?.estimatedCost, null),
+    ),
+    budget: governorSnapshot?.budget ?? null,
+    hysteresis: governorSnapshot?.hysteresis ?? null,
     dprBucket: metrics.dprBucket,
     deviceClass: metrics.deviceClass,
     rendererArea: metrics.rendererArea,
@@ -375,6 +410,68 @@ function buildTimingDiagnostics({
       materials: !!materialsRecent,
     },
   };
+}
+
+function ensureQualityGovernor(ctx) {
+  if (!ctx) return null;
+
+  const metrics = readRendererMetrics(ctx);
+  const existingProfile =
+    typeof ctx?.qualityProfile === 'string'
+      ? ctx.qualityProfile
+      : typeof ctx?.qualityProfiles?.current === 'string'
+        ? ctx.qualityProfiles.current
+        : undefined;
+
+  const forcedProfile =
+    typeof ctx?.forcedQualityProfile === 'string'
+      ? ctx.forcedQualityProfile
+      : typeof ctx?.qualityProfiles?.forced === 'string'
+        ? ctx.qualityProfiles.forced
+        : null;
+
+  if (!ctx.qualityGovernor) {
+    ctx.qualityGovernor = new QualityGovernor({
+      initialProfile: existingProfile,
+      forcedProfile,
+      devicePixelRatio: metrics.dpr ?? 1,
+      viewportWidth: metrics.width ?? 1440,
+      viewportHeight: metrics.height ?? 900,
+      isMobile: metrics.deviceClass === 'mobile',
+      downgradeAfterFrames: 3,
+      upgradeAfterFrames: 8,
+      cooldownFrames: 4,
+    });
+  } else if (typeof ctx.qualityGovernor.setDeviceHints === 'function') {
+    ctx.qualityGovernor.setDeviceHints({
+      devicePixelRatio: metrics.dpr ?? 1,
+      viewportWidth: metrics.width ?? 1440,
+      viewportHeight: metrics.height ?? 900,
+      isMobile: metrics.deviceClass === 'mobile',
+    });
+  }
+
+  if (typeof ctx.qualityGovernor.getSnapshot === 'function') {
+    writeQualitySnapshotToContext(ctx, ctx.qualityGovernor);
+  }
+
+  return ctx.qualityGovernor;
+}
+
+function countUsefulShadowCasters(ctx) {
+  const entries = ctx?.lightsRegistry?.values?.();
+  if (!entries) return 0;
+
+  let count = 0;
+  for (const entry of entries) {
+    if (!entry?.light) continue;
+    if (entry.active === false) continue;
+    if (!entry.config?.castShadow) continue;
+    if (entry.light.visible === false) continue;
+    count += 1;
+  }
+
+  return count;
 }
 
 function buildVolumeSafe(ctx) {
@@ -491,6 +588,8 @@ export class RitualOrchestrator {
       ...createEmptyTimingDiagnostics(),
       ...(this.ctx?.timingDiagnostics || {}),
     };
+
+    ensureQualityGovernor(this.ctx);
 
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -719,6 +818,12 @@ export class RitualOrchestrator {
     orbParticles.setParticlesConfig?.(this.ctx, { enabled: false });
     orbFluidParticles.ensureFluidParticlesConfig?.(this.ctx);
     orbFluidParticles.buildFluidParticles?.(this.ctx);
+
+    const initialQualityProfile = getQualityProfileFromContext(
+      this.ctx,
+      'high',
+    );
+    this.textManager?.setEnabled?.(initialQualityProfile.text3DEnabled);
 
     Object.assign(this.currentState, {
       orbScale: 0.42,
@@ -1332,6 +1437,9 @@ export class RitualOrchestrator {
       flowDirection: { x: 0, y: 1, z: 0 },
     });
 
+    const qualityProfile = getQualityProfileFromContext(this.ctx, 'high');
+    this.textManager?.setEnabled?.(qualityProfile.text3DEnabled);
+
     this.updateVisuals();
   }
 
@@ -1351,6 +1459,7 @@ export class RitualOrchestrator {
 
   applyTargetsToRuntime(ctx, targets, safetyFactor = 1, bloomClamp = null) {
     if (!ctx) return;
+    const qualityProfile = getQualityProfileFromContext(ctx, 'high');
     const emergency = !!ctx?.runtimeFlags?.emergencyMode;
     const safeFactor = Number.isFinite(safetyFactor)
       ? clamp01(safetyFactor)
@@ -1409,7 +1518,10 @@ export class RitualOrchestrator {
             sceneFog = ctx.scene.fog;
           }
           if (sceneFog?.isFogExp2 && typeof fog.density === 'number') {
-            sceneFog.density = fog.density * (1 - readabilityLift * 0.55);
+            sceneFog.density = Math.min(
+              fog.density * (1 - readabilityLift * 0.55),
+              qualityProfile.fogDensityCeiling,
+            );
           }
           if (fog.color != null && sceneFog?.color?.set) {
             sceneFog.color.set(fog.color);
@@ -1433,6 +1545,10 @@ export class RitualOrchestrator {
       if (typeof b?.strength === 'number')
         nextStrength = b.strength * safeFactor;
       nextStrength = normalizeClampValue(clampCfg?.strength, nextStrength);
+      if (qualityProfile.bloomEnabled === false) nextStrength = 0;
+      if (typeof nextStrength === 'number') {
+        nextStrength = Math.min(nextStrength, qualityProfile.bloomStrengthMax);
+      }
       if (typeof nextStrength === 'number')
         ctx.bloomPass.strength = nextStrength;
 
@@ -1446,6 +1562,8 @@ export class RitualOrchestrator {
       nextThreshold = normalizeClampValue(clampCfg?.threshold, nextThreshold);
       if (typeof nextThreshold === 'number')
         ctx.bloomPass.threshold = nextThreshold;
+      ctx.bloomPass.enabled =
+        qualityProfile.bloomEnabled !== false && ctx.bloomPass.strength > 0;
       ctx.appliedBloomStrength = ctx.bloomPass.strength ?? null;
     } else {
       ctx.appliedBloomStrength = null;
@@ -1462,10 +1580,14 @@ export class RitualOrchestrator {
           ? v.backgroundStrength
           : s.backgroundStrength;
 
-      volumeCfg.glowIntensity =
-        glowBase * safeFactor * (1 + readabilityLift * 0.24);
-      volumeCfg.backgroundStrength =
-        backgroundBase * safeFactor * (1 - readabilityLift * 0.42);
+      volumeCfg.glowIntensity = Math.min(
+        glowBase * safeFactor * (1 + readabilityLift * 0.24),
+        qualityProfile.glowIntensityMax,
+      );
+      volumeCfg.backgroundStrength = Math.min(
+        backgroundBase * safeFactor * (1 - readabilityLift * 0.42),
+        qualityProfile.volumetricBackgroundStrength,
+      );
       volumeCfg.softness =
         typeof v.softness === 'number'
           ? Math.max(v.softness, 0.22)
@@ -1491,6 +1613,10 @@ export class RitualOrchestrator {
         }
       }
       ctx.appliedVignette = typeof vignette === 'number' ? vignette : null;
+      ctx.smokeAlphaLayer = Math.min(
+        Number(ctx.smokeAlphaLayer ?? qualityProfile.smokeAlphaLayer),
+        qualityProfile.smokeAlphaLayer,
+      );
     } else {
       ctx.appliedVignette = null;
     }
@@ -1540,6 +1666,11 @@ export class RitualOrchestrator {
   update(time = 0) {
     const totalUpdateStartMs = nowMs();
 
+    const nextFrameCount =
+      Number(this.ctx?.runtimeTelemetry?.orchestratorUpdateCount ?? 0) + 1;
+    this.ctx.runtimeFrameIndex = nextFrameCount;
+    ensureQualityGovernor(this.ctx);
+
     let dt = Math.min(0.05, Math.max(0.001, time - (this.lastTime || time)));
     if (this.isVRT && this.vrtTime !== null) {
       time = this.vrtTime;
@@ -1555,7 +1686,9 @@ export class RitualOrchestrator {
       this.ctx.climateController.setProgress(this.progress);
       this.ctx.climateController.update(dtMs);
       this.ctx.climateTargets = this.ctx.climateController.getTargets();
-      if (typeof this.ctx.climateController.getRuntimeTelemetry === 'function') {
+      if (
+        typeof this.ctx.climateController.getRuntimeTelemetry === 'function'
+      ) {
         this.ctx.climateRuntime =
           this.ctx.climateController.getRuntimeTelemetry() ?? null;
       }
@@ -1987,8 +2120,22 @@ export class RitualOrchestrator {
 
     orchestratorTimings.totalUpdateMs = elapsedMs(totalUpdateStartMs);
 
-    const nextFrameCount =
-      Number(this.ctx?.runtimeTelemetry?.orchestratorUpdateCount ?? 0) + 1;
+    const usefulShadowCasterCount = countUsefulShadowCasters(this.ctx);
+    const qualityGovernor = ensureQualityGovernor(this.ctx);
+    if (qualityGovernor?.observe) {
+      qualityGovernor.observe({
+        frameIndex: nextFrameCount,
+        totalUpdateMs: orchestratorTimings.totalUpdateMs,
+        fluidMs: orchestratorTimings.fluidMs,
+        geometryMs: orchestratorTimings.geometryMs,
+        volumeMs: orchestratorTimings.volumeMs,
+        textMs: orchestratorTimings.textMs,
+        activeShadowCasters: usefulShadowCasterCount,
+        hasUsefulShadowCaster: usefulShadowCasterCount > 0,
+      });
+      writeQualitySnapshotToContext(this.ctx, qualityGovernor);
+    }
+
     const qualityProfiles = buildQualityProfileTelemetry(this.ctx);
     const timingDiagnostics = buildTimingDiagnostics({
       timings: orchestratorTimings,

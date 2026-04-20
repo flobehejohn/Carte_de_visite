@@ -22,6 +22,7 @@ export class OrbTextManager {
     this.isReady = false;
 
     this.focusTarget = 'none';
+    this.enabled = true;
 
     // 🛡️ FIX VITEST & STABILITÉ : Sécurisation absolue de l'abonnement au bridge
     // Empêche les crashs si le composant est appelé dans un environnement de test non-isolé
@@ -101,7 +102,25 @@ export class OrbTextManager {
     this.meshes.push(mesh);
   }
 
+
+  setEnabled(enabled) {
+    this.enabled = enabled !== false;
+    this.worldGroup.visible = this.enabled;
+    this.hudGroup.visible = this.enabled;
+
+    if (!this.enabled) {
+      this.progress = 0;
+      this.meshes.forEach((mesh) => {
+        mesh.fillOpacity = 0.0;
+        mesh.outlineOpacity = 0.0;
+        mesh.sync?.();
+      });
+    }
+  }
+
   applyFocusState() {
+    if (!this.enabled) return;
+
     this.meshes.forEach((mesh) => {
       if (this.focusTarget === 'citation' && mesh.userData.role !== 'quote') {
         const isBloomLayer = mesh.layers.isEnabled(ORB_BASE_RENDER_LAYER);
@@ -115,6 +134,8 @@ export class OrbTextManager {
   }
 
   animateReveal(dt) {
+    if (!this.enabled) return;
+
     // 🛡️ PROTECTION FRAME-DROP : Limite dt à 100ms maximum
     // Si l'utilisateur change d'onglet, dt explose. Ceci empêche la mathématique de casser.
     const safeDt = Math.min(dt, 0.1);
@@ -148,6 +169,7 @@ export class OrbTextManager {
 
   spawnOracle(data) {
     this.clear();
+    if (!this.enabled) return;
     this.progress = 0;
     if (!data) return;
 

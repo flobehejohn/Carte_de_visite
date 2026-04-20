@@ -567,25 +567,73 @@ const { chromium } = require("playwright");
             payload.exportChecks.qualityProfiles.currentValue =
               payload.exportChecks.qualityProfiles.hasCurrent ? qps.current ?? null : null;
             payload.exportChecks.qualityProfiles.hasForced =
-              !!qps && typeof qps === "object" && Object.prototype.hasOwnProperty.call(qps, "forced");
+              !!qps && typeof qps === "object" &&
+              Object.prototype.hasOwnProperty.call(qps, "forced");
             payload.exportChecks.qualityProfiles.forcedType =
               payload.exportChecks.qualityProfiles.hasForced
                 ? (qps.forced === null ? "null" : typeof qps.forced)
                 : null;
             payload.exportChecks.qualityProfiles.forcedValue =
               payload.exportChecks.qualityProfiles.hasForced ? qps.forced ?? null : null;
+
+            payload.exportChecks.qualityProfiles.hasSource =
+              !!qps && typeof qps === "object" &&
+              Object.prototype.hasOwnProperty.call(qps, "source");
+            payload.exportChecks.qualityProfiles.sourceType =
+              payload.exportChecks.qualityProfiles.hasSource
+                ? (qps.source === null ? "null" : typeof qps.source)
+                : null;
+            payload.exportChecks.qualityProfiles.sourceValue =
+              payload.exportChecks.qualityProfiles.hasSource ? qps.source ?? null : null;
+
             payload.exportChecks.qualityProfiles.hasEstimatedCost =
-              !!qps && typeof qps === "object" && Object.prototype.hasOwnProperty.call(qps, "estimatedCost");
+              !!qps && typeof qps === "object" &&
+              Object.prototype.hasOwnProperty.call(qps, "estimatedCost");
             payload.exportChecks.qualityProfiles.estimatedCostType =
               payload.exportChecks.qualityProfiles.hasEstimatedCost
                 ? (qps.estimatedCost === null ? "null" : typeof qps.estimatedCost)
                 : null;
             payload.exportChecks.qualityProfiles.estimatedCostValue =
               payload.exportChecks.qualityProfiles.hasEstimatedCost ? qps.estimatedCost ?? null : null;
+
+            payload.exportChecks.qualityProfiles.hasDeviceClass =
+              !!qps && typeof qps === "object" &&
+              Object.prototype.hasOwnProperty.call(qps, "deviceClass");
+            payload.exportChecks.qualityProfiles.deviceClassType =
+              payload.exportChecks.qualityProfiles.hasDeviceClass
+                ? (qps.deviceClass === null ? "null" : typeof qps.deviceClass)
+                : null;
+            payload.exportChecks.qualityProfiles.deviceClassValue =
+              payload.exportChecks.qualityProfiles.hasDeviceClass ? qps.deviceClass ?? null : null;
+
+            payload.exportChecks.qualityProfiles.hasDprBucket =
+              !!qps && typeof qps === "object" &&
+              Object.prototype.hasOwnProperty.call(qps, "dprBucket");
+            payload.exportChecks.qualityProfiles.dprBucketType =
+              payload.exportChecks.qualityProfiles.hasDprBucket
+                ? (qps.dprBucket === null ? "null" : typeof qps.dprBucket)
+                : null;
+            payload.exportChecks.qualityProfiles.dprBucketValue =
+              payload.exportChecks.qualityProfiles.hasDprBucket ? qps.dprBucket ?? null : null;
+
+            payload.exportChecks.qualityProfiles.hasRendererArea =
+              !!qps && typeof qps === "object" &&
+              Object.prototype.hasOwnProperty.call(qps, "rendererArea");
+            payload.exportChecks.qualityProfiles.rendererAreaType =
+              payload.exportChecks.qualityProfiles.hasRendererArea
+                ? (qps.rendererArea === null ? "null" : typeof qps.rendererArea)
+                : null;
+            payload.exportChecks.qualityProfiles.rendererAreaValue =
+              payload.exportChecks.qualityProfiles.hasRendererArea ? qps.rendererArea ?? null : null;
+
             payload.exported.qualityProfiles = qps == null ? null : {
               current: payload.exportChecks.qualityProfiles.currentValue,
               forced: payload.exportChecks.qualityProfiles.forcedValue,
-              estimatedCost: payload.exportChecks.qualityProfiles.estimatedCostValue
+              source: payload.exportChecks.qualityProfiles.sourceValue,
+              estimatedCost: payload.exportChecks.qualityProfiles.estimatedCostValue,
+              deviceClass: payload.exportChecks.qualityProfiles.deviceClassValue,
+              dprBucket: payload.exportChecks.qualityProfiles.dprBucketValue,
+              rendererArea: payload.exportChecks.qualityProfiles.rendererAreaValue
             };
 
             const counters = snapshot.counters;

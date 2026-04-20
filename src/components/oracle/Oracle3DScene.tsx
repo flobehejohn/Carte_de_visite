@@ -10,6 +10,10 @@ import {
   resetFluidParticles,
 } from '../../scene/modules/orbFluidParticles.js';
 import { getLightsSnapshot } from '../../scene/modules/orbLighting';
+import {
+  getQualityProfileFromContext,
+  writeQualitySnapshotToContext,
+} from '../../scene/performance/QualityGovernor';
 import { RitualOrchestrator } from '../../scene/RitualOrchestrator';
 import { LightSafetyGovernor } from '../../scene/safety/LightSafetyGovernor';
 import { getOracleTextLength } from '../../services/zarathustraService';
@@ -1279,6 +1283,9 @@ export function Oracle3DScene({
 
     const orchestrator = new RitualOrchestrator(ctx);
     orchestratorRef.current = orchestrator;
+    if (ctx.qualityGovernor) {
+      writeQualitySnapshotToContext(ctx, ctx.qualityGovernor);
+    }
 
     const callInitRitual = (seed: string) => {
       runtimeCountersRef.current.reinitCount += 1;
@@ -1379,6 +1386,18 @@ export function Oracle3DScene({
 
       if ((orchestratorRef.current as any)?.foregroundMesh) {
         (orchestratorRef.current as any).foregroundMesh.visible = false;
+      }
+
+      if (localCtx.orbMesh) {
+        localCtx.orbMesh.visible = true;
+      }
+
+      if (Array.isArray(localCtx.wireFrames)) {
+        localCtx.wireFrames.forEach((wire: any) => {
+          if (wire) {
+            wire.visible = true;
+          }
+        });
       }
     };
 
@@ -2179,30 +2198,100 @@ export function Oracle3DScene({
                 0,
             ) || 0;
 
+          const runtimeQuality = localCtx.runtime?.quality ?? null;
+
           const activeQualityProfile =
+            runtimeQuality?.activeProfile ??
             localCtx.activeQualityProfile ??
             localCtx.qualityProfile ??
             localCtx.runtimeFlags?.activeQualityProfile ??
             'unknown';
 
           const forcedQualityProfile =
+            runtimeQuality?.forcedProfile ??
             localCtx.forcedQualityProfile ??
             localCtx.runtimeFlags?.forcedQualityProfile ??
             null;
 
+          const autoDetectedQualityProfile =
+            runtimeQuality?.autoDetectedProfile ??
+            localCtx.autoDetectedQualityProfile ??
+            null;
+
+          const qualityProfileSource =
+            runtimeQuality?.source ??
+            localCtx.qualityProfileSource ??
+            'unknown';
+
+          const qualityDprBucket =
+            runtimeQuality?.dprBucket ??
+            localCtx.dprBucket ??
+            localCtx.runtimeTelemetry?.qualityProfiles?.dprBucket ??
+            (typeof dpr === 'number' && Number.isFinite(dpr)
+              ? dpr >= 2.5
+                ? 'ultra'
+                : dpr >= 1.5
+                  ? 'high'
+                  : 'normal'
+              : null);
+
+          const qualityRendererWidth =
+            typeof localCtx.runtimeTelemetry?.rendererSize?.w === 'number'
+              ? localCtx.runtimeTelemetry.rendererSize.w
+              : typeof localCtx.runtimeTelemetry?.rendererSize?.width === 'number'
+                ? localCtx.runtimeTelemetry.rendererSize.width
+                : typeof localCtx.renderer?.domElement?.width === 'number'
+                  ? localCtx.renderer.domElement.width
+                  : null;
+
+          const qualityRendererHeight =
+            typeof localCtx.runtimeTelemetry?.rendererSize?.h === 'number'
+              ? localCtx.runtimeTelemetry.rendererSize.h
+              : typeof localCtx.runtimeTelemetry?.rendererSize?.height === 'number'
+                ? localCtx.runtimeTelemetry.rendererSize.height
+                : typeof localCtx.renderer?.domElement?.height === 'number'
+                  ? localCtx.renderer.domElement.height
+                  : null;
+
+          const qualityRendererArea =
+            typeof localCtx.rendererArea === 'number'
+              ? localCtx.rendererArea
+              : typeof runtimeQuality?.rendererArea === 'number'
+                ? runtimeQuality.rendererArea
+                : typeof localCtx.runtimeTelemetry?.qualityProfiles?.rendererArea === 'number'
+                  ? localCtx.runtimeTelemetry.qualityProfiles.rendererArea
+                  : typeof qualityRendererWidth === 'number' && typeof qualityRendererHeight === 'number'
+                    ? Math.max(0, Math.round(qualityRendererWidth * qualityRendererHeight))
+                    : null;
+
+          const qualityDeviceClass =
+            runtimeQuality?.deviceClass ??
+            localCtx.deviceClass ??
+            localCtx.runtimeTelemetry?.qualityProfiles?.deviceClass ??
+            (typeof qualityRendererWidth === 'number' && typeof qualityRendererHeight === 'number'
+              ? (() => {
+                  const minSide = Math.min(qualityRendererWidth, qualityRendererHeight);
+                  const maxSide = Math.max(qualityRendererWidth, qualityRendererHeight);
+                  if (minSide <= 480) return 'mobile';
+                  if (minSide <= 900 && maxSide <= 1180) return 'tablet';
+                  return 'desktop';
+                })()
+              : null);
           const estimatedProfileCost =
-            typeof localCtx.estimatedProfileCost === 'number'
-              ? localCtx.estimatedProfileCost
-              : estimateProfileCost({
-                  drawCalls: Number(totalRender.calls || 0),
-                  triangles: Number(totalRender.triangles || 0),
-                  points: Number(totalRender.points || 0),
-                  lines: Number(totalRender.lines || 0),
-                  dpr,
-                  bloomEnabled,
-                  fogEnabled,
-                  fluidParticleCount,
-                });
+            typeof runtimeQuality?.estimatedCost === 'number'
+              ? runtimeQuality.estimatedCost
+              : typeof localCtx.estimatedProfileCost === 'number'
+                ? localCtx.estimatedProfileCost
+                : estimateProfileCost({
+                    drawCalls: Number(totalRender.calls || 0),
+                    triangles: Number(totalRender.triangles || 0),
+                    points: Number(totalRender.points || 0),
+                    lines: Number(totalRender.lines || 0),
+                    dpr,
+                    bloomEnabled,
+                    fogEnabled,
+                    fluidParticleCount,
+                  });
 
           const orchestratorTimings = (() => {
             const rawTimings =
@@ -2299,14 +2388,18 @@ export function Oracle3DScene({
           const qualityProfile =
             activeQualityProfile === null ? null : String(activeQualityProfile);
 
-          const qualityProfiles = {
-            current: qualityProfile,
-            forced:
-              forcedQualityProfile === null
-                ? null
-                : String(forcedQualityProfile),
-            estimatedCost: estimatedProfileCost,
-          };
+const qualityProfiles = {
+  current: qualityProfile,
+  forced:
+    forcedQualityProfile === null
+      ? null
+      : String(forcedQualityProfile),
+  source: qualityProfileSource,
+  estimatedCost: estimatedProfileCost,
+  deviceClass: qualityDeviceClass,
+  dprBucket: qualityDprBucket,
+  rendererArea: qualityRendererArea,
+};
 
           const counters = {
             reset: runtimeCountersRef.current.resetCount,
@@ -2340,6 +2433,8 @@ export function Oracle3DScene({
               null,
             activeQualityProfile,
             forcedQualityProfile,
+            autoDetectedQualityProfile,
+            qualityProfileSource,
             estimatedProfileCost,
             rebuildCount: Number(
               localCtx.fluidParticlesState?.rebuildCount ?? 0,
@@ -2469,6 +2564,33 @@ export function Oracle3DScene({
           },
           visible,
         );
+      };
+
+      const setQualityProfile = (
+        profile: 'safe' | 'low' | 'medium' | 'high' | 'ultra' | null,
+      ) => {
+        const localCtx = (orchestratorRef.current as any)?.ctx;
+        if (!localCtx?.qualityGovernor) return null;
+
+        const snapshot = localCtx.qualityGovernor.setForcedProfile(profile);
+        writeQualitySnapshotToContext(localCtx, localCtx.qualityGovernor);
+
+        const qualityProfile = getQualityProfileFromContext(localCtx, 'high');
+        bloomPass.enabled = qualityProfile.bloomEnabled !== false;
+
+        if (containerRef.current) {
+          const width = Math.max(1, containerRef.current.clientWidth);
+          const height = Math.max(1, containerRef.current.clientHeight);
+          renderer.setPixelRatio(
+            Math.min(window.devicePixelRatio || 1, qualityProfile.maxDpr),
+          );
+          renderer.setSize(width, height);
+          composer.setSize(width, height);
+          bloomPass.setSize(width, height);
+        }
+
+        scanFeedbackCandidatesRef.current('quality-profile-update');
+        return snapshot;
       };
 
       const setEmergencyVisibleMode = (enabled: boolean) => {
@@ -2647,6 +2769,29 @@ export function Oracle3DScene({
           (orchestratorRef.current as any).update(time, dtSeconds);
         }
 
+        const localCtx = (orchestratorRef.current as any)?.ctx ?? ctx;
+        const qualityProfile = getQualityProfileFromContext(localCtx, 'high');
+        bloomPass.enabled = qualityProfile.bloomEnabled !== false;
+        if ((bloomPass as any).strength > qualityProfile.bloomStrengthMax) {
+          (bloomPass as any).strength = qualityProfile.bloomStrengthMax;
+        }
+
+        if (containerRef.current) {
+          const width = Math.max(1, containerRef.current.clientWidth);
+          const height = Math.max(1, containerRef.current.clientHeight);
+          const currentPixelRatio = safeGetRendererPixelRatio(renderer);
+          const nextPixelRatio = Math.min(
+            window.devicePixelRatio || 1,
+            qualityProfile.maxDpr,
+          );
+          if (Math.abs(currentPixelRatio - nextPixelRatio) > 0.01) {
+            renderer.setPixelRatio(nextPixelRatio);
+            renderer.setSize(width, height);
+            composer.setSize(width, height);
+            bloomPass.setSize(width, height);
+          }
+        }
+
         if (emergencyVisualStateRef.current.active) {
           const localCtx = (orchestratorRef.current as any)?.ctx;
           if (localCtx) {
@@ -2694,13 +2839,30 @@ export function Oracle3DScene({
 
       const width = Math.max(1, containerRef.current.clientWidth);
       const height = Math.max(1, containerRef.current.clientHeight);
+      const localCtx = (orchestratorRef.current as any)?.ctx ?? ctx;
+
+      if (localCtx?.qualityGovernor) {
+        localCtx.qualityGovernor.setDeviceHints({
+          devicePixelRatio: window.devicePixelRatio || 1,
+          viewportWidth: width,
+          viewportHeight: height,
+          isMobile: width <= 768,
+        });
+        writeQualitySnapshotToContext(localCtx, localCtx.qualityGovernor);
+      }
+
+      const qualityProfile = getQualityProfileFromContext(localCtx, 'high');
 
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
 
+      renderer.setPixelRatio(
+        Math.min(window.devicePixelRatio || 1, qualityProfile.maxDpr),
+      );
       renderer.setSize(width, height);
       composer.setSize(width, height);
       bloomPass.setSize(width, height);
+      bloomPass.enabled = qualityProfile.bloomEnabled !== false;
     };
 
     if (containerRef.current) {

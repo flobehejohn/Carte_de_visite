@@ -1,5 +1,6 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 import { SimplexNoise } from 'three/examples/jsm/math/SimplexNoise.js';
+import { getQualityProfileFromContext } from '../performance/QualityGovernor';
 
 /**
  * orbParticles — version "Ultime" (corrigée)
@@ -40,6 +41,30 @@ const DEFAULTS = {
   },
 };
 
+
+function getRuntimeFrameIndex(ctx) {
+  return Math.max(
+    0,
+    Number(
+      ctx?.runtimeFrameIndex ??
+        ctx?.runtimeTelemetry?.orchestratorUpdateCount ??
+        0,
+    ) || 0,
+  );
+}
+
+function getParticlesQualityProfile(ctx) {
+  return getQualityProfileFromContext(ctx, 'high');
+}
+
+function shouldSkipParticleWork(ctx) {
+  const qualityProfile = getParticlesQualityProfile(ctx);
+  const divisor = Math.max(1, Number(qualityProfile.partialUpdateDivisors?.fluid ?? 1));
+  const frameIndex = getRuntimeFrameIndex(ctx);
+  if (divisor <= 1 || frameIndex <= 0) return false;
+  return frameIndex % divisor !== 0;
+}
+
 function clamp01(x) {
   return Math.max(0, Math.min(1, Number(x) || 0));
 }
@@ -62,7 +87,19 @@ function getOpacityMul(ctx) {
 }
 
 function applyOpacityToMaterials(ctx, cfg) {
-  // opacity is applied by applyMaterials (RenderParams)
+  const particlesMul = getParticlesOpacityMul(ctx);
+  const qualityProfile = getParticlesQualityProfile(ctx);
+  const baseOpacity = clamp01(cfg.opacity) * particlesMul;
+  const governedOpacity = Math.min(baseOpacity, qualityProfile.glowIntensityMax);
+  const linkOpacity = Math.min(1, governedOpacity * 0.45);
+
+  ctx.particlesRuntime = {
+    ...(ctx.particlesRuntime || {}),
+    governedOpacity,
+    governedLinkOpacity: linkOpacity,
+    qualityProfile: qualityProfile.name,
+    opacityMul: particlesMul,
+  };
 }
 
 function ensureConfig(ctx) {
@@ -274,6 +311,7 @@ export function animateParticles(ctx, time, turbulence = 0.25) {
 
   const cfg = ensureConfig(ctx);
   applyOpacityToMaterials(ctx, cfg);
+  if (shouldSkipParticleWork(ctx)) return;
 
   const geom = ctx.particlesPoints.geometry;
   const pos = geom.attributes.position.array;
@@ -363,6 +401,10 @@ export function updateParticleLinks(ctx) {
 
   // NOTE: opacité des matériaux recalée ici pour suivre le mul même sans rebuild
   applyOpacityToMaterials(ctx, cfg);
+  if (shouldSkipParticleWork(ctx)) {
+    if (ctx.particlesLinks) ctx.particlesLinks.visible = false;
+    return;
+  }
 
   if (!ctx.particlesLinks || !ctx.particlesPoints || cfg.mode !== 'links') {
     if (ctx.particlesLinks) ctx.particlesLinks.visible = false;
@@ -467,6 +509,10 @@ export function updateParticleTrails(ctx) {
 
   // NOTE: opacité des matériaux recalée ici pour suivre le mul même sans rebuild
   applyOpacityToMaterials(ctx, cfg);
+  if (shouldSkipParticleWork(ctx)) {
+    if (ctx.particlesTrails) ctx.particlesTrails.visible = false;
+    return;
+  }
 
   if (!ctx.particlesTrails || !ctx.particlesPoints || cfg.mode !== 'trails') {
     if (ctx.particlesTrails) ctx.particlesTrails.visible = false;
