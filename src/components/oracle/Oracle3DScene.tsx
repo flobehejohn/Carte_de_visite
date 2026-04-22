@@ -1004,7 +1004,9 @@ function cloneFogExp2(
 }
 
 const AUDIT_RUNTIME_ENABLED =
-  import.meta.env.DEV || import.meta.env.MODE === 'test';
+  import.meta.env.DEV ||
+  import.meta.env.MODE === 'test' ||
+  import.meta.env.VITE_ENABLE_ORB_AUDIT === 'true';
 
 export function Oracle3DScene({
   formData,
@@ -2331,6 +2333,14 @@ export function Oracle3DScene({
               lastUpdateMs: toFiniteNumberOrNull(rawState.lastUpdateMs),
               avgUpdateMs: toFiniteNumberOrNull(rawState.avgUpdateMs),
               rebuildCount: Number(rawState.rebuildCount ?? 0),
+              meshCapacity: Number(rawState.meshCapacity ?? 0),
+              targetMaxCount: Number(rawState.targetMaxCount ?? 0),
+              appliedMaxCount: Number(rawState.appliedMaxCount ?? 0),
+              lastProfileApplied:
+                rawState.lastProfileApplied === null ||
+                rawState.lastProfileApplied === undefined
+                  ? null
+                  : String(rawState.lastProfileApplied),
               enabled: Boolean(localCtx.fluidParticlesConfig?.enabled ?? true),
               visible: Boolean(
                 mesh?.visible ?? fluidState.meshVisible ?? false,
@@ -2394,6 +2404,10 @@ const qualityProfiles = {
     forcedQualityProfile === null
       ? null
       : String(forcedQualityProfile),
+  autoDetected:
+    autoDetectedQualityProfile === null
+      ? null
+      : String(autoDetectedQualityProfile),
   source: qualityProfileSource,
   estimatedCost: estimatedProfileCost,
   deviceClass: qualityDeviceClass,
@@ -2546,8 +2560,14 @@ const qualityProfiles = {
         if (!localCtx) return;
 
         ensureOverlayFluidIsolationConfig(localCtx);
-        localCtx.fluidParticlesConfig.enabled = Boolean(visible);
-        resetFluidParticles(localCtx);
+
+        const nextVisible = Boolean(visible);
+        const prevVisible = Boolean(localCtx.fluidParticlesConfig.enabled);
+
+        if (prevVisible !== nextVisible) {
+          localCtx.fluidParticlesConfig.enabled = nextVisible;
+          resetFluidParticles(localCtx);
+        }
 
         if (visibleSafeModeRef.current) {
           applyVisibleSafeModeRef.current(true);
@@ -2694,6 +2714,7 @@ const qualityProfiles = {
         getRenderMode,
         setAutoFallbackOnFeedback,
         setFluidParticlesVisible,
+        setQualityProfile,
         setVisibleSafeMode: (enabled: boolean) =>
           applyVisibleSafeModeRef.current(Boolean(enabled)),
         setEmergencyVisibleMode,

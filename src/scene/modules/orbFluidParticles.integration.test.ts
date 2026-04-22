@@ -1,4 +1,4 @@
-// @vitest-environment node
+/* @vitest-environment node */
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -6,13 +6,13 @@ import { describe, expect, it } from 'vitest';
 const JS_FILE = new URL('./orbFluidParticles.js', import.meta.url);
 
 describe('orbFluidParticles integration', () => {
-  it('uses an additive material suitable for overlay rendering', () => {
+  it('uses an additive material suitable for governed overlay rendering', () => {
     const text = readFileSync(JS_FILE, 'utf8');
 
     expect(text).toContain('new THREE.MeshBasicMaterial({');
     expect(text).toContain('blending: THREE.AdditiveBlending');
     expect(text).toContain('depthWrite: false');
-    expect(text).toContain('depthTest: true');
+    expect(text).toContain('depthTest: cfg.excludeFromComposer === false');
     expect(text).toContain('toneMapped: false');
   });
 
@@ -22,9 +22,7 @@ describe('orbFluidParticles integration', () => {
     expect(text).toContain('excludeFromComposer: true');
     expect(text).toContain('renderLayer: ORB_OVERLAY_RENDER_LAYER');
     expect(text).toContain('mesh.layers.set(layer)');
-    expect(text).toContain(
-      'postprocessIsolation: layer !== ORB_BASE_RENDER_LAYER',
-    );
+    expect(text).toContain('postprocessIsolation: layer !== ORB_BASE_RENDER_LAYER');
   });
 
   it('exports a deterministic reset path for ritual restart', () => {
@@ -48,12 +46,8 @@ describe('orbFluidParticles integration', () => {
   it('supports persistent enabled toggling through config', () => {
     const text = readFileSync(JS_FILE, 'utf8');
 
-    expect(text).toContain(
-      'export function setFluidParticlesEnabled(ctx, enabled)',
-    );
-    expect(text).toContain(
-      'return setFluidParticlesConfig(ctx, { enabled: Boolean(enabled) });',
-    );
+    expect(text).toContain('export function setFluidParticlesEnabled(ctx, enabled)');
+    expect(text).toContain('return setFluidParticlesConfig(ctx, { enabled: Boolean(enabled) });');
   });
 
   it('documents the stable runtime telemetry fields', () => {

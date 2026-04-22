@@ -194,7 +194,7 @@ function opticalConfigSignature(cfg) {
     toneMapped: false,
     transparent: true,
     depthWrite: false,
-    depthTest: true,
+    depthTest: cfg.excludeFromComposer === false,
   });
 }
 
@@ -262,6 +262,9 @@ function ensureState(ctx) {
       lastConfigSignature: '',
       lastOpticalSignature: '',
       meshCapacity: 0,
+      targetMaxCount: 0,
+      appliedMaxCount: 0,
+      lastProfileApplied: null,
     };
   }
   return ctx.fluidParticlesState;
@@ -380,7 +383,7 @@ function buildMaterial(cfg) {
     transparent: true,
     opacity: clamp01(cfg.opacity ?? 0.78),
     depthWrite: false,
-    depthTest: true,
+    depthTest: cfg.excludeFromComposer === false,
     blending: THREE.AdditiveBlending,
     vertexColors: true,
     toneMapped: false,
@@ -446,6 +449,9 @@ export function resetFluidParticles(ctx) {
   state.lastLogTime = 0;
   state.particles.length = 0;
   state.activeParticleCount = 0;
+  state.targetMaxCount = cfg.maxCount;
+  state.appliedMaxCount = 0;
+  state.lastProfileApplied = cfg.__qualityProfile ?? null;
 
   if (state.mesh) {
     replaceMaterialIfNeeded(state, cfg);
@@ -493,6 +499,9 @@ export function buildFluidParticles(ctx, overrideConfig = null) {
   state.lastConfigSignature = stableConfigSignature(cfg);
   state.lastOpticalSignature = opticalConfigSignature(cfg);
   state.meshCapacity = cfg.maxCount;
+  state.targetMaxCount = cfg.maxCount;
+  state.appliedMaxCount = cfg.maxCount;
+  state.lastProfileApplied = cfg.__qualityProfile ?? null;
 
   syncLegacyHandle(ctx, mesh);
 
@@ -545,12 +554,18 @@ export function setFluidParticlesConfig(ctx, patch = {}) {
       cfg.excludeFromComposer !== prevExclude) ||
     ('renderLayer' in patch && cfg.renderLayer !== prevLayer);
 
-  if (!state.mesh || structuralChanged || state.meshCapacity !== governedCfg.maxCount) {
+  if (!state.mesh || structuralChanged || governedCfg.maxCount > state.meshCapacity) {
     buildFluidParticles(ctx, governedCfg);
   } else if (state.mesh) {
     replaceMaterialIfNeeded(state, governedCfg);
     state.mesh.visible = !!governedCfg.enabled;
     applyMeshRenderIsolation(state.mesh, governedCfg);
+    state.targetMaxCount = governedCfg.maxCount;
+    state.appliedMaxCount = Math.min(
+      governedCfg.maxCount,
+      Math.max(0, Number(state.meshCapacity ?? governedCfg.maxCount)),
+    );
+    state.lastProfileApplied = governedCfg.__qualityProfile ?? null;
     syncLegacyHandle(ctx, state.mesh);
   }
 
@@ -704,7 +719,15 @@ export function updateFluidParticles(ctx, delta = 0) {
     cfg.flowCenter = { x: 0, y: 0, z: 0 };
   }
 
-  if (!state.mesh || state.meshCapacity !== cfg.maxCount) buildFluidParticles(ctx, cfg);
+  if (!state.mesh || cfg.maxCount > state.meshCapacity) {
+    buildFluidParticles(ctx, cfg);
+  }
+  state.targetMaxCount = cfg.maxCount;
+  state.appliedMaxCount = Math.min(
+    cfg.maxCount,
+    Math.max(0, Number(state.meshCapacity ?? cfg.maxCount)),
+  );
+  state.lastProfileApplied = cfg.__qualityProfile ?? null;
   const mesh = state.mesh;
   if (!mesh) {
     finalizeRuntimeUpdate(state, startedAtMs, 0);

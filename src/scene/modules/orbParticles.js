@@ -57,12 +57,79 @@ function getParticlesQualityProfile(ctx) {
   return getQualityProfileFromContext(ctx, 'high');
 }
 
-function shouldSkipParticleWork(ctx) {
+function getParticlesQualityUpdateDivisor(ctx) {
   const qualityProfile = getParticlesQualityProfile(ctx);
-  const divisor = Math.max(1, Number(qualityProfile.partialUpdateDivisors?.fluid ?? 1));
+  return Math.max(
+    1,
+    Number(
+      qualityProfile.partialUpdateDivisors?.particles ??
+        qualityProfile.partialUpdateDivisors?.fluid ??
+        1,
+    ),
+  );
+}
+
+function getAllocatedParticlesCount(ctx) {
+  return (
+    Number(
+      ctx?.particlesPoints?.geometry?.getAttribute?.('position')?.count ?? 0,
+    ) || 0
+  );
+}
+
+function getRenderableParticleCount(ctx, cfg) {
+  const allocatedCount = getAllocatedParticlesCount(ctx);
+  const targetCount = Math.max(0, Math.floor(Number(cfg?.count ?? allocatedCount)));
+  return Math.min(targetCount, allocatedCount || targetCount);
+}
+
+function syncParticlesRuntime(ctx, cfg) {
+  const qualityProfile = getParticlesQualityProfile(ctx);
+  const allocatedCount = getAllocatedParticlesCount(ctx);
+  const targetCount = Math.max(0, Math.floor(Number(cfg?.count ?? allocatedCount)));
+  const appliedCount = Math.min(targetCount, allocatedCount || targetCount);
+  const prev = ctx.particlesRuntime || {};
+
+  ctx.particlesRuntime = {
+    ...prev,
+    qualityProfile: qualityProfile.name,
+    updateDivisor: getParticlesQualityUpdateDivisor(ctx),
+    allocatedCount,
+    targetCount,
+    appliedCount,
+    lastProfileApplied: qualityProfile.name,
+    rebuildCount: Number(prev.rebuildCount ?? 0),
+    mode: cfg?.mode ?? prev.mode ?? 'points',
+    pointsVisible: Boolean(ctx?.particlesPoints?.visible ?? false),
+    linksVisible: Boolean(ctx?.particlesLinks?.visible ?? false),
+    trailsVisible: Boolean(ctx?.particlesTrails?.visible ?? false),
+    pointsDrawCount: Number(ctx?.particlesPoints?.geometry?.drawRange?.count ?? 0),
+    linksDrawCount: Number(ctx?.particlesLinks?.geometry?.drawRange?.count ?? 0),
+    trailsDrawCount: Number(ctx?.particlesTrails?.geometry?.drawRange?.count ?? 0),
+    trailHistoryLength: Array.isArray(ctx?.trailHistory) ? ctx.trailHistory.length : 0,
+    runtimeFrameIndex: Number(prev.runtimeFrameIndex ?? 0),
+    lastSkip: Boolean(prev.lastSkip ?? false),
+    burstTarget: Number(prev.burstTarget ?? 0),
+    burstEnvelope: Number(prev.burstEnvelope ?? 0),
+  };
+
+  return ctx.particlesRuntime;
+}
+
+function shouldSkipParticleWork(ctx) {
+  const divisor = getParticlesQualityUpdateDivisor(ctx);
   const frameIndex = getRuntimeFrameIndex(ctx);
-  if (divisor <= 1 || frameIndex <= 0) return false;
-  return frameIndex % divisor !== 0;
+  const skip = !(divisor <= 1 || frameIndex <= 0) && frameIndex % divisor !== 0;
+
+  const prev = ctx.particlesRuntime || {};
+  ctx.particlesRuntime = {
+    ...prev,
+    updateDivisor: divisor,
+    runtimeFrameIndex: frameIndex,
+    lastSkip: skip,
+  };
+
+  return skip;
 }
 
 function clamp01(x) {
@@ -86,6 +153,19 @@ function getOpacityMul(ctx) {
   return getParticlesOpacityMul(ctx);
 }
 
+function getBurstEnvelope(ctx, target) {
+  const prev = Number(ctx?.particlesRuntime?.burstEnvelope ?? 0);
+  const next = prev + (target - prev) * 0.18;
+
+  ctx.particlesRuntime = {
+    ...(ctx.particlesRuntime || {}),
+    burstTarget: target,
+    burstEnvelope: next,
+  };
+
+  return next;
+}
+
 function applyOpacityToMaterials(ctx, cfg) {
   const particlesMul = getParticlesOpacityMul(ctx);
   const qualityProfile = getParticlesQualityProfile(ctx);
@@ -93,8 +173,9 @@ function applyOpacityToMaterials(ctx, cfg) {
   const governedOpacity = Math.min(baseOpacity, qualityProfile.glowIntensityMax);
   const linkOpacity = Math.min(1, governedOpacity * 0.45);
 
+  const runtime = syncParticlesRuntime(ctx, cfg);
   ctx.particlesRuntime = {
-    ...(ctx.particlesRuntime || {}),
+    ...runtime,
     governedOpacity,
     governedLinkOpacity: linkOpacity,
     qualityProfile: qualityProfile.name,
@@ -300,6 +381,16 @@ export function createInnerParticles(ctx) {
   ctx.particlesTrails = new THREE.Points(trailGeometry, trailMaterial);
   ctx.particlesTrails.visible = false;
   (ctx.orbGroup || ctx.scene).add(ctx.particlesTrails);
+
+  ctx.particlesRuntime = {
+    ...(ctx.particlesRuntime || {}),
+    rebuildCount: Number(ctx.particlesRuntime?.rebuildCount ?? 0) + 1,
+    allocatedCount: count,
+    targetCount: count,
+    appliedCount: count,
+    lastProfileApplied: getParticlesQualityProfile(ctx).name,
+    updateDivisor: getParticlesQualityUpdateDivisor(ctx),
+  };
 }
 
 /**
@@ -321,12 +412,14 @@ export function animateParticles(ctx, time, turbulence = 0.25) {
   const seed = geom.attributes.seed.array;
   const vel = geom.attributes.velocity.array;
 
-  const count = pos.length / 3;
+  const count = getRenderableParticleCount(ctx, cfg);
+  ctx.particlesPoints.geometry.setDrawRange(0, count);
+  syncParticlesRuntime(ctx, cfg);
 
   // énergie globale (rituel)
   const energy = ctx?.ritualGenome?.motion?.energy ?? 0.5;
-  const isBurst = !!cfg.dynamics?.burst;
-  const burstBoost = isBurst ? 1.0 : 0.0;
+  const burstTarget = cfg.dynamics?.burst ? 1 : 0;
+  const burstBoost = getBurstEnvelope(ctx, burstTarget);
 
   const globalSpeed = 0.14 + energy * 0.28 + burstBoost * 0.22;
   const amp = (0.18 + turbulence * 0.55) * (1.0 + burstBoost * 0.65);
@@ -362,9 +455,9 @@ export function animateParticles(ctx, time, turbulence = 0.25) {
       burstBoost * (0.65 + 0.35 * Math.sin(time * 6.0 + ph)) * (0.35 + 0.65 * Math.abs(si));
 
     // vitesse intégrée (suavise le mouvement)
-    vel[idx] += (nx * 0.04 + (rnd(ctx) - 0.5) * 0.01) * (1 + burst);
-    vel[idx + 1] += (ny * 0.04 + (rnd(ctx) - 0.5) * 0.01) * (1 + burst);
-    vel[idx + 2] += (nz * 0.04 + (rnd(ctx) - 0.5) * 0.01) * (1 + burst);
+    vel[idx] += nx * 0.04 * (1 + burst);
+    vel[idx + 1] += ny * 0.04 * (1 + burst);
+    vel[idx + 2] += nz * 0.04 * (1 + burst);
 
     // damping
     vel[idx] *= 0.94 - burst * 0.03;
@@ -402,7 +495,6 @@ export function updateParticleLinks(ctx) {
   // NOTE: opacité des matériaux recalée ici pour suivre le mul même sans rebuild
   applyOpacityToMaterials(ctx, cfg);
   if (shouldSkipParticleWork(ctx)) {
-    if (ctx.particlesLinks) ctx.particlesLinks.visible = false;
     return;
   }
 
@@ -412,7 +504,8 @@ export function updateParticleLinks(ctx) {
   }
 
   const pPos = ctx.particlesPoints.geometry.attributes.position.array;
-  const count = pPos.length / 3;
+  const count = getRenderableParticleCount(ctx, cfg);
+  syncParticlesRuntime(ctx, cfg);
 
   const linkGeom = ctx.particlesLinks.geometry;
   const lPos = linkGeom.attributes.position.array;
@@ -510,7 +603,6 @@ export function updateParticleTrails(ctx) {
   // NOTE: opacité des matériaux recalée ici pour suivre le mul même sans rebuild
   applyOpacityToMaterials(ctx, cfg);
   if (shouldSkipParticleWork(ctx)) {
-    if (ctx.particlesTrails) ctx.particlesTrails.visible = false;
     return;
   }
 
@@ -520,7 +612,8 @@ export function updateParticleTrails(ctx) {
   }
 
   const pPos = ctx.particlesPoints.geometry.attributes.position.array;
-  const count = pPos.length / 3;
+  const count = getRenderableParticleCount(ctx, cfg);
+  syncParticlesRuntime(ctx, cfg);
 
   // Historique: garde trailLength snapshots
   ctx.trailHistory.unshift(Float32Array.from(pPos));
@@ -593,16 +686,27 @@ export function setParticlesConfig(ctx, patch = {}) {
   }
 
   // rebuild si structure change
-  const rebuildKeys = ['count', 'distribution'];
-  const mustRebuild = patch.forceRebuild || rebuildKeys.some((k) => k in patch) || !ctx.particlesPoints;
+  const allocatedCount = getAllocatedParticlesCount(ctx);
+  const rebuildKeys = ['distribution'];
+  const mustRebuild =
+    patch.forceRebuild ||
+    rebuildKeys.some((k) => k in patch) ||
+    !ctx.particlesPoints ||
+    ('count' in patch && Number(cfg.count) > allocatedCount);
 
   if (mustRebuild) {
     createInnerParticles(ctx);
     return cfg;
   }
 
+  syncParticlesRuntime(ctx, cfg);
+
   // update matériaux (en appliquant le mul)
   applyOpacityToMaterials(ctx, cfg);
+
+  if (ctx.particlesPoints?.geometry) {
+    ctx.particlesPoints.geometry.setDrawRange(0, getRenderableParticleCount(ctx, cfg));
+  }
 
   if (ctx.particlesPoints?.material) {
     ctx.particlesPoints.material.size = cfg.size;
