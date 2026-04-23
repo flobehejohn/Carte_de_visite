@@ -2,10 +2,13 @@ import {
   clamp,
   computeAlphaInPlace,
   computeTransparencyPolicy,
+  computeSmokeVisualCompensation,
   isFiniteNumber,
   type MaterialTransparencyPolicy,
   type TransparencyOptions,
   type TransparencyState,
+  type SmokePolicyState,
+  type SmokeVisualCompensation,
 } from '../optics/transparency';
 import type { RenderParams } from './materialParams';
 
@@ -18,7 +21,12 @@ type MaterialLike = {
   dithering?: boolean;
   alphaTest?: number;
   alphaHash?: boolean;
-  userData?: { opacityBase?: number };
+  blending?: number;
+  userData?: {
+    opacityBase?: number;
+    smokeSensitive?: boolean;
+    additiveAlphaMultiplier?: number;
+  };
 };
 
 type MaterialHost = { material?: MaterialLike | MaterialLike[] | null };
@@ -30,6 +38,9 @@ type RenderMaterialContext = {
   particlesLinks?: MaterialHost;
   foregroundMesh?: MaterialHost;
   particlesConfig?: { opacity?: number };
+  smokePolicyState?: SmokePolicyState;
+  smokeAlphaLayer?: number | null;
+  smokeCompensation?: SmokeVisualCompensation | null;
 
   _transparencyStateWire?: TransparencyState;
   _transparencyStateParticles?: TransparencyState;
@@ -137,6 +148,7 @@ function getOpacityBase(material: MaterialLike, fallback: number): number {
 }
 
 function applyToMaterialSetWithBase(
+  ctx: RenderMaterialContext,
   target: MaterialLike | MaterialLike[] | null | undefined,
   alphaMul: number,
   policyConfig: TransparencyPolicyConfig,
@@ -152,7 +164,8 @@ function applyToMaterialSetWithBase(
       const mat = target[i];
       if (!mat) continue;
       const base = getOpacityBase(mat, baseFallback);
-      const finalAlpha = clamp(alphaMul * base, rangeMin, rangeMax);
+      const smokeMul = resolveSmokeAdditiveMultiplier(mat, ctx);
+      const finalAlpha = clamp(alphaMul * base * smokeMul, rangeMin, rangeMax);
       const policy = computeTransparencyPolicy(finalAlpha, policyConfig);
       const transparent = finalAlpha < 0.999;
       applyPolicyToMaterial(mat, finalAlpha, transparent, policy, alphaHashEnabled);
@@ -161,7 +174,8 @@ function applyToMaterialSetWithBase(
   }
 
   const base = getOpacityBase(target, baseFallback);
-  const finalAlpha = clamp(alphaMul * base, rangeMin, rangeMax);
+  const smokeMul = resolveSmokeAdditiveMultiplier(target, ctx);
+  const finalAlpha = clamp(alphaMul * base * smokeMul, rangeMin, rangeMax);
   const policy = computeTransparencyPolicy(finalAlpha, policyConfig);
   const transparent = finalAlpha < 0.999;
   applyPolicyToMaterial(target, finalAlpha, transparent, policy, alphaHashEnabled);
@@ -203,6 +217,7 @@ function applyToMeshList(
 }
 
 function applyToMeshListWithBase(
+  ctx: RenderMaterialContext,
   meshes: MaterialHost[] | undefined,
   alphaMul: number,
   policyConfig: TransparencyPolicyConfig,
@@ -215,8 +230,29 @@ function applyToMeshListWithBase(
 
   for (let i = 0; i < meshes.length; i += 1) {
     const mat = meshes[i]?.material ?? null;
-    applyToMaterialSetWithBase(mat, alphaMul, policyConfig, alphaHashEnabled, baseFallback, rangeMin, rangeMax);
+    applyToMaterialSetWithBase(ctx, mat, alphaMul, policyConfig, alphaHashEnabled, baseFallback, rangeMin, rangeMax);
   }
+}
+
+function resolveSmokeAdditiveMultiplier(
+  material: MaterialLike | null | undefined,
+  ctx: RenderMaterialContext,
+): number {
+  const compensation =
+    ctx.smokeCompensation ??
+    computeSmokeVisualCompensation(
+      ctx.smokePolicyState ?? 'premium',
+      ctx.smokeAlphaLayer ?? 0,
+    );
+
+  const materialMul = isFiniteNumber(material?.userData?.additiveAlphaMultiplier)
+    ? Math.max(0, material.userData.additiveAlphaMultiplier)
+    : 1;
+
+  const smokeSensitive = Boolean(material?.userData?.smokeSensitive ?? false);
+  if (!smokeSensitive) return 1;
+
+  return clamp(materialMul * compensation.additiveAlphaMultiplier, 0, 1);
 }
 
 function ensurePolicyOut(
@@ -281,6 +317,7 @@ export function applyMaterials(
   const wireOverride = runtimeFlags?.wireMaterials ?? null;
   if (wireOverride) {
     applyToMaterialSetWithBase(
+      ctx,
       wireOverride,
       wireAlphaMul,
       policyConfig,
@@ -291,6 +328,7 @@ export function applyMaterials(
     );
   } else {
     applyToMeshListWithBase(
+      ctx,
       ctx.wireFrames,
       wireAlphaMul,
       policyConfig,
@@ -329,6 +367,7 @@ export function applyMaterials(
     : BASE_ALPHA_PARTICLES;
   if (particlesOverride) {
     applyToMaterialSetWithBase(
+      ctx,
       particlesOverride,
       particlesAlphaMul,
       policyConfig,
@@ -339,6 +378,7 @@ export function applyMaterials(
     );
   } else {
     applyToMaterialSetWithBase(
+      ctx,
       ctx.particlesPoints?.material ?? null,
       particlesAlphaMul,
       policyConfig,
@@ -348,6 +388,7 @@ export function applyMaterials(
       rangeMax
     );
     applyToMaterialSetWithBase(
+      ctx,
       ctx.particlesTrails?.material ?? null,
       particlesAlphaMul,
       policyConfig,
@@ -357,6 +398,7 @@ export function applyMaterials(
       rangeMax
     );
     applyToMaterialSetWithBase(
+      ctx,
       ctx.particlesLinks?.material ?? null,
       particlesAlphaMul,
       policyConfig,

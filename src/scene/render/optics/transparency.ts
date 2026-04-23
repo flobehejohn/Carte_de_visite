@@ -138,6 +138,72 @@ export function computeAlpha(
   return { alpha, nextState };
 }
 
+
+export type SmokePolicyState = 'premium' | 'simplified' | 'off';
+export type SmokePolicySource = 'forced' | 'quality-profile' | 'runtime-budget';
+
+export type SmokeVisualCompensation = {
+  fogDensityMultiplier: number;
+  glowIntensityMultiplier: number;
+  volumetricBackgroundMultiplier: number;
+  additiveAlphaMultiplier: number;
+};
+
+export function resolveSmokePolicyStateFromProfile(
+  profileName: string | null | undefined,
+): SmokePolicyState {
+  const profile = String(profileName || '').toLowerCase();
+
+  if (profile === 'safe' || profile === 'low') return 'off';
+  if (profile === 'medium') return 'simplified';
+  return 'premium';
+}
+
+export function resolveSmokePolicySource(
+  forcedState: SmokePolicyState | null | undefined,
+  runtimeBudgetDowngrade: boolean | null | undefined,
+): SmokePolicySource {
+  if (forcedState) return 'forced';
+  if (runtimeBudgetDowngrade) return 'runtime-budget';
+  return 'quality-profile';
+}
+
+function clampMul(value: number, fallback = 1): number {
+  return isFiniteNumber(value) ? Math.max(0, value) : fallback;
+}
+
+export function computeSmokeVisualCompensation(
+  state: SmokePolicyState,
+  smokeAlphaLayer: number | null | undefined,
+): SmokeVisualCompensation {
+  const alpha = isFiniteNumber(smokeAlphaLayer) ? Math.max(0, smokeAlphaLayer) : 0;
+
+  if (state === 'off') {
+    return {
+      fogDensityMultiplier: clampMul(1.12 - alpha * 0.15, 1.06),
+      glowIntensityMultiplier: clampMul(0.84 - alpha * 0.10, 0.82),
+      volumetricBackgroundMultiplier: 0.12,
+      additiveAlphaMultiplier: 0.62,
+    };
+  }
+
+  if (state === 'simplified') {
+    return {
+      fogDensityMultiplier: clampMul(1.06 - alpha * 0.08, 1.02),
+      glowIntensityMultiplier: clampMul(0.92 - alpha * 0.05, 0.90),
+      volumetricBackgroundMultiplier: 0.55,
+      additiveAlphaMultiplier: 0.82,
+    };
+  }
+
+  return {
+    fogDensityMultiplier: 1,
+    glowIntensityMultiplier: 1,
+    volumetricBackgroundMultiplier: 1,
+    additiveAlphaMultiplier: 1,
+  };
+}
+
 type TransparencyPolicyConfig = {
   opaqueOrder: number;
   transparentOrder: number;
