@@ -1852,6 +1852,12 @@ export function Oracle3DScene({
           const volumeEffective = (() => {
             if (!localCtx.volumeConfig) return null;
             return {
+              smokePolicyState:
+                localCtx.smokePolicyState ??
+                localCtx.smokePolicy?.state ??
+                localCtx.climateTargets?.smoke?.state ??
+                localCtx.volumeEffective?.smokeState ??
+                null,
               backgroundStrength: localCtx.volumeConfig.backgroundStrength,
               glowIntensity: localCtx.volumeConfig.glowIntensity,
               softness: localCtx.volumeConfig.softness,
@@ -2398,7 +2404,35 @@ export function Oracle3DScene({
           const qualityProfile =
             activeQualityProfile === null ? null : String(activeQualityProfile);
 
-const qualityProfiles = {
+          const smokePolicyState =
+            localCtx.smokePolicyState ??
+            localCtx.smokePolicy?.state ??
+            localCtx.climateTargets?.smoke?.state ??
+            localCtx.volumeEffective?.smokeState ??
+            null;
+
+          const smokePolicySource =
+            localCtx.smokePolicySource ??
+            localCtx.smokePolicy?.source ??
+            localCtx.climateTargets?.smoke?.source ??
+            null;
+
+          const smokeAlphaLayerResolved =
+            localCtx.smokeAlphaLayer ??
+            localCtx.smokePolicy?.alphaLayer ??
+            localCtx.climateTargets?.smoke?.alphaLayer ??
+            localCtx.volumeConfig?.smokeAlphaLayer ??
+            localCtx.particlesConfig?.smokeAlphaLayer ??
+            null;
+
+          const smokeCompensation =
+            localCtx.smokeCompensation ??
+            localCtx.smokePolicy?.compensation ??
+            localCtx.climateTargets?.smoke?.compensation ??
+            localCtx.volumeEffective?.smokeCompensation ??
+            null;
+
+          const qualityProfiles = {
   current: qualityProfile,
   forced:
     forcedQualityProfile === null
@@ -2421,6 +2455,9 @@ const qualityProfiles = {
           };
 
           const telemetry = {
+            smokePolicyState,
+            smokePolicySource,
+            smokeCompensation,
             sampleCount: frameStats.sampleCount,
             frameWindowSize: FRAME_WINDOW_MAX_SAMPLES,
             meanFrameTime: frameStats.meanFrameTime,
@@ -2441,10 +2478,7 @@ const qualityProfiles = {
             shadowMapEnabled: Boolean(renderer.shadowMap?.enabled),
             fluidParticleCount,
             smokeAlphaLayer:
-              localCtx.smokeAlphaLayer ??
-              localCtx.volumeConfig?.smokeAlphaLayer ??
-              localCtx.particlesConfig?.smokeAlphaLayer ??
-              null,
+              smokeAlphaLayerResolved,
             activeQualityProfile,
             forcedQualityProfile,
             autoDetectedQualityProfile,
