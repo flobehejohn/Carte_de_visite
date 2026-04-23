@@ -1,5 +1,11 @@
 import { orbLog } from '../../shared/debug/orbDebug';
 import { SAFE_RANGES, buildPresetVariants } from './presetLibrary';
+import {
+  computeSmokeVisualCompensation,
+  type SmokePolicySource,
+  type SmokePolicyState,
+  type SmokeVisualCompensation,
+} from '../render/optics/transparency';
 
 export type ClimateTargets = {
   presetName: string;
@@ -18,6 +24,12 @@ export type ClimateTargets = {
     particlesOpacityMul: number;
     foregroundOpacity?: number;
   };
+  smoke?: {
+    state: SmokePolicyState;
+    alphaLayer: number;
+    source: SmokePolicySource;
+    compensation: SmokeVisualCompensation;
+  };
 };
 
 export type ClimateRuntimeTelemetry = {
@@ -33,6 +45,13 @@ export type ClimateRuntimeTelemetry = {
 type ClimateControllerConfig = {
   seed?: string;
   debug?: boolean;
+};
+
+type ClimateSmokeRuntimeState = {
+  state: SmokePolicyState;
+  alphaLayer: number;
+  source: SmokePolicySource;
+  compensation: SmokeVisualCompensation;
 };
 
 type ClimatePresetDef = {
@@ -225,6 +244,14 @@ function cloneTargets(targets: ClimateTargets | null): ClimateTargets | null {
     bloom: { ...targets.bloom },
     volume: { ...targets.volume },
     opacity: { ...targets.opacity },
+    ...(targets.smoke
+      ? {
+          smoke: {
+            ...targets.smoke,
+            compensation: { ...targets.smoke.compensation },
+          },
+        }
+      : {}),
   };
 }
 
@@ -246,6 +273,12 @@ export class ClimateController {
   private presetSwitched = false;
 
   private targets: ClimateTargets | null = null;
+  private smokeRuntime: ClimateSmokeRuntimeState = {
+    state: 'premium',
+    alphaLayer: 0.18,
+    source: 'quality-profile',
+    compensation: computeSmokeVisualCompensation('premium', 0.18),
+  };
 
   private transitionSec = { fog: 4, bloom: 5, volume: 5, opacity: 3.5 };
   private lastLogMs = 0;
@@ -286,6 +319,43 @@ export class ClimateController {
 
   setVisualParams(visualParams: any | null) {
     this.visualParams = visualParams || null;
+  }
+
+  setSmokeRuntime(
+    input:
+      | Partial<ClimateSmokeRuntimeState>
+      | null
+      | undefined,
+  ) {
+    const nextState =
+      input?.state ?? this.smokeRuntime.state ?? 'premium';
+
+    const nextAlpha = clamp(
+      typeof input?.alphaLayer === 'number' && Number.isFinite(input.alphaLayer)
+        ? input.alphaLayer
+        : this.smokeRuntime.alphaLayer,
+      0,
+      1,
+    );
+
+    const nextSource =
+      input?.source ?? this.smokeRuntime.source ?? 'quality-profile';
+
+    const nextCompensation =
+      input?.compensation ??
+      computeSmokeVisualCompensation(nextState, nextAlpha);
+
+    this.smokeRuntime = {
+      state: nextState,
+      alphaLayer: nextAlpha,
+      source: nextSource,
+      compensation: {
+        fogDensityMultiplier: clamp(nextCompensation.fogDensityMultiplier, 0, 4),
+        glowIntensityMultiplier: clamp(nextCompensation.glowIntensityMultiplier, 0, 4),
+        volumetricBackgroundMultiplier: clamp(nextCompensation.volumetricBackgroundMultiplier, 0, 4),
+        additiveAlphaMultiplier: clamp(nextCompensation.additiveAlphaMultiplier, 0, 4),
+      },
+    };
   }
 
   update(dtMs: number) {
@@ -539,23 +609,54 @@ export class ClimateController {
       glowColor = mixColor(glowColor, primary, 0.25);
     }
 
+    const smokeState = this.smokeRuntime.state;
+    const smokeAlphaLayer = clamp(this.smokeRuntime.alphaLayer, 0, 1);
+    const smokeSource = this.smokeRuntime.source;
+    const smokeCompensation =
+      this.smokeRuntime.compensation ??
+      computeSmokeVisualCompensation(smokeState, smokeAlphaLayer);
+
+    const compensatedFogDensity = clamp(
+      fogDensity * smokeCompensation.fogDensityMultiplier,
+      SAFE_RANGES.fogDensity.min,
+      SAFE_RANGES.fogDensity.max,
+    );
+
+    const compensatedGlowIntensity = clamp(
+      glowIntensity * smokeCompensation.glowIntensityMultiplier,
+      SAFE_RANGES.glowIntensity.min,
+      SAFE_RANGES.glowIntensity.max,
+    );
+
+    const compensatedBackgroundStrength = clamp(
+      backgroundStrength * smokeCompensation.volumetricBackgroundMultiplier,
+      SAFE_RANGES.backgroundStrength.min,
+      SAFE_RANGES.backgroundStrength.max,
+    );
+
     return {
       presetName: preset.name,
-      fog: { enabled: true, density: fogDensity, color: fogColor },
+      fog: { enabled: true, density: compensatedFogDensity, color: fogColor },
       bloom: {
         strength: bloomStrength,
         radius: bloomRadius,
         threshold: bloomThreshold,
       },
       volume: {
-        glowIntensity,
-        backgroundStrength,
+        glowIntensity: compensatedGlowIntensity,
+        backgroundStrength: compensatedBackgroundStrength,
         softness,
         vignette: preset.vignette,
         bgColor,
         glowColor,
       },
       opacity: { wireOpacityMul, particlesOpacityMul, foregroundOpacity },
+      smoke: {
+        state: smokeState,
+        alphaLayer: smokeAlphaLayer,
+        source: smokeSource,
+        compensation: smokeCompensation,
+      },
     };
   }
 
@@ -584,6 +685,9 @@ export class ClimateController {
     const hasForegroundOpacity =
       typeof current.opacity.foregroundOpacity === 'number' ||
       typeof next.opacity.foregroundOpacity === 'number';
+
+    const currentSmoke = current.smoke ?? null;
+    const nextSmoke = next.smoke ?? currentSmoke;
 
     return {
       presetName: next.presetName,
@@ -652,6 +756,41 @@ export class ClimateController {
           ? lerp(currentForegroundOpacity, nextForegroundOpacity, opacityAlpha)
           : undefined,
       },
+      ...(nextSmoke
+        ? {
+            smoke: {
+              state: nextSmoke.state,
+              source: nextSmoke.source,
+              alphaLayer: lerp(
+                currentSmoke?.alphaLayer ?? nextSmoke.alphaLayer,
+                nextSmoke.alphaLayer,
+                opacityAlpha,
+              ),
+              compensation: {
+                fogDensityMultiplier: lerp(
+                  currentSmoke?.compensation?.fogDensityMultiplier ?? nextSmoke.compensation.fogDensityMultiplier,
+                  nextSmoke.compensation.fogDensityMultiplier,
+                  volumeAlpha,
+                ),
+                glowIntensityMultiplier: lerp(
+                  currentSmoke?.compensation?.glowIntensityMultiplier ?? nextSmoke.compensation.glowIntensityMultiplier,
+                  nextSmoke.compensation.glowIntensityMultiplier,
+                  volumeAlpha,
+                ),
+                volumetricBackgroundMultiplier: lerp(
+                  currentSmoke?.compensation?.volumetricBackgroundMultiplier ?? nextSmoke.compensation.volumetricBackgroundMultiplier,
+                  nextSmoke.compensation.volumetricBackgroundMultiplier,
+                  volumeAlpha,
+                ),
+                additiveAlphaMultiplier: lerp(
+                  currentSmoke?.compensation?.additiveAlphaMultiplier ?? nextSmoke.compensation.additiveAlphaMultiplier,
+                  nextSmoke.compensation.additiveAlphaMultiplier,
+                  opacityAlpha,
+                ),
+              },
+            },
+          }
+        : {}),
     };
   }
 
@@ -664,6 +803,21 @@ export class ClimateController {
             SAFE_RANGES.foregroundOpacityMul.max,
           )
         : undefined;
+
+    const smoke = targets.smoke;
+    const clampedSmoke = smoke
+      ? {
+          state: smoke.state,
+          source: smoke.source,
+          alphaLayer: clamp(smoke.alphaLayer, 0, 1),
+          compensation: {
+            fogDensityMultiplier: clamp(smoke.compensation.fogDensityMultiplier, 0, 4),
+            glowIntensityMultiplier: clamp(smoke.compensation.glowIntensityMultiplier, 0, 4),
+            volumetricBackgroundMultiplier: clamp(smoke.compensation.volumetricBackgroundMultiplier, 0, 4),
+            additiveAlphaMultiplier: clamp(smoke.compensation.additiveAlphaMultiplier, 0, 4),
+          },
+        }
+      : undefined;
 
     return {
       presetName: targets.presetName,
@@ -726,6 +880,7 @@ export class ClimateController {
         ),
         ...(typeof foregroundOpacity === 'number' ? { foregroundOpacity } : {}),
       },
+      ...(clampedSmoke ? { smoke: clampedSmoke } : {}),
     };
   }
 
