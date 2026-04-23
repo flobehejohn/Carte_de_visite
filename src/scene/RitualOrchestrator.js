@@ -19,6 +19,11 @@ import {
 } from './performance/QualityGovernor';
 import { applyMaterials } from './render/materials/applyMaterials';
 import { mapClimateToRenderParams } from './render/materials/mapClimateToRenderParams';
+import {
+  computeSmokeVisualCompensation,
+  resolveSmokePolicySource,
+  resolveSmokePolicyStateFromProfile,
+} from './render/optics/transparency';
 
 /**
  * RitualOrchestrator — version "Ultime" (Thème E : Cinématographie & Atmosphère)
@@ -458,6 +463,73 @@ function ensureQualityGovernor(ctx) {
   return ctx.qualityGovernor;
 }
 
+function resolveSmokePolicyRuntime(ctx, qualitySnapshot) {
+  const profile =
+    qualitySnapshot?.profile ??
+    getQualityProfileFromContext(ctx, 'high');
+
+  const forcedState =
+    typeof ctx?.forcedSmokePolicyState === 'string' &&
+    ctx.forcedSmokePolicyState.trim()
+      ? ctx.forcedSmokePolicyState.trim()
+      : null;
+
+  const runtimeBudgetDowngrade =
+    qualitySnapshot?.source === 'runtime-budget';
+
+  const state =
+    forcedState ??
+    resolveSmokePolicyStateFromProfile(profile?.name);
+
+  const source = resolveSmokePolicySource(
+    forcedState,
+    runtimeBudgetDowngrade,
+  );
+
+  const alphaLayer =
+    normalizeFiniteNumber(ctx?.forcedSmokeAlphaLayer, null) ??
+    normalizeFiniteNumber(ctx?.smokeAlphaLayer, null) ??
+    normalizeFiniteNumber(profile?.smokeAlphaLayer, 0) ??
+    0;
+
+  const compensation =
+    ctx?.smokeCompensation ??
+    computeSmokeVisualCompensation(state, alphaLayer);
+
+  return {
+    state,
+    source,
+    alphaLayer,
+    compensation,
+    qualityProfile: profile?.name ?? null,
+    governorSource: qualitySnapshot?.source ?? null,
+  };
+}
+
+function writeSmokePolicyToContext(ctx, smokePolicy) {
+  if (!ctx || !smokePolicy) return smokePolicy;
+
+  ctx.smokePolicy = smokePolicy;
+  ctx.smokePolicyState = smokePolicy.state;
+  ctx.smokePolicySource = smokePolicy.source;
+  ctx.smokeAlphaLayer = smokePolicy.alphaLayer;
+  ctx.smokeCompensation = smokePolicy.compensation;
+
+  ctx.runtimeTelemetry = {
+    ...(ctx.runtimeTelemetry || {}),
+    smokePolicy: {
+      state: smokePolicy.state,
+      source: smokePolicy.source,
+      alphaLayer: smokePolicy.alphaLayer,
+      compensation: smokePolicy.compensation,
+      qualityProfile: smokePolicy.qualityProfile ?? null,
+      governorSource: smokePolicy.governorSource ?? null,
+    },
+  };
+
+  return smokePolicy;
+}
+
 function countUsefulShadowCasters(ctx) {
   const entries = ctx?.lightsRegistry?.values?.();
   if (!entries) return 0;
@@ -589,7 +661,14 @@ export class RitualOrchestrator {
       ...(this.ctx?.timingDiagnostics || {}),
     };
 
-    ensureQualityGovernor(this.ctx);
+    const initialQualityGovernor = ensureQualityGovernor(this.ctx);
+    const initialSmokePolicy = writeSmokePolicyToContext(
+      this.ctx,
+      resolveSmokePolicyRuntime(
+        this.ctx,
+        initialQualityGovernor?.getSnapshot?.() ?? this.ctx?.runtime?.quality ?? null,
+      ),
+    );
 
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -652,6 +731,10 @@ export class RitualOrchestrator {
       seed: this.ritualDNA.seed,
       debug: isDev(),
     });
+
+    this.ctx.climateController.setSmokeRuntime?.(
+      this.ctx.smokePolicy ?? initialSmokePolicy,
+    );
 
     this.ctx.lightSafetyGovernor = {
       update: (params) => {
