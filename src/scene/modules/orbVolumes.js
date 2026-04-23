@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import { getQualityProfileFromContext } from '../performance/QualityGovernor';
+import {
+  computeSmokeVisualCompensation,
+  resolveSmokePolicyStateFromProfile,
+} from '../render/optics/transparency';
 
 /**
  * orbVolumes — version "Ultime"
@@ -69,6 +73,55 @@ function clamp(v, a, b) {
   return Math.max(a, Math.min(b, Number(v) || 0));
 }
 
+function resolveSmokeRuntime(ctx, profileName) {
+  const state =
+    ctx?.smokePolicyState ??
+    resolveSmokePolicyStateFromProfile(profileName);
+
+  const alpha = Number.isFinite(ctx?.smokeAlphaLayer)
+    ? Math.max(0, Number(ctx.smokeAlphaLayer))
+    : null;
+
+  const compensation =
+    ctx?.smokeCompensation ??
+    computeSmokeVisualCompensation(state, alpha ?? 0);
+
+  return { state, alpha, compensation };
+}
+
+function applySmokePolicyToVolumeConfig(ctx, cfg, qualityProfile) {
+  const smoke = resolveSmokeRuntime(ctx, qualityProfile?.name);
+
+  const next = {
+    ...cfg,
+    noise: { ...(cfg.noise || {}) },
+  };
+
+  if (smoke.state === 'simplified') {
+    next.backgroundStrength *= smoke.compensation.volumetricBackgroundMultiplier;
+    next.glowIntensity *= Math.max(0.88, smoke.compensation.glowIntensityMultiplier);
+    next.softness = clamp(next.softness * 0.9, 0.12, 0.9);
+    next.noise.amount = clamp((next.noise.amount ?? 0) * 0.7, 0, 0.6);
+  } else if (smoke.state === 'off') {
+    next.backgroundStrength *= smoke.compensation.volumetricBackgroundMultiplier;
+    next.glowIntensity *= Math.max(0.76, smoke.compensation.glowIntensityMultiplier);
+    next.softness = clamp(next.softness * 0.82, 0.12, 0.9);
+    next.noise.amount = clamp((next.noise.amount ?? 0) * 0.35, 0, 0.6);
+  }
+
+  ctx.volumeEffective = {
+    ...(ctx.volumeEffective || {}),
+    enabled: Boolean(next.enabled),
+    smokeState: smoke.state,
+    smokeAlphaLayer: smoke.alpha,
+    smokeCompensation: smoke.compensation,
+    backgroundStrength: next.backgroundStrength,
+    glowIntensity: next.glowIntensity,
+  };
+
+  return next;
+}
+
 function normalizeConfig(cfg) {
   cfg.enabled = cfg.enabled !== false;
   cfg.scale = clamp(cfg.scale ?? 70, 10, 200);
@@ -109,10 +162,19 @@ export function ensureVolumeConfig(ctx) {
       ctx.volumeConfig,
     );
 
-  const cfg = normalizeConfig(ctx.volumeConfig);
+  let cfg = normalizeConfig(ctx.volumeConfig);
   const qualityProfile = getQualityProfileFromContext(ctx, 'high');
-  cfg.backgroundStrength = Math.min(cfg.backgroundStrength, qualityProfile.volumetricBackgroundStrength);
-  cfg.glowIntensity = Math.min(cfg.glowIntensity, qualityProfile.glowIntensityMax);
+
+  cfg.backgroundStrength = Math.min(
+    cfg.backgroundStrength,
+    qualityProfile.volumetricBackgroundStrength,
+  );
+  cfg.glowIntensity = Math.min(
+    cfg.glowIntensity,
+    qualityProfile.glowIntensityMax,
+  );
+
+  cfg = applySmokePolicyToVolumeConfig(ctx, cfg, qualityProfile);
   return cfg;
 }
 

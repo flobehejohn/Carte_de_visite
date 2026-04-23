@@ -2,6 +2,10 @@ import * as THREE from 'three';
 import { SimplexNoise } from 'three/examples/jsm/math/SimplexNoise.js';
 import { orbLog, orbWarn } from '../../shared/debug/orbDebug';
 import { getQualityProfileFromContext } from '../performance/QualityGovernor';
+import {
+  computeSmokeVisualCompensation,
+  resolveSmokePolicyStateFromProfile,
+} from '../render/optics/transparency';
 
 /**
  * orbFluidParticles — version stabilisée, overlay-safe et conforme à l'audit
@@ -210,15 +214,49 @@ function getRuntimeFrameIndex(ctx) {
   );
 }
 
+function resolveSmokeRuntime(ctx, profileName) {
+  const state =
+    ctx?.smokePolicyState ??
+    resolveSmokePolicyStateFromProfile(profileName);
+
+  const alpha = Number.isFinite(ctx?.smokeAlphaLayer)
+    ? Math.max(0, Number(ctx.smokeAlphaLayer))
+    : null;
+
+  const compensation =
+    ctx?.smokeCompensation ??
+    computeSmokeVisualCompensation(state, alpha ?? 0);
+
+  return { state, alpha, compensation };
+}
+
 function getGovernedFluidConfig(ctx, rawCfg) {
   const qualityProfile = getQualityProfileFromContext(ctx, 'high');
-  const maxCount = Math.max(
+  const smoke = resolveSmokeRuntime(ctx, qualityProfile.name);
+
+  let maxCount = Math.max(
     0,
     Math.min(
       Math.max(0, Math.floor(Number(rawCfg?.maxCount ?? DEFAULT_FLUID_CONFIG.maxCount))),
       Math.max(0, Math.floor(Number(qualityProfile.fluidParticleCount ?? 0))),
     ),
   );
+
+  let size = Math.max(0.005, Number(rawCfg?.size ?? DEFAULT_FLUID_CONFIG.size));
+  let opacity = clamp01(Number(rawCfg?.opacity ?? DEFAULT_FLUID_CONFIG.opacity));
+  let spawnRate = Math.max(0, Number(rawCfg?.spawnRate ?? DEFAULT_FLUID_CONFIG.spawnRate));
+
+  if (smoke.state === 'simplified') {
+    maxCount = Math.max(0, Math.floor(maxCount * 0.45));
+    size *= 0.88;
+    opacity *= 0.72;
+    spawnRate *= 0.4;
+  } else if (smoke.state === 'off') {
+    maxCount = 0;
+    size *= 0.82;
+    opacity *= 0.24;
+    spawnRate = 0;
+  }
 
   const updateRate = Math.max(1, Number(qualityProfile.fluidUpdateRate ?? 1));
   const divisor = Math.max(1, Number(qualityProfile.partialUpdateDivisors?.fluid ?? 1));
@@ -228,11 +266,16 @@ function getGovernedFluidConfig(ctx, rawCfg) {
     ...rawCfg,
     enabled,
     maxCount,
-    spawnRate: enabled ? Math.min(Number(rawCfg?.spawnRate ?? 0), maxCount) : 0,
+    size,
+    opacity,
+    spawnRate: enabled ? Math.min(spawnRate, maxCount) : 0,
     lifetime: Number(rawCfg?.lifetime ?? DEFAULT_FLUID_CONFIG.lifetime),
     __qualityProfile: qualityProfile.name,
     __qualityUpdateRate: updateRate,
     __qualityUpdateDivisor: divisor,
+    __smokePolicyState: smoke.state,
+    __smokeCompensation: smoke.compensation,
+    __smokeAlphaLayer: smoke.alpha,
   };
 }
 
@@ -422,6 +465,11 @@ function applyMeshRenderIsolation(mesh, cfg) {
     overlayLayer: layer,
     postprocessIsolation: layer !== ORB_BASE_RENDER_LAYER,
     opacityBase: clamp01(cfg.opacity ?? 0.78),
+    smokeSensitive: true,
+    additiveAlphaMultiplier: Number(
+      cfg.__smokeCompensation?.additiveAlphaMultiplier ?? 1,
+    ),
+    smokePolicyState: cfg.__smokePolicyState ?? 'premium',
   };
 }
 

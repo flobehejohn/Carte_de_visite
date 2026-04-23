@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { SimplexNoise } from 'three/examples/jsm/math/SimplexNoise.js';
 import { getQualityProfileFromContext } from '../performance/QualityGovernor';
+import {
+  computeSmokeVisualCompensation,
+  resolveSmokePolicyStateFromProfile,
+} from '../render/optics/transparency';
 
 /**
  * orbParticles — version "Ultime" (corrigée)
@@ -166,20 +170,104 @@ function getBurstEnvelope(ctx, target) {
   return next;
 }
 
+function getSmokeRuntime(ctx) {
+  const qualityProfile = getParticlesQualityProfile(ctx);
+  const state =
+    ctx?.smokePolicyState ??
+    resolveSmokePolicyStateFromProfile(qualityProfile?.name);
+
+  const alpha = Number.isFinite(ctx?.smokeAlphaLayer)
+    ? Math.max(0, Number(ctx.smokeAlphaLayer))
+    : null;
+
+  const compensation =
+    ctx?.smokeCompensation ??
+    computeSmokeVisualCompensation(state, alpha ?? 0);
+
+  return { state, alpha, compensation };
+}
+
+function getSmokeMaterialMultipliers(ctx) {
+  const smoke = getSmokeRuntime(ctx);
+
+  if (smoke.state === 'off') {
+    return {
+      ...smoke,
+      points: 0.78,
+      links: 0.42 * smoke.compensation.additiveAlphaMultiplier,
+      trails: 0.58 * smoke.compensation.additiveAlphaMultiplier,
+    };
+  }
+
+  if (smoke.state === 'simplified') {
+    return {
+      ...smoke,
+      points: 0.92,
+      links: 0.74 * smoke.compensation.additiveAlphaMultiplier,
+      trails: 0.84 * smoke.compensation.additiveAlphaMultiplier,
+    };
+  }
+
+  return {
+    ...smoke,
+    points: 1,
+    links: 1,
+    trails: 1,
+  };
+}
+
 function applyOpacityToMaterials(ctx, cfg) {
   const particlesMul = getParticlesOpacityMul(ctx);
   const qualityProfile = getParticlesQualityProfile(ctx);
-  const baseOpacity = clamp01(cfg.opacity) * particlesMul;
-  const governedOpacity = Math.min(baseOpacity, qualityProfile.glowIntensityMax);
-  const linkOpacity = Math.min(1, governedOpacity * 0.45);
+  const smoke = getSmokeMaterialMultipliers(ctx);
+
+  const rawBaseOpacity = clamp01(cfg.opacity);
+  const baseOpacity = rawBaseOpacity * particlesMul;
+  const governedOpacity = Math.min(
+    baseOpacity * smoke.points,
+    qualityProfile.glowIntensityMax,
+  );
+  const linkOpacity = Math.min(1, rawBaseOpacity * 0.45 * particlesMul * smoke.links);
+  const trailOpacity = Math.min(1, rawBaseOpacity * particlesMul * smoke.trails);
+
+  if (ctx.particlesPoints?.material) {
+    if (!ctx.particlesPoints.material.userData) ctx.particlesPoints.material.userData = {};
+    ctx.particlesPoints.material.userData.opacityBase = rawBaseOpacity;
+    ctx.particlesPoints.material.userData.smokeSensitive = true;
+    ctx.particlesPoints.material.userData.additiveAlphaMultiplier = smoke.points;
+    // opacity applied by applyMaterials.ts
+    ctx.particlesPoints.material.needsUpdate = true;
+  }
+
+  if (ctx.particlesLinks?.material) {
+    if (!ctx.particlesLinks.material.userData) ctx.particlesLinks.material.userData = {};
+    ctx.particlesLinks.material.userData.opacityBase = Math.min(1, rawBaseOpacity * 0.45);
+    ctx.particlesLinks.material.userData.smokeSensitive = true;
+    ctx.particlesLinks.material.userData.additiveAlphaMultiplier = smoke.links;
+    // opacity applied by applyMaterials.ts
+    ctx.particlesLinks.material.needsUpdate = true;
+  }
+
+  if (ctx.particlesTrails?.material) {
+    if (!ctx.particlesTrails.material.userData) ctx.particlesTrails.material.userData = {};
+    ctx.particlesTrails.material.userData.opacityBase = rawBaseOpacity;
+    ctx.particlesTrails.material.userData.smokeSensitive = true;
+    ctx.particlesTrails.material.userData.additiveAlphaMultiplier = smoke.trails;
+    // opacity applied by applyMaterials.ts
+    ctx.particlesTrails.material.needsUpdate = true;
+  }
 
   const runtime = syncParticlesRuntime(ctx, cfg);
   ctx.particlesRuntime = {
     ...runtime,
     governedOpacity,
     governedLinkOpacity: linkOpacity,
+    governedTrailOpacity: trailOpacity,
     qualityProfile: qualityProfile.name,
     opacityMul: particlesMul,
+    smokePolicyState: smoke.state,
+    smokeAlphaLayer: smoke.alpha,
+    smokeAdditiveAlphaMultiplier: smoke.compensation.additiveAlphaMultiplier,
   };
 }
 
@@ -381,6 +469,8 @@ export function createInnerParticles(ctx) {
   ctx.particlesTrails = new THREE.Points(trailGeometry, trailMaterial);
   ctx.particlesTrails.visible = false;
   (ctx.orbGroup || ctx.scene).add(ctx.particlesTrails);
+
+  applyOpacityToMaterials(ctx, cfg);
 
   ctx.particlesRuntime = {
     ...(ctx.particlesRuntime || {}),
