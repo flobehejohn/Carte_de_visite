@@ -127,7 +127,14 @@ try {
     $latestPath = $runDir
   }
   else {
-    $latestPath = Write-AuditLatest -Category $category -RunDir $runDir -LatestDir $latest -Keep $Keep
+    try {
+      $latestPath = Write-AuditLatest -Category $category -RunDir $runDir -LatestDir $latest -Keep $Keep
+    }
+    catch {
+      Info $log ("Latest mirror fallback on lock/error: {0}" -f $_.Exception.Message)
+      $latestPath = $runDir
+      Write-LogFile -State $log -Path $logPath
+    }
   }
 
   if ($overall -eq "OK") {
