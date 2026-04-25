@@ -1,3 +1,4 @@
+import { orbLog, orbWarn } from '../../shared/debug/orbDebug';
 export type LightSafetyBudgetSignals = {
   keyIntensity?: number;
   fillIntensity?: number;
@@ -45,6 +46,65 @@ function clamp01(value: number): number {
 function toFiniteNumber(value: unknown, fallback = 0): number {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
+}
+function logLightSafety(
+  level: 'info' | 'warn',
+  message: string,
+  options: Record<string, unknown> = {},
+): void {
+  options = {
+    ...options,
+    key: `light-safety:${level}:${message}`,
+    throttleMs: 1000,
+  };
+
+  if (level === 'warn') {
+    orbWarn('LightSafety', message, options);
+    return;
+  }
+
+  orbLog('LightSafety', message, options);
+}
+
+function readNestedNumber(input: unknown, path: string, fallback = 0): number {
+  const value = path.split('.').reduce<unknown>((cursor, key) => {
+    if (cursor && typeof cursor === 'object' && key in cursor) {
+      return (cursor as Record<string, unknown>)[key];
+    }
+
+    return undefined;
+  }, input);
+
+  return toFiniteNumber(value, fallback);
+}
+
+function deriveBudgetSignalsFromAttachment(
+  attachment: LightSafetyAttachment | null,
+): LightSafetyBudgetSignals {
+  if (!attachment) {
+    return {};
+  }
+
+  const bloomPass = attachment.bloomPass;
+  const bloomStrength = readNestedNumber(bloomPass, 'strength', 0);
+  const bloomRadius = readNestedNumber(bloomPass, 'radius', 0);
+  const bloomThreshold = readNestedNumber(bloomPass, 'threshold', 1);
+  const rendererExposure = readNestedNumber(attachment.renderer, 'toneMappingExposure', 1);
+  const shadowCasters = countUsefulShadowCasters(attachment.scene);
+
+  const bloomLoad =
+    bloomStrength * rendererExposure * (1 + Math.max(0, bloomRadius) * 0.25) +
+    Math.max(0, 1 - bloomThreshold) * 0.5;
+
+  return {
+    keyIntensity: bloomLoad * 2.2,
+    fillIntensity: shadowCasters * 0.15,
+    rimIntensity: bloomLoad * 0.5,
+    glowIntensity: bloomLoad * 1.2,
+    backgroundStrength: bloomLoad * 0.5,
+    wireOpacity: readNestedNumber(attachment, 'wireOpacity', 0),
+    particlesOpacity: readNestedNumber(attachment, 'particlesOpacity', 0),
+  };
 }
 
 function computeOverloadScore(signals: LightSafetyBudgetSignals): number {
@@ -135,13 +195,16 @@ export class LightSafetyGovernor {
 
   update(dtMs = 0): LightSafetyDecision {
     const safeDtMs = Math.max(0, toFiniteNumber(dtMs, 0));
-    const signals = this.attachment?.getBudgetSignals?.() ?? {};
+    const signals =
+      this.attachment?.getBudgetSignals?.() ??
+      deriveBudgetSignalsFromAttachment(this.attachment);
     const overloadScore = computeOverloadScore(signals);
 
     const hardOverload = overloadScore >= this.options.hardThreshold;
     const softOverload = overloadScore >= this.options.softThreshold;
 
     if (hardOverload) {
+      logLightSafety('warn', 'hard-overload', { overloadScore });
       this.overMs = this.options.maxOverDurationMs;
       this.cooldownMsLeft = this.options.cooldownMs;
 
@@ -168,6 +231,7 @@ export class LightSafetyGovernor {
       );
 
       if (this.overMs >= this.options.maxOverDurationMs) {
+        logLightSafety('warn', 'soft-overload', { overloadScore, overMs: this.overMs });
         this.cooldownMsLeft = this.options.cooldownMs;
 
         this.lastDecision = {
@@ -200,6 +264,7 @@ export class LightSafetyGovernor {
     this.overMs = 0;
 
     if (this.cooldownMsLeft > 0) {
+      logLightSafety('info', 'cooldown', { cooldownMsLeft: this.cooldownMsLeft });
       this.cooldownMsLeft = Math.max(0, this.cooldownMsLeft - safeDtMs);
 
       this.lastDecision = {

@@ -230,34 +230,34 @@ function resolveSmokeRuntime(ctx, profileName) {
   return { state, alpha, compensation };
 }
 
-function getGovernedFluidConfig(ctx, rawCfg) {
-  const qualityProfile = getQualityProfileFromContext(ctx, 'high');
-  const smoke = resolveSmokeRuntime(ctx, qualityProfile.name);
+function resolveQualityFluidParticleCount(qualityProfile, rawMaxCount) {
+  const candidates = [
+    qualityProfile?.fluidParticleCount,
+    qualityProfile?.fluidParticles?.maxCount,
+    qualityProfile?.fluidParticles?.count,
+    qualityProfile?.particles?.fluidParticleCount,
+    qualityProfile?.budgets?.fluidParticleCount,
+    rawMaxCount,
+  ];
 
-  let maxCount = Math.max(
-    0,
-    Math.min(
-      Math.max(0, Math.floor(Number(rawCfg?.maxCount ?? DEFAULT_FLUID_CONFIG.maxCount))),
-      Math.max(0, Math.floor(Number(qualityProfile.fluidParticleCount ?? 0))),
-    ),
-  );
-
-  let size = Math.max(0.005, Number(rawCfg?.size ?? DEFAULT_FLUID_CONFIG.size));
-  let opacity = clamp01(Number(rawCfg?.opacity ?? DEFAULT_FLUID_CONFIG.opacity));
-  let spawnRate = Math.max(0, Number(rawCfg?.spawnRate ?? DEFAULT_FLUID_CONFIG.spawnRate));
-
-  if (smoke.state === 'simplified') {
-    maxCount = Math.max(0, Math.floor(maxCount * 0.45));
-    size *= 0.88;
-    opacity *= 0.72;
-    spawnRate *= 0.4;
-  } else if (smoke.state === 'off') {
-    maxCount = 0;
-    size *= 0.82;
-    opacity *= 0.24;
-    spawnRate = 0;
+  for (const candidate of candidates) {
+    const value = Math.floor(Number(candidate));
+    if (Number.isFinite(value) && value > 0) {
+      return value;
+    }
   }
 
+  return Math.max(0, Math.floor(Number(rawMaxCount ?? 0)));
+}
+
+function getGovernedFluidConfig(ctx, rawCfg) {
+  const qualityProfile = getQualityProfileFromContext(ctx, 'high') ?? {};
+  const rawMaxCount = Math.max(
+    0,
+    Math.floor(Number(rawCfg?.maxCount ?? DEFAULT_FLUID_CONFIG.maxCount)),
+  );
+  const profileMaxCount = resolveQualityFluidParticleCount(qualityProfile, rawMaxCount);
+  const maxCount = Math.max(0, Math.min(rawMaxCount, profileMaxCount));
   const updateRate = Math.max(1, Number(qualityProfile.fluidUpdateRate ?? 1));
   const divisor = Math.max(1, Number(qualityProfile.partialUpdateDivisors?.fluid ?? 1));
   const enabled = Boolean(rawCfg?.enabled !== false && maxCount > 0);
@@ -266,19 +266,13 @@ function getGovernedFluidConfig(ctx, rawCfg) {
     ...rawCfg,
     enabled,
     maxCount,
-    size,
-    opacity,
-    spawnRate: enabled ? Math.min(spawnRate, maxCount) : 0,
+    spawnRate: enabled ? Math.min(Number(rawCfg?.spawnRate ?? 0), maxCount) : 0,
     lifetime: Number(rawCfg?.lifetime ?? DEFAULT_FLUID_CONFIG.lifetime),
-    __qualityProfile: qualityProfile.name,
+    __qualityProfile: qualityProfile.name ?? qualityProfile.id ?? 'unknown',
     __qualityUpdateRate: updateRate,
     __qualityUpdateDivisor: divisor,
-    __smokePolicyState: smoke.state,
-    __smokeCompensation: smoke.compensation,
-    __smokeAlphaLayer: smoke.alpha,
   };
 }
-
 function shouldUpdateFluidFrame(ctx, cfg) {
   const divisor = Math.max(1, Number(cfg?.__qualityUpdateDivisor ?? 1));
   const frameIndex = getRuntimeFrameIndex(ctx);
@@ -307,8 +301,8 @@ function ensureState(ctx) {
       meshCapacity: 0,
       targetMaxCount: 0,
       appliedMaxCount: 0,
-      lastProfileApplied: null,
-    };
+      lastProfileApplied: 'unknown',
+};
   }
   return ctx.fluidParticlesState;
 }
@@ -492,7 +486,14 @@ export function resetFluidParticles(ctx) {
   const cfg = getGovernedFluidConfig(ctx, ensureFluidParticlesConfig(ctx));
   const state = ensureState(ctx);
 
-  state.spawnAccumulator = 0;
+
+  state.targetMaxCount = cfg.maxCount;
+  state.appliedMaxCount = Math.min(
+    cfg.maxCount,
+    Math.max(0, Number(state.meshCapacity ?? cfg.maxCount)),
+  );
+  state.lastProfileApplied = cfg.__qualityProfile ?? 'unknown';
+state.spawnAccumulator = 0;
   state.lastBurst = 0;
   state.lastLogTime = 0;
   state.particles.length = 0;
@@ -522,7 +523,14 @@ export function buildFluidParticles(ctx, overrideConfig = null) {
   const cfg = getGovernedFluidConfig(ctx, overrideConfig || ensureFluidParticlesConfig(ctx));
   const state = ensureState(ctx);
 
-  disposeMesh(ctx, state);
+
+  state.targetMaxCount = cfg.maxCount;
+  state.appliedMaxCount = Math.min(
+    cfg.maxCount,
+    Math.max(0, Number(state.meshCapacity ?? cfg.maxCount)),
+  );
+  state.lastProfileApplied = cfg.__qualityProfile ?? 'unknown';
+disposeMesh(ctx, state);
 
   const geometry = buildGeometry(cfg);
   const material = buildMaterial(cfg);
@@ -549,7 +557,7 @@ export function buildFluidParticles(ctx, overrideConfig = null) {
   state.meshCapacity = cfg.maxCount;
   state.targetMaxCount = cfg.maxCount;
   state.appliedMaxCount = cfg.maxCount;
-  state.lastProfileApplied = cfg.__qualityProfile ?? null;
+  state.lastProfileApplied = cfg.__qualityProfile ?? 'unknown';
 
   syncLegacyHandle(ctx, mesh);
 
@@ -583,7 +591,14 @@ export function setFluidParticlesConfig(ctx, patch = {}) {
   const cfg = ensureFluidParticlesConfig(ctx);
   const state = ensureState(ctx);
 
-  const prevMax = cfg.maxCount;
+
+  state.targetMaxCount = cfg.maxCount;
+  state.appliedMaxCount = Math.min(
+    cfg.maxCount,
+    Math.max(0, Number(state.meshCapacity ?? cfg.maxCount)),
+  );
+  state.lastProfileApplied = cfg.__qualityProfile ?? 'unknown';
+const prevMax = cfg.maxCount;
   const prevShape = cfg.shape;
   const prevExclude = cfg.excludeFromComposer;
   const prevLayer = cfg.renderLayer;
@@ -596,24 +611,32 @@ export function setFluidParticlesConfig(ctx, patch = {}) {
   const changed = nextSignature !== state.lastConfigSignature;
 
   const structuralChanged =
-    ('maxCount' in patch && cfg.maxCount !== prevMax) ||
+    ('maxCount' in patch && cfg.maxCount !== prevMax && Number(cfg.maxCount) > Number(prevMax)) ||
     ('shape' in patch && cfg.shape !== prevShape) ||
     ('excludeFromComposer' in patch &&
       cfg.excludeFromComposer !== prevExclude) ||
     ('renderLayer' in patch && cfg.renderLayer !== prevLayer);
 
-  if (!state.mesh || structuralChanged || governedCfg.maxCount > state.meshCapacity) {
+  const requestedCapacity = Math.max(0, Number(governedCfg.maxCount ?? 0));
+  const currentCapacity = Math.max(0, Number(state.meshCapacity ?? 0));
+  const capacityTooSmall = currentCapacity < requestedCapacity;
+
+  state.targetMaxCount = requestedCapacity;
+  state.appliedMaxCount = requestedCapacity;
+  state.lastProfileApplied = governedCfg.__qualityProfile ?? 'unknown';
+
+  if (!state.mesh || structuralChanged || capacityTooSmall) {
     buildFluidParticles(ctx, governedCfg);
   } else if (state.mesh) {
     replaceMaterialIfNeeded(state, governedCfg);
     state.mesh.visible = !!governedCfg.enabled;
-    applyMeshRenderIsolation(state.mesh, governedCfg);
-    state.targetMaxCount = governedCfg.maxCount;
-    state.appliedMaxCount = Math.min(
-      governedCfg.maxCount,
-      Math.max(0, Number(state.meshCapacity ?? governedCfg.maxCount)),
+    state.mesh.count = Math.min(Number(state.mesh.count ?? 0), requestedCapacity);
+    state.particles = state.particles.slice(0, requestedCapacity);
+    state.activeParticleCount = Math.min(
+      Math.max(0, Number(state.activeParticleCount ?? 0)),
+      requestedCapacity,
     );
-    state.lastProfileApplied = governedCfg.__qualityProfile ?? null;
+    applyMeshRenderIsolation(state.mesh, governedCfg);
     syncLegacyHandle(ctx, state.mesh);
   }
 
@@ -624,7 +647,6 @@ export function setFluidParticlesConfig(ctx, patch = {}) {
 
   return cfg;
 }
-
 function spawnParticle(ctx, state, cfg) {
   if (!state.mesh) return;
 
@@ -753,7 +775,14 @@ export function updateFluidParticles(ctx, delta = 0) {
   const cfg = getGovernedFluidConfig(ctx, rawCfg);
   const state = ensureState(ctx);
 
-  state.fallbackHits = fallbackHits;
+
+  state.targetMaxCount = cfg.maxCount;
+  state.appliedMaxCount = Math.min(
+    cfg.maxCount,
+    Math.max(0, Number(state.meshCapacity ?? cfg.maxCount)),
+  );
+  state.lastProfileApplied = cfg.__qualityProfile ?? 'unknown';
+state.fallbackHits = fallbackHits;
   if (fallbackHits > 10 && !state.fallbackWarning) {
     state.fallbackWarning = true;
     orbWarn('FluidParticles', 'Simplex fallback used frequently.', {
