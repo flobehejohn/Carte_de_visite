@@ -17,7 +17,7 @@ describe('OrbAuditBridge snapshot merge contract', () => {
   });
 
   async function loadBridge() {
-    return await import('./OrbAuditBridge');
+    return await import('./audit/OrbAuditBridge.ts');
   }
 
   it('initialise un contrat minimal synchrone si aucun bridge n’existe encore', async () => {

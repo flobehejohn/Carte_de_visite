@@ -1,7 +1,7 @@
 import gsap from 'gsap';
 import * as THREE from 'three';
 import { orbLog, orbWarn } from '../shared/debug/orbDebug';
-import { OrbAuditBridge } from './OrbAuditBridge.ts';
+import { OrbAuditBridge } from './audit/OrbAuditBridge.ts';
 import * as orbFluidParticles from './modules/orbFluidParticles.js';
 import * as orbGeometry from './modules/orbGeometry.js';
 import * as orbGround from './modules/orbGround.js';
@@ -333,7 +333,7 @@ function buildQualityProfileTelemetry(ctx) {
       : 'fallback';
 
   const source = governorSnapshot?.source
-    ? governorSnapshot.source === 'auto-detect'
+    ? governorSnapshot.source === 'auto-detected'
       ? 'auto-detected'
       : governorSnapshot.source
     : fallbackSource;

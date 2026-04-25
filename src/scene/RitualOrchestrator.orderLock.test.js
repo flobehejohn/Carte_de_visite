@@ -17,7 +17,7 @@ vi.mock('./modules/orbTextManager.js', () => ({
 }));
 
 // 3. On neutralise l'Audit Bridge pour l'empêcher de scanner une scène incomplète
-vi.mock('./OrbAuditBridge.ts', () => ({
+vi.mock('./audit/OrbAuditBridge.ts', () => ({
   OrbAuditBridge: vi.fn().mockImplementation(() => ({
     hookIntoRenderer: vi.fn(),
     captureRuntimeState: vi.fn(),

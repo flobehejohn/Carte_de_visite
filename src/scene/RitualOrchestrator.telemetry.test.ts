@@ -112,7 +112,7 @@ vi.mock('./modules/orbTextManager.js', () => ({
   })),
 }));
 
-vi.mock('./OrbAuditBridge.ts', () => ({
+vi.mock('./audit/OrbAuditBridge.ts', () => ({
   OrbAuditBridge: class OrbAuditBridge {
     static captureRuntimeState = orbAuditCaptureStaticMock;
     hookIntoRenderer = vi.fn();

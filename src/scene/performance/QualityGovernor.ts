@@ -1,7 +1,7 @@
 export const QUALITY_PROFILE_NAMES = ['safe', 'low', 'medium', 'high', 'ultra'] as const;
 
 export type QualityProfileName = (typeof QUALITY_PROFILE_NAMES)[number];
-export type QualitySource = 'forced' | 'auto-detect' | 'runtime-budget';
+export type QualitySource = 'forced' | 'auto-detected' | 'runtime-budget';
 
 export interface QualityProfile {
   name: QualityProfileName;
@@ -344,7 +344,7 @@ export class QualityGovernor {
     this.autoDetectedProfile = detectQualityProfileFromDevice(this.deviceHints);
     this.forcedProfile = options.forcedProfile ?? null;
     this.activeProfile = clampProfileName(options.initialProfile ?? this.autoDetectedProfile);
-    this.source = this.forcedProfile ? 'forced' : 'auto-detect';
+    this.source = this.forcedProfile ? 'forced' : 'auto-detected';
 
     if (this.forcedProfile) {
       this.activeProfile = this.forcedProfile;
@@ -384,7 +384,7 @@ export class QualityGovernor {
       this.resetHysteresis();
     } else {
       this.activeProfile = this.autoDetectedProfile;
-      this.source = 'auto-detect';
+      this.source = 'auto-detected';
       this.resetHysteresis();
     }
 
@@ -400,7 +400,7 @@ export class QualityGovernor {
 
     this.autoDetectedProfile = detectQualityProfileFromDevice(this.deviceHints);
 
-    if (!this.forcedProfile && this.source === 'auto-detect') {
+    if (!this.forcedProfile && this.source === 'auto-detected') {
       this.activeProfile = this.autoDetectedProfile;
       this.lastEstimatedCost = estimateProfileCost(this.getActiveProfile());
     }
@@ -411,7 +411,7 @@ export class QualityGovernor {
   resetToAutoDetected(): QualitySnapshot {
     this.forcedProfile = null;
     this.activeProfile = this.autoDetectedProfile;
-    this.source = 'auto-detect';
+    this.source = 'auto-detected';
     this.resetHysteresis();
     this.lastEstimatedCost = estimateProfileCost(this.getActiveProfile());
     return this.getSnapshot();
