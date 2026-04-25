@@ -1,49 +1,52 @@
-import { test, expect } from '@playwright/test';
+import { test } from '@playwright/test';
+import {
+  expectOracleCanvasSnapshot,
+  prepareOracleVrtScenario,
+  type VrtQualityProfile,
+} from './utils/orbScenario';
 
-const PROFILES = ['ultra', 'medium', 'safe'] as const;
+const SMOKE_VRT_SCENARIOS: Array<{
+  label: string;
+  profile: VrtQualityProfile;
+  screenshot: string;
+}> = [
+  {
+    label: 'fumée premium / profil ultra',
+    profile: 'ultra',
+    screenshot: 'oracle-smoke-profile-ultra.png',
+  },
+  {
+    label: 'fumée réduite / profil safe',
+    profile: 'safe',
+    screenshot: 'oracle-smoke-profile-safe.png',
+  },
+];
 
-for (const profile of PROFILES) {
-  test(`oracle smoke visual candidate (${profile})`, async ({ page }, testInfo) => {
-    await page.goto('/');
+test.describe('VRT — Oracle smoke profiles', () => {
+  for (const scenario of SMOKE_VRT_SCENARIOS) {
+    test(scenario.label, async ({ page }, testInfo) => {
+      test.setTimeout(240_000);
 
-    await page.waitForFunction(() => {
-      const audit = (window as any).__ORB_AUDIT__;
-      return Boolean(audit && typeof audit.ready === 'function' && audit.ready());
-    }, null, { timeout: 30000 });
+      await page.setViewportSize({ width: 960, height: 540 });
 
-    await page.evaluate((nextProfile) => {
-      const audit = (window as any).__ORB_AUDIT__;
-      audit.setSeed?.('pass2-vrt-smoke');
-      audit.setProgress?.(0.72);
-      audit.setFluidParticlesVisible?.(true);
-      audit.setQualityProfile?.(nextProfile);
-    }, profile);
+      const snapshot = await prepareOracleVrtScenario(page, testInfo, {
+        profile: scenario.profile,
+        seed: 777001,
+        progress: 0.58,
+        renderMode: 'composer-bloom',
+        waitMs: 1_000,
+      });
 
-    await page.waitForTimeout(900);
+      await testInfo.attach(`${scenario.screenshot}.snapshot.json`, {
+        body: JSON.stringify(snapshot, null, 2),
+        contentType: 'application/json',
+      });
 
-    const snapshot = await page.evaluate(() => {
-      const audit = (window as any).__ORB_AUDIT__;
-      return audit.snapshot();
+      await expectOracleCanvasSnapshot(page, testInfo, scenario.screenshot, {
+        maxDiffPixelRatio: 0.28,
+        threshold: 0.55,
+        timeoutMs: 120_000,
+      });
     });
-
-    const filePath = testInfo.outputPath(`oracle-smoke-${profile}.png`);
-    const shot = await page.screenshot({
-      path: filePath,
-      fullPage: true,
-    });
-
-    expect(shot.byteLength).toBeGreaterThan(1000);
-    expect(typeof snapshot).toBe('object');
-    expect(snapshot).toHaveProperty('telemetry');
-
-    const smoke = snapshot?.telemetry?.smokeAlphaLayer ?? null;
-    expect(
-      smoke === null || (typeof smoke === 'number' && Number.isFinite(smoke)),
-    ).toBe(true);
-
-    await testInfo.attach(`oracle-smoke-${profile}`, {
-      path: filePath,
-      contentType: 'image/png',
-    });
-  });
-}
+  }
+});
