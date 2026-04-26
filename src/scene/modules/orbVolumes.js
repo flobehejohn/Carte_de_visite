@@ -99,12 +99,12 @@ function applySmokePolicyToVolumeConfig(ctx, cfg, qualityProfile) {
 
   if (smoke.state === 'simplified') {
     next.backgroundStrength *= smoke.compensation.volumetricBackgroundMultiplier;
-    next.glowIntensity *= Math.max(0.88, smoke.compensation.glowIntensityMultiplier);
+    next.glowIntensity *= Math.max(1.04, smoke.compensation.glowIntensityMultiplier);
     next.softness = clamp(next.softness * 0.9, 0.12, 0.9);
     next.noise.amount = clamp((next.noise.amount ?? 0) * 0.7, 0, 0.6);
   } else if (smoke.state === 'off') {
     next.backgroundStrength *= smoke.compensation.volumetricBackgroundMultiplier;
-    next.glowIntensity *= Math.max(0.76, smoke.compensation.glowIntensityMultiplier);
+    next.glowIntensity *= Math.max(1.08, smoke.compensation.glowIntensityMultiplier);
     next.softness = clamp(next.softness * 0.82, 0.12, 0.9);
     next.noise.amount = clamp((next.noise.amount ?? 0) * 0.35, 0, 0.6);
   }
@@ -113,6 +113,7 @@ function applySmokePolicyToVolumeConfig(ctx, cfg, qualityProfile) {
     ...(ctx.volumeEffective || {}),
     enabled: Boolean(next.enabled),
     smokeState: smoke.state,
+    smokePolicyState: smoke.state,
     smokeAlphaLayer: smoke.alpha,
     smokeCompensation: smoke.compensation,
     backgroundStrength: next.backgroundStrength,
