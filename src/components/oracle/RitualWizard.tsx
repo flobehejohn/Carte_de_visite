@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useOracleContext } from '../../context/OracleContext';
 import { mapToFinalRevealModel } from '../../domain/oracleText/finalRevealModel';
 import { oracleInteractionBridge } from '../../domain/oracleText/InteractionBridge';
@@ -8,9 +8,26 @@ import {
   getOraclePrimaryProse,
   getOracleTextLength,
 } from '../../services/zarathustraService';
-import { Oracle3DScene } from './Oracle3DScene';
 
-const Oracle3DSceneMemo = memo(Oracle3DScene);
+const LazyOracle3DScene = lazy(() =>
+  import('./Oracle3DScene').then((module) => ({
+    default: module.Oracle3DScene,
+  })),
+);
+
+function Oracle3DSceneFallback() {
+  return (
+    <div
+      data-testid="oracle-3d-scene-fallback"
+      aria-hidden="true"
+      className="absolute inset-0 bg-[#020408] overflow-hidden"
+    >
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(245,158,11,0.18),rgba(2,4,8,0.72)_42%,rgba(2,4,8,1)_76%)]" />
+      <div className="absolute inset-x-0 top-1/3 mx-auto h-40 w-40 rounded-full border border-amber-300/10 bg-amber-200/5 blur-2xl" />
+      <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/60" />
+    </div>
+  );
+}
 
 type ViewState = 'INPUT' | 'GUIDANCE';
 
@@ -735,15 +752,17 @@ export default function RitualWizard({ isE2E = false }: RitualWizardProps) {
       className="relative w-full h-screen min-h-screen bg-[#020408] overflow-hidden isolate"
     >
       <div className="absolute inset-0 z-0">
-        <Oracle3DSceneMemo
-          formData={sceneData}
-          stage={stage}
-          loading={effectiveLoading}
-          result={lastResult}
-          progress={
-            lastResult ? 1.0 : effectiveLoading ? 0.85 : (stage / 10) * 0.8
-          }
-        />
+        <Suspense fallback={<Oracle3DSceneFallback />}>
+          <LazyOracle3DScene
+            formData={sceneData}
+            stage={stage}
+            loading={effectiveLoading}
+            result={lastResult}
+            progress={
+              lastResult ? 1.0 : effectiveLoading ? 0.85 : (stage / 10) * 0.8
+            }
+          />
+        </Suspense>
       </div>
 
       <AnimatePresence>
