@@ -35,7 +35,8 @@
     "audit:orb": "tsx scripts/orb-deep-audit.ts --runs 10 --out audit/orb_audit_report.txt",
     "runtime:stop": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/run/stop-local-stack.ps1",
     "runtime:check:3000": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/run/runtime-check.ps1 -BaseUrl http://127.0.0.1:3000",
-    "runtime:check:5173": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/run/runtime-check.ps1 -BaseUrl http://127.0.0.1:5173"
+    "runtime:check:5173": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/run/runtime-check.ps1 -BaseUrl http://127.0.0.1:5173",
+    "gate:bundle": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/gate-bundle.ps1"
   },
   "dependencies": {
     "@google/genai": "^1.43.0",

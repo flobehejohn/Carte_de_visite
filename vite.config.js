@@ -10,6 +10,10 @@ export default defineConfig(function (_a) {
         'http://127.0.0.1:3000').trim();
     return {
         plugins: [react()],
+        build: {
+            manifest: true,
+            reportCompressedSize: true,
+        },
         server: {
             host: '127.0.0.1',
             port: port,
