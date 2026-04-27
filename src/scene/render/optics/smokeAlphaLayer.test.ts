@@ -26,3 +26,17 @@ describe('smokeAlphaLayer runtime exposure', () => {
     expect(source).toContain('export function computeTransparencyPolicy(');
   });
 });
+
+// <block-f-canonical-smoke-policy-mapping>
+describe('canonical smoke policy profile mapping', () => {
+  it('maps quality profiles to canonical smoke states', async () => {
+    const { resolveSmokePolicyStateFromProfile } = await import('./transparency');
+
+    expect(resolveSmokePolicyStateFromProfile('ultra')).toBe('premium');
+    expect(resolveSmokePolicyStateFromProfile('high')).toBe('premium');
+    expect(resolveSmokePolicyStateFromProfile('medium')).toBe('simplified');
+    expect(resolveSmokePolicyStateFromProfile('low')).toBe('simplified');
+    expect(resolveSmokePolicyStateFromProfile('safe')).toBe('off');
+  });
+});
+// </block-f-canonical-smoke-policy-mapping>

@@ -154,8 +154,8 @@ export function resolveSmokePolicyStateFromProfile(
 ): SmokePolicyState {
   const profile = String(profileName || '').toLowerCase();
 
-  if (profile === 'safe' || profile === 'low') return 'off';
-  if (profile === 'medium') return 'simplified';
+  if (profile === 'safe') return 'off';
+  if (profile === 'low' || profile === 'medium') return 'simplified';
   return 'premium';
 }
 

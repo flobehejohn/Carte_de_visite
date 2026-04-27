@@ -74,19 +74,44 @@ function clamp(v, a, b) {
 }
 
 function resolveSmokeRuntime(ctx, profileName) {
+  const forcedState =
+    ctx?.smokePolicySource === 'forced' && ctx?.smokePolicyState
+      ? ctx.smokePolicyState
+      : null;
+
   const state =
-    ctx?.smokePolicyState ??
+    forcedState ??
     resolveSmokePolicyStateFromProfile(profileName);
+
+  const source =
+    forcedState
+      ? 'forced'
+      : ctx?.qualityProfileSource === 'runtime-budget' ||
+          ctx?.runtime?.quality?.source === 'runtime-budget'
+        ? 'runtime-budget'
+        : 'quality-profile';
 
   const alpha = Number.isFinite(ctx?.smokeAlphaLayer)
     ? Math.max(0, Number(ctx.smokeAlphaLayer))
-    : null;
+    : Number.isFinite(qualityProfileSmokeAlpha(ctx, profileName))
+      ? Math.max(0, Number(qualityProfileSmokeAlpha(ctx, profileName)))
+      : null;
 
   const compensation =
-    ctx?.smokeCompensation ??
-    computeSmokeVisualCompensation(state, alpha ?? 0);
+    ctx?.smokePolicySource === 'forced' && ctx?.smokeCompensation
+      ? ctx.smokeCompensation
+      : computeSmokeVisualCompensation(state, alpha ?? 0);
 
-  return { state, alpha, compensation };
+  return { state, source, alpha, compensation };
+}
+
+function qualityProfileSmokeAlpha(ctx, profileName) {
+  const runtimeProfile = ctx?.runtime?.quality?.profile;
+  if (runtimeProfile?.name === profileName && Number.isFinite(runtimeProfile.smokeAlphaLayer)) {
+    return runtimeProfile.smokeAlphaLayer;
+  }
+
+  return null;
 }
 
 function applySmokePolicyToVolumeConfig(ctx, cfg, qualityProfile) {
@@ -109,11 +134,17 @@ function applySmokePolicyToVolumeConfig(ctx, cfg, qualityProfile) {
     next.noise.amount = clamp((next.noise.amount ?? 0) * 0.35, 0, 0.6);
   }
 
+  ctx.smokePolicyState = smoke.state;
+  ctx.smokePolicySource = smoke.source;
+  ctx.smokeAlphaLayer = smoke.alpha;
+  ctx.smokeCompensation = smoke.compensation;
+
   ctx.volumeEffective = {
     ...(ctx.volumeEffective || {}),
     enabled: Boolean(next.enabled),
     smokeState: smoke.state,
     smokePolicyState: smoke.state,
+    smokePolicySource: smoke.source,
     smokeAlphaLayer: smoke.alpha,
     smokeCompensation: smoke.compensation,
     backgroundStrength: next.backgroundStrength,
