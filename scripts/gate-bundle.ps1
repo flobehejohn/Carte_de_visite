@@ -1,10 +1,10 @@
 param(
   [string]$DistPath = '.\dist',
-  [int]$TotalJsRawKbBudget = 1800,
-  [int]$LargestJsRawKbBudget = 1600,
-  [int]$EntryJsRawKbBudget = 1600,
-  [int]$EntryGzipKbBudget = 480,
-  [int]$EntryBrotliKbBudget = 440
+  [int]$TotalJsRawKbBudget = 1550,
+  [int]$LargestJsRawKbBudget = 650,
+  [int]$EntryJsRawKbBudget = 80,
+  [int]$EntryGzipKbBudget = 20,
+  [int]$EntryBrotliKbBudget = 20
 )
 
 $ErrorActionPreference = 'Stop'

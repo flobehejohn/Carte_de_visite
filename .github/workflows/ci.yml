@@ -107,6 +107,10 @@ jobs:
       - name: Build
         run: npm run build 2>&1 | tee ci-build.log
 
+      - name: Bundle gate
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/gate-bundle.ps1 | Tee-Object -FilePath ci-bundle-gate.log
+
       - name: Upload build artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -135,6 +139,11 @@ jobs:
 
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps chromium
+
+      - name: First paint lazy 3D
+        env:
+          VITE_ENABLE_ORB_AUDIT: 'true'
+        run: npm run test:e2e:first-paint 2>&1 | tee ci-first-paint-lazy-3d.log
 
       - name: Run Playwright tests
         run: npx playwright test --project=chromium 2>&1 | tee ci-e2e.log
