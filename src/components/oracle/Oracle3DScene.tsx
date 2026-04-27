@@ -1856,7 +1856,14 @@ export function Oracle3DScene({
                 localCtx.smokePolicyState ??
                 localCtx.smokePolicy?.state ??
                 localCtx.climateTargets?.smoke?.state ??
+                localCtx.volumeEffective?.smokePolicyState ??
                 localCtx.volumeEffective?.smokeState ??
+                null,
+              smokeCompensation:
+                localCtx.smokeCompensation ??
+                localCtx.smokePolicy?.compensation ??
+                localCtx.climateTargets?.smoke?.compensation ??
+                localCtx.volumeEffective?.smokeCompensation ??
                 null,
               backgroundStrength: localCtx.volumeConfig.backgroundStrength,
               glowIntensity: localCtx.volumeConfig.glowIntensity,
@@ -2408,7 +2415,8 @@ export function Oracle3DScene({
             localCtx.smokePolicyState ??
             localCtx.smokePolicy?.state ??
             localCtx.climateTargets?.smoke?.state ??
-            localCtx.volumeEffective?.smokeState ??
+            localCtx.volumeEffective?.smokePolicyState ??
+                localCtx.volumeEffective?.smokeState ??
             null;
 
           const smokePolicySource =
@@ -2748,7 +2756,19 @@ export function Oracle3DScene({
         getRenderMode,
         setAutoFallbackOnFeedback,
         setFluidParticlesVisible,
-        setQualityProfile,
+        get smokePolicyState() {
+          const currentSnapshot = snapshot() as any;
+          return currentSnapshot?.telemetry?.smokePolicyState ?? null;
+        },
+        get smokePolicySource() {
+          const currentSnapshot = snapshot() as any;
+          return currentSnapshot?.telemetry?.smokePolicySource ?? null;
+        },
+        get smokeAlphaLayer() {
+          const currentSnapshot = snapshot() as any;
+          return currentSnapshot?.telemetry?.smokeAlphaLayer ?? null;
+        },
+     setQualityProfile,
         setVisibleSafeMode: (enabled: boolean) =>
           applyVisibleSafeModeRef.current(Boolean(enabled)),
         setEmergencyVisibleMode,

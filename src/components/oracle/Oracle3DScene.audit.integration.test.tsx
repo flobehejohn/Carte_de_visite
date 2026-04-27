@@ -344,3 +344,29 @@ describe('Oracle3DScene audit snapshot contract', () => {
     expect(snapshot.uiWindow.visibleSafeMode).toBe(false);
   });
 });
+
+// <block-e-smoke-audit-bridge-contract-tests>
+describe('Oracle3DScene governed smoke audit bridge contract', () => {
+  it('exposes smoke policy fields through the audit runtime bridge surface', async () => {
+    const fs = await import('node:fs');
+    const source = fs.readFileSync('src/components/oracle/Oracle3DScene.tsx', 'utf8');
+
+    expect(source).toContain('(window as any).__ORB_AUDIT__ = {');
+    expect(source).toContain('get smokePolicyState()');
+    expect(source).toContain('get smokePolicySource()');
+    expect(source).toContain('get smokeAlphaLayer()');
+    expect(source).toContain('const currentSnapshot = snapshot() as any;');
+
+    expect(source).toContain('snapshot');
+    expect(source).toContain('setQualityProfile');
+  });
+
+  it('keeps smoke override strategy routed through quality profiles before Pass 4', async () => {
+    const fs = await import('node:fs');
+    const source = fs.readFileSync('src/components/oracle/Oracle3DScene.tsx', 'utf8');
+
+    expect(source).toContain('setQualityProfile');
+    expect(source).not.toContain('setSmokePolicyState(');
+  });
+});
+// </block-e-smoke-audit-bridge-contract-tests>

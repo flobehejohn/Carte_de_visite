@@ -1229,3 +1229,39 @@ describe('Oracle3DScene snapshot rich contract', () => {
     });
   });
 });
+
+// <block-e-smoke-snapshot-contract-tests>
+describe('Oracle3DScene governed smoke snapshot contract', () => {
+  it('locks smoke policy fields in runtime snapshot telemetry and volumeEffective', async () => {
+    const fs = await import('node:fs');
+    const source = fs.readFileSync('src/components/oracle/Oracle3DScene.tsx', 'utf8');
+
+    expect(source).toContain('const smokePolicyState');
+    expect(source).toContain('const smokePolicySource');
+    expect(source).toContain('const smokeAlphaLayerResolved');
+    expect(source).toContain('const smokeCompensation');
+
+    expect(source).toContain('smokePolicyState,');
+    expect(source).toContain('smokePolicySource,');
+    expect(source).toContain('smokeCompensation,');
+    expect(source).toContain('smokeAlphaLayer:');
+
+    expect(source).toContain('volumeEffective');
+    expect(source).toContain('localCtx.volumeEffective?.smokePolicyState');
+    expect(source).toContain('localCtx.volumeEffective?.smokeCompensation');
+  });
+
+  it('wires smoke compensation through the snapshot without duplicating policy constants in Oracle3DScene', async () => {
+    const fs = await import('node:fs');
+    const source = fs.readFileSync('src/components/oracle/Oracle3DScene.tsx', 'utf8');
+
+    expect(source).toContain('const smokeCompensation =');
+    expect(source).toContain('localCtx.smokeCompensation ??');
+    expect(source).toContain('localCtx.smokePolicy?.compensation ??');
+    expect(source).toContain('localCtx.climateTargets?.smoke?.compensation ??');
+    expect(source).toContain('localCtx.volumeEffective?.smokeCompensation ??');
+    expect(source).toContain('smokeCompensation,');
+    expect(source).not.toContain('SMOKE_VISUAL_COMPENSATION');
+  });
+});
+// </block-e-smoke-snapshot-contract-tests>
