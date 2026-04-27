@@ -107,8 +107,25 @@ function Get-ViteEntryFile {
 
   foreach ($property in $manifest.PSObject.Properties) {
     $entry = $property.Value
+    $propertyNames = @($entry.PSObject.Properties.Name)
 
-    if ($entry.isEntry -eq $true -and $entry.file) {
+    $hasIsEntry = $propertyNames -contains 'isEntry'
+    $hasFile = $propertyNames -contains 'file'
+
+    if ($hasIsEntry -and $hasFile -and $entry.isEntry -eq $true -and $entry.file) {
+      return [string]$entry.file
+    }
+  }
+
+  $indexEntry = $manifest.PSObject.Properties |
+    Where-Object { $_.Name -eq 'index.html' } |
+    Select-Object -First 1
+
+  if ($indexEntry) {
+    $entry = $indexEntry.Value
+    $propertyNames = @($entry.PSObject.Properties.Name)
+
+    if (($propertyNames -contains 'file') -and $entry.file) {
       return [string]$entry.file
     }
   }

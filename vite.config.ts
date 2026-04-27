@@ -21,6 +21,53 @@ export default defineConfig(({ mode }) => {
     build: {
       manifest: true,
       reportCompressedSize: true,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            const normalized = id.split('\\').join('/');
+
+            if (
+              normalized.includes(
+                'node_modules/three/examples/jsm/postprocessing',
+              )
+            ) {
+              return 'three-postprocess';
+            }
+
+            if (normalized.includes('node_modules/three/')) {
+              return 'three-core';
+            }
+
+            if (
+              normalized.includes('node_modules/troika-three-text') ||
+              normalized.includes('node_modules/troika-')
+            ) {
+              return 'troika-text';
+            }
+
+            if (
+              normalized.includes('node_modules/framer-motion') ||
+              normalized.includes('node_modules/@react-spring') ||
+              normalized.includes('node_modules/gsap')
+            ) {
+              return 'motion-ui';
+            }
+
+            if (
+              normalized.includes('/src/scene/') ||
+              normalized.includes('/src/components/oracle/Oracle3DScene')
+            ) {
+              return 'orchestrator-3d';
+            }
+
+            if (normalized.includes('node_modules')) {
+              return 'vendor';
+            }
+
+            return undefined;
+          },
+        },
+      },
     },
 
     server: {
