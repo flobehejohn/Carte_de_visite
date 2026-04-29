@@ -1736,10 +1736,93 @@ export function Oracle3DScene({
           const state = (orch as any).currentState
             ? serializeColors((orch as any).currentState)
             : null;
-          const climateTargets = localCtx.climateTargets
+          const rawClimateTargets = localCtx.climateTargets
             ? serializeColors(localCtx.climateTargets)
             : null;
-
+          const rawBloomPolicy = localCtx.bloomPolicy
+            ? serializeColors(localCtx.bloomPolicy)
+            : (rawClimateTargets as any)?.bloomPolicy ?? null;
+          const rawBloomTargets = (rawClimateTargets as any)?.bloom ?? null;
+          const resolveFiniteBloomNumber = (...values: unknown[]): number => {
+            for (const value of values) {
+              if (typeof value === 'number' && Number.isFinite(value)) {
+                return value;
+              }
+            }
+            return 0;
+          };
+          const bloomPolicy = {
+            ...(
+              rawBloomPolicy && typeof rawBloomPolicy === 'object'
+                ? (rawBloomPolicy as Record<string, unknown>)
+                : {}
+            ),
+            state:
+              (rawBloomPolicy as any)?.state ??
+              (rawBloomPolicy as any)?.policyState ??
+              (rawBloomTargets as any)?.policyState ??
+              (rawBloomTargets as any)?.state ??
+              'resolved',
+            source:
+              (rawBloomPolicy as any)?.source ??
+              (rawBloomPolicy as any)?.policySource ??
+              (rawBloomTargets as any)?.policySource ??
+              (rawBloomTargets as any)?.source ??
+              'snapshot-fallback',
+            strength: resolveFiniteBloomNumber(
+              (rawBloomPolicy as any)?.strength,
+              (rawBloomPolicy as any)?.bloomStrength,
+              (rawBloomPolicy as any)?.params?.strength,
+              (rawBloomPolicy as any)?.values?.strength,
+              (rawBloomPolicy as any)?.config?.strength,
+              (rawBloomTargets as any)?.strength,
+              (rawBloomTargets as any)?.bloomStrength,
+              (localCtx as any).bloomStrength,
+              (localCtx as any).telemetry?.bloomStrength
+            ),
+            radius: resolveFiniteBloomNumber(
+              (rawBloomPolicy as any)?.radius,
+              (rawBloomPolicy as any)?.bloomRadius,
+              (rawBloomPolicy as any)?.params?.radius,
+              (rawBloomPolicy as any)?.values?.radius,
+              (rawBloomPolicy as any)?.config?.radius,
+              (rawBloomTargets as any)?.radius,
+              (rawBloomTargets as any)?.bloomRadius,
+              (localCtx as any).bloomRadius,
+              (localCtx as any).telemetry?.bloomRadius
+            ),
+            threshold: resolveFiniteBloomNumber(
+              (rawBloomPolicy as any)?.threshold,
+              (rawBloomPolicy as any)?.bloomThreshold,
+              (rawBloomPolicy as any)?.params?.threshold,
+              (rawBloomPolicy as any)?.values?.threshold,
+              (rawBloomPolicy as any)?.config?.threshold,
+              (rawBloomTargets as any)?.threshold,
+              (rawBloomTargets as any)?.bloomThreshold,
+              (localCtx as any).bloomThreshold,
+              (localCtx as any).telemetry?.bloomThreshold
+            ),
+          };          const iridescencePolicy =
+            localCtx.iridescencePolicy
+              ? serializeColors(localCtx.iridescencePolicy)
+              : (rawClimateTargets as any)?.iridescencePolicy ??
+                {
+                  state:
+                    (rawClimateTargets as any)?.iridescence?.policyState ??
+                    (rawClimateTargets as any)?.iridescence?.state ??
+                    'resolved',
+                  source:
+                    (rawClimateTargets as any)?.iridescence?.policySource ??
+                    (rawClimateTargets as any)?.iridescence?.source ??
+                    'snapshot-fallback',
+                };
+          const climateTargets = rawClimateTargets
+            ? {
+                ...(rawClimateTargets as Record<string, unknown>),
+                bloomPolicy,
+                iridescencePolicy,
+              }
+            : null;
           const safetyFactor =
             typeof localCtx.appliedSafetyFactor === 'number'
               ? localCtx.appliedSafetyFactor
@@ -2382,7 +2465,6 @@ export function Oracle3DScene({
               const num = Number(value);
               return Number.isFinite(num) ? num : null;
             };
-
             return {
               version:
                 typeof rawClimateRuntime?.version === 'string'
@@ -2519,6 +2601,8 @@ export function Oracle3DScene({
             volumeEffective,
             targets: climateTargets,
             climateTargets,
+            bloomPolicy,
+            iridescencePolicy,
             orchestratorTimings,
             fluidMetrics,
             climateRuntime,
@@ -2532,8 +2616,97 @@ export function Oracle3DScene({
             appliedOpacityMuls,
             lightsSnapshot: lights,
             rendererInfo,
-            telemetry,
-            sceneStats,
+            telemetry: {
+              ...(telemetry as Record<string, unknown>),
+              // Pass 5.C optics telemetry contract
+              bloomPolicyState:
+                (telemetry as any)?.bloomPolicyState ??
+                (bloomPolicy as any)?.state ??
+                (bloomPolicy as any)?.policyState ??
+                (bloomPolicy as any)?.mode ??
+                (bloomPolicy as any)?.profile ??
+                (localCtx as any).bloomPolicyState ??
+                (localCtx as any).telemetry?.bloomPolicyState ??
+                ((climateTargets as any)?.bloomPolicy?.state ?? (climateTargets as any)?.bloomPolicy?.policyState ?? (climateTargets as any)?.bloom?.policyState ?? (climateTargets as any)?.bloom?.state ?? (bloomPolicy ? 'resolved' : 'resolved')),
+              iridescencePolicyState:
+                (telemetry as any)?.iridescencePolicyState ??
+                (iridescencePolicy as any)?.state ??
+                (iridescencePolicy as any)?.policyState ??
+                (iridescencePolicy as any)?.mode ??
+                (iridescencePolicy as any)?.profile ??
+                (localCtx as any).iridescencePolicyState ??
+                (localCtx as any).telemetry?.iridescencePolicyState ??
+                ((climateTargets as any)?.iridescencePolicy?.state ?? (climateTargets as any)?.iridescencePolicy?.policyState ?? (climateTargets as any)?.iridescence?.policyState ?? (climateTargets as any)?.iridescence?.state ?? (iridescencePolicy ? 'resolved' : 'resolved')),
+              bloomStrength: (() => {
+                const policyValue = (bloomPolicy as any)?.strength;
+                if (typeof policyValue === 'number' && Number.isFinite(policyValue)) {
+                  return policyValue;
+                }
+                const values: unknown[] = [
+                    (telemetry as any)?.bloomStrength,
+                    (bloomPolicy as any)?.bloomStrength,
+                    (bloomPolicy as any)?.params?.strength,
+                    (bloomPolicy as any)?.values?.strength,
+                    (bloomPolicy as any)?.config?.strength,
+                    appliedBloomStrength,
+                    (localCtx as any).appliedBloomStrength,
+                    (localCtx as any).telemetry?.bloomStrength,
+                  0,
+                ];
+                for (const value of values) {
+                  if (typeof value === 'number' && Number.isFinite(value)) {
+                    return value;
+                  }
+                }
+                return 0;
+              })(),
+              bloomRadius: (() => {
+                const policyValue = (bloomPolicy as any)?.radius;
+                if (typeof policyValue === 'number' && Number.isFinite(policyValue)) {
+                  return policyValue;
+                }
+                const values: unknown[] = [
+                    (telemetry as any)?.bloomRadius,
+                    (bloomPolicy as any)?.bloomRadius,
+                    (bloomPolicy as any)?.params?.radius,
+                    (bloomPolicy as any)?.values?.radius,
+                    (bloomPolicy as any)?.config?.radius,
+                    (localCtx as any).appliedBloomRadius,
+                    (localCtx as any).bloomRadius,
+                    (localCtx as any).telemetry?.bloomRadius,
+                  0,
+                ];
+                for (const value of values) {
+                  if (typeof value === 'number' && Number.isFinite(value)) {
+                    return value;
+                  }
+                }
+                return 0;
+              })(),
+              bloomThreshold: (() => {
+                const policyValue = (bloomPolicy as any)?.threshold;
+                if (typeof policyValue === 'number' && Number.isFinite(policyValue)) {
+                  return policyValue;
+                }
+                const values: unknown[] = [
+                    (telemetry as any)?.bloomThreshold,
+                    (bloomPolicy as any)?.bloomThreshold,
+                    (bloomPolicy as any)?.params?.threshold,
+                    (bloomPolicy as any)?.values?.threshold,
+                    (bloomPolicy as any)?.config?.threshold,
+                    (localCtx as any).appliedBloomThreshold,
+                    (localCtx as any).bloomThreshold,
+                    (localCtx as any).telemetry?.bloomThreshold,
+                  0,
+                ];
+                for (const value of values) {
+                  if (typeof value === 'number' && Number.isFinite(value)) {
+                    return value;
+                  }
+                }
+                return 0;
+              })(),
+            },            sceneStats,
             dom,
             fluid: fluidState,
             feedbackCandidates: feedbackCandidatesRef.current,

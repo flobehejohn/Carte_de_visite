@@ -823,6 +823,16 @@ export class RitualOrchestrator {
     this.ctx.climateController.setMood(this.mood);
     this.ctx.climateController.setVisualParams(this.llmParams);
     this.ctx.climateTargets = null;
+    this.ctx.bloomPolicy = null?.bloomPolicy ?? null;
+    this.ctx.iridescencePolicy = null?.iridescencePolicy ?? null;
+    this.ctx.telemetry = {
+      ...(this.ctx.telemetry || {}),
+      bloomPolicyState: this.ctx.bloomPolicy?.state ?? null,
+      iridescencePolicyState: this.ctx.iridescencePolicy?.state ?? null,
+      bloomStrength: this.ctx.bloomPolicy?.strength ?? null?.bloom?.strength ?? null,
+      bloomRadius: this.ctx.bloomPolicy?.radius ?? null?.bloom?.radius ?? null,
+      bloomThreshold: this.ctx.bloomPolicy?.threshold ?? null?.bloom?.threshold ?? null,
+    };
     this.ctx.ritualGenome = this._buildGenome({ progress: 0, payload: null });
 
     this.ctx.orbShellConfig = this.ctx.orbShellConfig || {};

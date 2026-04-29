@@ -1,5 +1,6 @@
 import { orbLog } from '../../shared/debug/orbDebug';
 import { SAFE_RANGES, buildPresetVariants } from './presetLibrary';
+import { resolveRuntimeOpticsPolicy, type RuntimeOpticsPolicy } from '../render/optics/runtimeOpticsPolicy';
 import {
   computeSmokeVisualCompensation,
   type SmokePolicySource,
@@ -11,6 +12,8 @@ export type ClimateTargets = {
   presetName: string;
   fog: { enabled: boolean; density: number; color: string | number };
   bloom: { strength: number; radius: number; threshold: number };
+  bloomPolicy?: RuntimeOpticsPolicy['bloomPolicy'];
+  iridescencePolicy?: RuntimeOpticsPolicy['iridescencePolicy'];
   volume: {
     glowIntensity: number;
     backgroundStrength: number;
@@ -417,11 +420,21 @@ export class ClimateController {
     const endPhase = smoothstep(0.85, 1.0, t);
     const endMul = 1 - endPhase * 0.5;
 
+    const governedBloomStrength = targets.bloom.strength * endMul;
+    const bloomPolicy: ClimateTargets['bloomPolicy'] = targets.bloomPolicy
+      ? {
+          ...targets.bloomPolicy,
+          strength: governedBloomStrength,
+          source: endPhase > 0 ? 'safety-cap' : targets.bloomPolicy.source,
+          safetyClamped: targets.bloomPolicy.safetyClamped || endPhase > 0,
+        }
+      : undefined;
     return {
       ...targets,
+      ...(bloomPolicy ? { bloomPolicy } : {}),
       bloom: {
         ...targets.bloom,
-        strength: targets.bloom.strength * endMul,
+        strength: governedBloomStrength,
       },
       volume: {
         ...targets.volume,
@@ -467,6 +480,17 @@ export class ClimateController {
     }
   }
 
+  private resolveOpticsQualityProfile(): string {
+    const raw =
+      this.visualParams?.qualityProfile ??
+      this.visualParams?.quality_profile ??
+      this.visualParams?.qualityProfileState ??
+      'ultra';
+
+    return typeof raw === 'string' && raw.trim()
+      ? raw.trim()
+      : 'ultra';
+  }
   private computeTargets(): ClimateTargets {
     const preset = PRESETS[this.currentPreset] || DEFAULT_PRESET;
     const t = clamp01(this.progress);
@@ -821,6 +845,8 @@ export class ClimateController {
 
     return {
       presetName: targets.presetName,
+      bloomPolicy: targets.bloomPolicy,
+      iridescencePolicy: targets.iridescencePolicy,
       fog: {
         enabled: targets.fog.enabled,
         density: clamp(
