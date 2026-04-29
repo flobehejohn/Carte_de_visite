@@ -78,12 +78,17 @@ jobs:
       - name: Vitest
         run: npx vitest run 2>&1 | tee ci-vitest.log
 
+      - name: Governed optics policy tests
+        run: npm run test:optics 2>&1 | tee ci-optics.log
+
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: tests-${{ github.run_number }}-${{ github.sha }}
-          path: ci-vitest.log
+          path: |
+            ci-vitest.log
+            ci-optics.log
 
   build:
     name: build
@@ -145,6 +150,11 @@ jobs:
           VITE_ENABLE_ORB_AUDIT: 'true'
         run: npm run test:e2e:first-paint 2>&1 | tee ci-first-paint-lazy-3d.log
 
+      - name: Governed visual policy E2E
+        env:
+          VITE_ENABLE_ORB_AUDIT: 'true'
+        run: npm run test:e2e:visual-policy 2>&1 | tee ci-visual-policy-e2e.log
+
       - name: Run Playwright tests
         run: npx playwright test --project=chromium 2>&1 | tee ci-e2e.log
         # 🛡️ SPRINT 5.2 : Non-bloquant au début (continue-on-error)
@@ -157,4 +167,6 @@ jobs:
           name: playwright-report-${{ github.run_number }}-${{ github.sha }}
           path: |
             playwright-report/
+            ci-first-paint-lazy-3d.log
+            ci-visual-policy-e2e.log
             ci-e2e.log
