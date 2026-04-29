@@ -172,7 +172,7 @@ export async function prepareOracleVrtScenario(
     `,
   });
 
-  await page.evaluate(async ({ seed, progress, renderMode }) => {
+  await page.evaluate(async ({ seed, renderMode }) => {
     const audit = (window as any).__ORB_AUDIT__;
 
     if (!audit) {
@@ -186,13 +186,22 @@ export async function prepareOracleVrtScenario(
     if (renderMode && typeof audit.setRenderMode === 'function') {
       await audit.setRenderMode(renderMode);
     }
+  }, scenario);
+
+  await forceQualityProfile(page, scenario.profile);
+
+  await page.evaluate(async ({ progress }) => {
+    const audit = (window as any).__ORB_AUDIT__;
+
+    if (!audit) {
+      throw new Error('__ORB_AUDIT__ indisponible après setQualityProfile.');
+    }
 
     if (typeof progress === 'number' && typeof audit.setProgress === 'function') {
       await audit.setProgress(progress);
     }
   }, scenario);
 
-  await forceQualityProfile(page, scenario.profile);
   await waitForSteadyRuntime(page);
 
   await page.evaluate(async () => {
