@@ -245,7 +245,12 @@ function cloneTargets(targets: ClimateTargets | null): ClimateTargets | null {
     presetName: targets.presetName,
     fog: { ...targets.fog },
     bloom: { ...targets.bloom },
-    volume: { ...targets.volume },
+    ...(targets.bloomPolicy
+      ? { bloomPolicy: { ...targets.bloomPolicy } }
+      : {}),
+    ...(targets.iridescencePolicy
+      ? { iridescencePolicy: { ...targets.iridescencePolicy } }
+      : {}),    volume: { ...targets.volume },
     opacity: { ...targets.opacity },
     ...(targets.smoke
       ? {
@@ -479,18 +484,24 @@ export class ClimateController {
       this.lastPresetChangeMs = this.timeMs;
     }
   }
-
   private resolveOpticsQualityProfile(): string {
-    const raw =
+    const audit = (globalThis as any).__ORB_AUDIT__;
+
+    const runtimeProfile =
       this.visualParams?.qualityProfile ??
       this.visualParams?.quality_profile ??
       this.visualParams?.qualityProfileState ??
-      'ultra';
+      this.visualParams?.activeQualityProfile ??
+      audit?.activeQualityProfile ??
+      audit?.qualityProfiles?.current ??
+      (globalThis as any).__ORB_ACTIVE_QUALITY_PROFILE__ ??
+      null;
 
-    return typeof raw === 'string' && raw.trim()
-      ? raw.trim()
+    return typeof runtimeProfile === 'string' && runtimeProfile.trim()
+      ? runtimeProfile.trim()
       : 'ultra';
   }
+
   private computeTargets(): ClimateTargets {
     const preset = PRESETS[this.currentPreset] || DEFAULT_PRESET;
     const t = clamp01(this.progress);
@@ -658,13 +669,53 @@ export class ClimateController {
       SAFE_RANGES.backgroundStrength.max,
     );
 
+    const opticsQualityProfile = this.resolveOpticsQualityProfile();
+
+    const runtimeOpticsPolicy = resolveRuntimeOpticsPolicy({
+
+      qualityProfile: opticsQualityProfile,
+
+      ritualEnergy: t,
+
+      ritualState: t,
+
+      bloomRequested: {
+
+        strength: bloomStrength,
+
+        radius: bloomRadius,
+
+        threshold: bloomThreshold,
+
+      },
+
+      iridescenceRequested: {
+
+        intensity: compensatedGlowIntensity,
+
+        hueShift: 0.08 * t,
+
+        edgeBias: foregroundOpacity,
+
+        temporalDrift: 0.04 * t,
+
+      },
+
+    });
+
+
     return {
+
       presetName: preset.name,
+
+      bloomPolicy: runtimeOpticsPolicy.bloomPolicy,
+
+      iridescencePolicy: runtimeOpticsPolicy.iridescencePolicy,
       fog: { enabled: true, density: compensatedFogDensity, color: fogColor },
       bloom: {
-        strength: bloomStrength,
-        radius: bloomRadius,
-        threshold: bloomThreshold,
+        strength: runtimeOpticsPolicy.bloomPolicy.strength,
+        radius: runtimeOpticsPolicy.bloomPolicy.radius,
+        threshold: runtimeOpticsPolicy.bloomPolicy.threshold,
       },
       volume: {
         glowIntensity: compensatedGlowIntensity,
@@ -715,7 +766,10 @@ export class ClimateController {
 
     return {
       presetName: next.presetName,
-      fog: {
+      ...(next.bloomPolicy ? { bloomPolicy: next.bloomPolicy } : {}),
+      ...(next.iridescencePolicy
+        ? { iridescencePolicy: next.iridescencePolicy }
+        : {}),      fog: {
         enabled: next.fog.enabled,
         density: lerp(current.fog.density, next.fog.density, fogAlpha),
         color: mixColor(
