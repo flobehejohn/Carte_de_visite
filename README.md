@@ -1,8 +1,16 @@
 # Oracle Zarathustra LLMed
 
+[![Vercel Deploy](https://img.shields.io/badge/Vercel-appllmedwtfix.vercel.app-000000?logo=vercel&logoColor=white)](https://appllmedwtfix.vercel.app)
+
 Oracle Zarathustra LLMed est une démonstration d'ingénierie autour d'un moteur rituel 3D gouverné et d'une couche LLM contractualisée.
 
 Le projet ne se limite pas à une expérience visuelle. Il montre comment transformer un prototype créatif 3D/LLM en système testable, observable, auditable et certifiable.
+
+## Démo officielle
+
+URL publique de démonstration : [`https://appllmedwtfix.vercel.app`](https://appllmedwtfix.vercel.app)
+
+Cette URL est la cible Vercel de référence pour la branche vitrine.
 
 ## Résumé exécutif
 
