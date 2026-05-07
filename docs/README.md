@@ -2,6 +2,12 @@
 
 Cette documentation accompagne la branche vitrine `oracle.z.demo` et la branche de présentation stricte `docs/oracle-z-demo-presentation-20260430`.
 
+## Démo officielle
+
+URL publique de démonstration : [`https://appllmedwtfix.vercel.app`](https://appllmedwtfix.vercel.app)
+
+Cette URL est la cible Vercel de référence pour la branche vitrine.
+
 ## Lecture recommandée
 
 1. [`SYSTEM_CONTRACT.md`](SYSTEM_CONTRACT.md) — contrat normatif du système.
