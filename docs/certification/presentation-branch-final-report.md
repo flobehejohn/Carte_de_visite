@@ -6,6 +6,12 @@
 
 La branche `docs/oracle-z-demo-presentation-20260430` a été reconstruite depuis le SHA certifié `oracle.z.demo` puis limitée à des changements documentaires.
 
+## Démo officielle
+
+URL publique de démonstration : [`https://appllmedwtfix.vercel.app`](https://appllmedwtfix.vercel.app)
+
+Cette URL est la cible Vercel de référence documentée par la branche vitrine.
+
 ## Contexte Git
 
 | Champ | Valeur |
@@ -16,6 +22,7 @@ La branche `docs/oracle-z-demo-presentation-20260430` a été reconstruite depui
 | Branche docs | `docs/oracle-z-demo-presentation-20260430` |
 | SHA base certifié | `f5a0555a495e7b30037382bf510f750d614fc597` |
 | Stratégie retenue | Option A — vitrine stricte |
+| Démo officielle | `https://appllmedwtfix.vercel.app` |
 
 ## Périmètre conservé
 
@@ -93,7 +100,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\audit-runtime.ps1
 | Validation locale post-reconstruction | Faible | À relancer par sécurité. |
 | Mermaid GitHub | Faible | Syntaxe corrigée ; vérifier visuellement dans GitHub. |
 | Portfolio encore vide | Faible | Structure prête ; les preuves lourdes restent à sélectionner. |
+| URL déployée | Faible | URL officielle documentée : `https://appllmedwtfix.vercel.app`. |
 
 ## Verdict
 
-La branche est maintenant propre pour une présentation professionnelle : elle est limitée à la documentation, aux preuves synthétiques et au portfolio.
+La branche est maintenant propre pour une présentation professionnelle : elle est limitée à la documentation, aux preuves synthétiques et au portfolio, et pointe explicitement vers la démo Vercel officielle.
